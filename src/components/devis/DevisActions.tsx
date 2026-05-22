@@ -37,24 +37,31 @@ const PRINT_CSS = `
   }
 
   /* Reserve space at the top + bottom of every page for the fixed
-     header / footer. Overrides the inline padding: 14mm on the wrapper. */
+     header / footer. Tight values: just enough to clear them, otherwise
+     short documents would overflow into a phantom 2nd page. */
   [data-print-body] {
     min-height: 0 !important;
     height: auto !important;
-    padding-top: 36mm !important;
-    padding-bottom: 22mm !important;
+    padding-top: 30mm !important;
+    padding-bottom: 16mm !important;
   }
 
-  /* Header — fixed at top of every page */
+  /* Header — fixed at top of every page (logo + RC/ICE + colored rule) */
   [data-print-header] {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    padding: 8mm 14mm 0 14mm !important;
+    padding: 6mm 14mm 0 14mm !important;
     margin: 0 !important;
     background: white !important;
     z-index: 9999;
+  }
+
+  /* Inside the fixed header, kill the rule's bottom margin — we already
+     reserve room via [data-print-body] padding-top. */
+  [data-print-header] > div:last-child {
+    margin-bottom: 0 !important;
   }
 
   /* Footer — fixed at bottom of every page */
@@ -63,7 +70,7 @@ const PRINT_CSS = `
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    padding: 4mm 14mm 6mm 14mm !important;
+    padding: 3mm 14mm 4mm 14mm !important;
     margin: 0 !important;
     background: white !important;
     border-top: 1px solid #e2e8f0 !important;
