@@ -98,6 +98,8 @@ const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   /* Projets — lecture pour tous, création/édition admin+manager+commercial,
      suppression admin+manager */
   projets:                   matrix(ALL,                  ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
+  /* Bons de livraison — handover projet (contient mots de passe → accès restreint) */
+  bons_livraison:            matrix(['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
 }
 
 export function canTableAction(role: Role, table: string, action: Action): boolean {

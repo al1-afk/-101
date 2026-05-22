@@ -14,8 +14,10 @@ interface DevisActionsProps {
 }
 
 /* ── Print CSS ────────────────────────────────────────────────
-   @page margin: 0  →  browser removes its URL / page-number header/footer
-   Content padding comes from the template's own 14mm padding.
+   @page margin: 0   →  remove browser's URL / page-number header/footer.
+   data-print-header / data-footer are position:fixed so the browser
+   repaints them on every printed page. The body gets top/bottom padding
+   so flowing content never sits underneath the repeated header/footer.
 ──────────────────────────────────────────────────────────────── */
 const PRINT_CSS = `
   @page {
@@ -34,15 +36,38 @@ const PRINT_CSS = `
     print-color-adjust: exact !important;
   }
 
-  /* The cloned template already carries padding: 14mm */
+  /* Reserve space at the top + bottom of every page for the fixed
+     header / footer. Overrides the inline padding: 14mm on the wrapper. */
   [data-print-body] {
     min-height: 0 !important;
     height: auto !important;
+    padding-top: 36mm !important;
+    padding-bottom: 22mm !important;
   }
 
-  /* Footer stays in normal flow */
+  /* Header — fixed at top of every page */
+  [data-print-header] {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    padding: 8mm 14mm 0 14mm !important;
+    margin: 0 !important;
+    background: white !important;
+    z-index: 9999;
+  }
+
+  /* Footer — fixed at bottom of every page */
   [data-footer] {
-    position: static !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    padding: 4mm 14mm 6mm 14mm !important;
+    margin: 0 !important;
+    background: white !important;
+    border-top: 1px solid #e2e8f0 !important;
+    z-index: 9999;
   }
 
   /* Avoid cutting inside short inline elements only */

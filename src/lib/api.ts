@@ -354,3 +354,6 @@ export const stagiairesApi              = tableApi('stagiaires')
 
 /* ── Projets (gestion de projets clients & internes) ─────────── */
 export const projetsApi                 = tableApi('projets')
+
+/* ── Bons de livraison (handover client + mots de passe + liens) ── */
+export const bonsLivraisonApi           = tableApi('bons_livraison')

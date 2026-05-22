@@ -164,33 +164,35 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
         }}
       >
 
-        {/* ══ 1. HEADER ══════════════════════════════════════════ */}
-        <div className="flex items-start justify-between mb-1">
-          {/* Left: logo + name */}
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo-gestiq.png"
-              alt="NEXT GITAL"
-              className="w-16 h-16 object-contain"
-              onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-            />
-            <div>
-              <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
-              <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
+        {/* ══ 1. HEADER (repeated on every printed page) ═════════ */}
+        <div data-print-header="true">
+          <div className="flex items-start justify-between mb-1">
+            {/* Left: logo + name */}
+            <div className="flex items-center gap-3">
+              <img
+                src="/logo-gestiq.png"
+                alt="NEXT GITAL"
+                className="w-16 h-16 object-contain"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+              <div>
+                <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
+                <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
+              </div>
+            </div>
+
+            {/* Right: legal */}
+            <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
+              <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
+              <p>ICE: {CO.ice}</p>
+              <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
+              <p>{CO.email}  ·  {CO.web}</p>
             </div>
           </div>
 
-          {/* Right: legal */}
-          <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
-            <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
-            <p>ICE: {CO.ice}</p>
-            <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
-            <p>{CO.email}  ·  {CO.web}</p>
-          </div>
+          {/* Header rule */}
+          <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
         </div>
-
-        {/* Header rule */}
-        <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
 
         {/* ══ 2. TITLE BADGE + REF ═══════════════════════════════ */}
         <div className="flex items-start justify-between mb-5">

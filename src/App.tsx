@@ -33,6 +33,8 @@ const Vehicules      = lazy(() => import('@/pages/Vehicules'))
 const Produits       = lazy(() => import('@/pages/Produits'))
 const ProduitsStock  = lazy(() => import('@/pages/ProduitsStock'))
 const BonsCommande   = lazy(() => import('@/pages/BonsCommande'))
+const BonsLivraison       = lazy(() => import('@/pages/BonsLivraison'))
+const BonLivraisonPreview = lazy(() => import('@/pages/BonLivraisonPreview'))
 const Statistiques   = lazy(() => import('@/pages/Statistiques'))
 const ActivityLogs   = lazy(() => import('@/pages/ActivityLogs'))
 const ConseillerIA   = lazy(() => import('@/pages/ConseillerIA'))
@@ -117,6 +119,8 @@ export default function App() {
               <Route path="factures"                   element={<Factures />} />
               <Route path="contrats"                   element={<Contrats />} />
               <Route path="bons-commande"              element={<BonsCommande />} />
+              <Route path="bons-livraison"             element={<BonsLivraison />} />
+              <Route path="bons-livraison/:id/preview" element={<BonLivraisonPreview />} />
               <Route path="produits"                   element={<Produits />} />
               <Route path="produits-stock"             element={<ProduitsStock />} />
               <Route path="paiements"                  element={<Paiements />} />
