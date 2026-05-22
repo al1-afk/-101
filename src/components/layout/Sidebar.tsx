@@ -53,6 +53,8 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'equipe',            label: 'Équipe' },
   { key: 'fournisseurs',      label: 'Fournisseurs' },
   { key: 'vehicules',         label: 'Véhicules' },
+  { key: 'domaines',          label: 'Domaines' },
+  { key: 'hebergements',      label: 'Hébergements' },
   { key: 'statistiques',      label: 'Statistiques' },
   { key: 'activite',          label: 'Journal d\'activité' },
   { key: 'conseiller-ia',     label: 'Conseiller IA' },
@@ -111,6 +113,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { label: 'Équipe',         href: '/equipe',       icon: Briefcase, module: 'equipe' },
       { label: 'Fournisseurs',   href: '/fournisseurs', icon: Building2, module: 'fournisseurs' },
       { label: 'Véhicules',      href: '/vehicules',    icon: Car, badge: 'Vehicles', module: 'vehicules' },
+      { label: 'Domaines',       href: '/domaines',     icon: Globe, module: 'domaines' },
+      { label: 'Hébergements',   href: '/hebergements', icon: Server, module: 'hebergements' },
     ],
   },
   {
