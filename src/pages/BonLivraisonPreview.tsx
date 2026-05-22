@@ -11,7 +11,7 @@ import { useClients }       from '@/hooks/useClients'
 import { useProjets }       from '@/hooks/useProjets'
 import { Button } from '@/components/ui/button'
 import BonLivraisonTemplate from '@/components/bons-livraison/BonLivraisonTemplate'
-import { openPrint } from '@/components/devis/DevisActions'
+import { openPrint, buildPdfFilename } from '@/components/devis/DevisActions'
 
 const A4_W_PX = 794
 const A4_H_PX = 1123
@@ -110,24 +110,33 @@ export default function BonLivraisonPreview() {
               }
             </Button>
 
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => { const e = templateRef.current; if (e) openPrint(e, bon.numero, false) }}
-              className="flex items-center gap-2"
-            >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">Imprimer</span>
-            </Button>
+            {(() => {
+              const filename = buildPdfFilename({
+                numero:     bon.numero,
+                clientName: client?.entreprise ?? client?.nom,
+                date:       bon.date_livraison,
+              })
+              return <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => { const e = templateRef.current; if (e) openPrint(e, filename, false) }}
+                  className="flex items-center gap-2"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span className="hidden sm:inline">Imprimer</span>
+                </Button>
 
-            <Button
-              size="sm"
-              onClick={() => { const e = templateRef.current; if (e) openPrint(e, bon.numero, true) }}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white border-0"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Télécharger PDF</span>
-            </Button>
+                <Button
+                  size="sm"
+                  onClick={() => { const e = templateRef.current; if (e) openPrint(e, filename, true) }}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white border-0"
+                >
+                  <Download className="w-4 h-4" />
+                  <span className="hidden sm:inline">Télécharger PDF</span>
+                </Button>
+              </>
+            })()}
           </div>
         </div>
       </div>

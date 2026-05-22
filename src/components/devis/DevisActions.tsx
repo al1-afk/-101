@@ -10,7 +10,23 @@ import { Button } from '@/components/ui/button'
 
 interface DevisActionsProps {
   templateRef: RefObject<HTMLDivElement | null>
-  numero: string
+  /** Nom de fichier souhaité (sans extension). Sert aussi de titre du
+      document imprimé, ce que Chrome/Safari utilisent pour pré-remplir
+      « Enregistrer sous » dans la boîte de dialogue PDF. */
+  filename: string
+}
+
+/** Construit le nom du PDF : « Client - Numéro - Date » (segments vides
+    ignorés). Caractères interdits dans les noms de fichiers échappés. */
+export function buildPdfFilename(parts: {
+  numero:      string
+  clientName?: string | null
+  date?:       string | null
+}): string {
+  const bits = [parts.clientName, parts.numero, parts.date]
+    .map(s => (s ?? '').trim())
+    .filter(Boolean)
+  return bits.join(' - ').replace(/[/\\?*:|"<>]/g, '-').replace(/\s+/g, ' ')
 }
 
 /* ── Print CSS ────────────────────────────────────────────────
@@ -88,10 +104,17 @@ function buildPrintHTML(el: HTMLDivElement, numero: string): string {
 </html>`
 }
 
-export function openPrint(el: HTMLDivElement, numero: string, autoClose: boolean) {
+export function openPrint(el: HTMLDivElement, filename: string, autoClose: boolean) {
   document.getElementById('__devis_if')?.remove()
 
-  const html   = buildPrintHTML(el, numero)
+  /* Sanitize then stash & override document.title — Chrome/Safari fall
+     back to the parent document.title when filling the "Save as PDF"
+     dialog filename. Restored after the dialog closes. */
+  const safe = filename.replace(/[/\\?*:|"<>]/g, '-').replace(/\s+/g, ' ').trim() || 'document'
+  const prevTitle = document.title
+  document.title  = safe
+
+  const html   = buildPrintHTML(el, safe)
   const iframe = document.createElement('iframe')
   iframe.id    = '__devis_if'
   iframe.style.cssText =
@@ -104,17 +127,22 @@ export function openPrint(el: HTMLDivElement, numero: string, autoClose: boolean
   doc.write(html)
   doc.close()
 
+  const cleanup = () => {
+    iframe.remove()
+    document.title = prevTitle
+  }
+
   iframe.onload = () => {
     setTimeout(() => {
       iframe.contentWindow!.focus()
       iframe.contentWindow!.print()
-      if (autoClose) setTimeout(() => iframe.remove(), 1500)
-      else           setTimeout(() => iframe.remove(), 3000)
+      if (autoClose) setTimeout(cleanup, 1500)
+      else           setTimeout(cleanup, 3000)
     }, 450)
   }
 }
 
-export default function DevisActions({ templateRef, numero }: DevisActionsProps) {
+export default function DevisActions({ templateRef, filename }: DevisActionsProps) {
   const el = () => templateRef.current
 
   return (
@@ -124,7 +152,7 @@ export default function DevisActions({ templateRef, numero }: DevisActionsProps)
       <Button
         variant="secondary"
         size="sm"
-        onClick={() => { const e = el(); if (e) openPrint(e, numero, false) }}
+        onClick={() => { const e = el(); if (e) openPrint(e, filename, false) }}
         className="flex items-center gap-2"
       >
         <Printer className="w-4 h-4" />
@@ -134,7 +162,7 @@ export default function DevisActions({ templateRef, numero }: DevisActionsProps)
       {/* ── Télécharger PDF ───────────────────────────────── */}
       <Button
         size="sm"
-        onClick={() => { const e = el(); if (e) openPrint(e, numero, true) }}
+        onClick={() => { const e = el(); if (e) openPrint(e, filename, true) }}
         className="flex items-center gap-2 bg-[#1e64c4] hover:bg-[#1558b0] text-white border-0"
       >
         <Download className="w-4 h-4" />

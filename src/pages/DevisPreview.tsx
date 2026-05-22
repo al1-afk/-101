@@ -17,7 +17,7 @@ import { useDevis }   from '@/hooks/useDevis'
 import { useClients } from '@/hooks/useClients'
 import { Button }      from '@/components/ui/button'
 import DevisTemplate   from '@/components/devis/DevisTemplate'
-import DevisActions    from '@/components/devis/DevisActions'
+import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
 
 export default function DevisPreview() {
   const { id, tenantSlug } = useParams<{ id: string; tenantSlug: string }>()
@@ -117,7 +117,14 @@ export default function DevisPreview() {
               }
             </Button>
 
-            <DevisActions templateRef={templateRef} numero={devis.numero} />
+            <DevisActions
+              templateRef={templateRef}
+              filename={buildPdfFilename({
+                numero:     devis.numero,
+                clientName: client?.entreprise ?? client?.nom ?? devis.client_nom,
+                date:       devis.date_emission,
+              })}
+            />
           </div>
         </div>
       </div>

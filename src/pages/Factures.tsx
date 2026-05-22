@@ -40,7 +40,7 @@ import {
   type Prestation, type BankInfo, type DescriptionBlock,
 } from '@/pages/Devis'
 import FactureTemplate from '@/components/facture/FactureTemplate'
-import DevisActions    from '@/components/devis/DevisActions'
+import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
 import { toast } from 'sonner'
 
 /* ─── Status config ──────────────────────────────────────────────── */
@@ -635,7 +635,14 @@ function FactureWizard({
           </div>
           <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
             <div className="hidden md:flex items-center gap-2">
-              <DevisActions templateRef={previewRef} numero={previewFacture.numero} />
+              <DevisActions
+                templateRef={previewRef}
+                filename={buildPdfFilename({
+                  numero:     previewFacture.numero,
+                  clientName: client?.entreprise ?? client?.nom ?? previewFacture.client_nom,
+                  date:       previewFacture.date_emission,
+                })}
+              />
               <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
             </div>
             <Button size="sm" onClick={handleSubmit} disabled={busy}

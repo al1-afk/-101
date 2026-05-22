@@ -25,7 +25,7 @@ import { formatCurrency, formatDate, getInitials } from '@/lib/utils'
 import { toast } from 'sonner'
 import { generateDevisPDFWithRetry } from '@/lib/generateDevisPDF'
 import DevisTemplate from '@/components/devis/DevisTemplate'
-import DevisActions  from '@/components/devis/DevisActions'
+import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { devisSchema } from '@/lib/importExportSchemas'
 import {
@@ -930,7 +930,14 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
           </div>
           <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
             <div className="hidden md:flex items-center gap-2">
-              <DevisActions templateRef={previewRef} numero={previewDevis.numero} />
+              <DevisActions
+                templateRef={previewRef}
+                filename={buildPdfFilename({
+                  numero:     previewDevis.numero,
+                  clientName: client?.entreprise ?? client?.nom ?? previewDevis.client_nom,
+                  date:       previewDevis.date_emission,
+                })}
+              />
               <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
             </div>
             <Button size="sm" onClick={handleSubmit} disabled={busy}
@@ -1791,20 +1798,17 @@ export default function DevisPage() {
                           Modifier
                         </button>
 
-                        {/* Always-visible for accepted devis — primary follow-up action */}
-                        {d.statut === 'accepte' && (
-                          <button
-                            onClick={() => convertToFacture(d)}
-                            disabled={createFacture.isPending}
-                            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
-                            title="Créer une facture à partir de ce devis (copie prestations, conditions, banque, signature)"
-                          >
-                            {createFacture.isPending
-                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              : <Receipt className="w-3.5 h-3.5" />}
-                            Facturer
-                          </button>
-                        )}
+                        <button
+                          onClick={() => convertToFacture(d)}
+                          disabled={createFacture.isPending}
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                          title="Créer une facture à partir de ce devis (copie prestations, conditions, banque, signature)"
+                        >
+                          {createFacture.isPending
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Receipt className="w-3.5 h-3.5" />}
+                          Facturer
+                        </button>
 
                         {/* Hidden-until-hover: PDF, delete */}
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
