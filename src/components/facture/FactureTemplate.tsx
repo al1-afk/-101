@@ -77,10 +77,10 @@ const CO = {
 }
 
 const DEFAULT_CONDITIONS = [
-  'Règlement à 30 jours fin de mois',
-  'Pénalité de retard : 3 fois le taux d\'intérêt légal',
-  'Pas d\'escompte pour règlement anticipé',
-  'TVA acquittée sur les débits',
+  '50% à la signature du devis',
+  '50% à la livraison du projet',
+  'Délai de livraison : 15 à 21 jours ouvrables',
+  'Acompte non remboursable après démarrage',
 ]
 
 /* ─── Sub-components ─────────────────────────────────────────── */
@@ -150,30 +150,32 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
           fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
         }}
       >
-        {/* ══ HEADER ════════════════════════════════════════════ */}
-        <div className="flex items-start justify-between mb-1">
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo-gestiq.png"
-              alt="NEXT GITAL"
-              className="w-16 h-16 object-contain"
-              onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-            />
-            <div>
-              <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
-              <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
+        {/* ══ HEADER (repeated on every printed page) ═══════════ */}
+        <div data-print-header="true">
+          <div className="flex items-start justify-between mb-1">
+            <div className="flex items-center gap-3">
+              <img
+                src="/logo-gestiq.png"
+                alt="NEXT GITAL"
+                className="w-16 h-16 object-contain"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+              <div>
+                <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
+                <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
+              </div>
+            </div>
+
+            <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
+              <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
+              <p>ICE: {CO.ice}</p>
+              <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
+              <p>{CO.email}  ·  {CO.web}</p>
             </div>
           </div>
 
-          <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
-            <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
-            <p>ICE: {CO.ice}</p>
-            <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
-            <p>{CO.email}  ·  {CO.web}</p>
-          </div>
+          <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
         </div>
-
-        <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
 
         {/* ══ TITLE BADGE + REF ═══════════════════════════════ */}
         <div className="flex items-start justify-between mb-5">
@@ -366,7 +368,7 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
 
           <div>
             <p className="text-[10px] font-bold text-[#0a1a3c] uppercase tracking-wider mb-2">
-              Conditions de Règlement
+              Conditions Générales
             </p>
             <ul className="space-y-1">
               {allConditions.slice(0, 6).map((c, i) => (

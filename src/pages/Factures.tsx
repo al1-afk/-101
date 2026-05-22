@@ -40,6 +40,7 @@ import {
   type Prestation, type BankInfo, type DescriptionBlock,
 } from '@/pages/Devis'
 import FactureTemplate from '@/components/facture/FactureTemplate'
+import DevisActions    from '@/components/devis/DevisActions'
 import { toast } from 'sonner'
 
 /* ─── Status config ──────────────────────────────────────────────── */
@@ -418,9 +419,9 @@ function FactureWizard({
     facture?.notes ? parseDevisNotes(facture.notes).bankInfo : DEFAULT_BANK
   )
   const [conditions, setConditions] = useState<string[]>(() => {
-    if (!facture?.notes) return ['Règlement à 30 jours fin de mois']
+    if (!facture?.notes) return ['Délai de livraison : 7 jours ouvrables']
     const { conditions: c } = parseDevisNotes(facture.notes)
-    return c.length ? c : ['Règlement à 30 jours fin de mois']
+    return c.length ? c : ['Délai de livraison : 7 jours ouvrables']
   })
   const [newCondition, setNewCondition] = useState('')
 
@@ -612,10 +613,10 @@ function FactureWizard({
             </div>
           </div>
           <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            <Button size="sm" variant="secondary" className="hidden md:inline-flex"
-              onClick={() => generateFacturePDF(previewFacture)}>
-              <Download className="w-3.5 h-3.5" /> PDF
-            </Button>
+            <div className="hidden md:flex items-center gap-2">
+              <DevisActions templateRef={previewRef} numero={previewFacture.numero} />
+              <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
+            </div>
             <Button size="sm" onClick={handleSubmit} disabled={busy}
               className="bg-emerald-600 hover:bg-emerald-700 text-white border-0 px-2.5 md:px-3 h-8">
               {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
