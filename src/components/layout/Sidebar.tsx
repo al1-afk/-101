@@ -7,7 +7,7 @@ import {
   Repeat, BarChart3, CheckSquare, Building2, ChevronDown,
   Settings, Briefcase, Banknote, Wallet, Activity, X,
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
-  BookOpen, Crown, MapPin, FolderKanban, FileCheck,
+  BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
@@ -40,6 +40,7 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'bons-commande',     label: 'Bons de commande' },
   { key: 'bons-livraison',    label: 'Bons de livraison' },
   { key: 'produits',          label: 'Produits & Services' },
+  { key: 'services',          label: 'Services' },
   { key: 'produits-stock',    label: 'Produits & Stock' },
   { key: 'paiements',         label: 'Paiements' },
   { key: 'cheques-recus',     label: 'Chèques reçus' },
@@ -87,6 +88,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { label: 'Bons de commande',    href: '/bons-commande',icon: ShoppingCart, module: 'bons-commande' },
       { label: 'Bons de livraison',   href: '/bons-livraison',icon: FileCheck, badge: 'New', module: 'bons-livraison' },
       { label: 'Produits & Services', href: '/produits',     icon: Package, module: 'produits' },
+      { label: 'Services',            href: '/services',     icon: Wrench, module: 'services' },
       { label: 'Produits & Stock',    href: '/produits-stock', icon: Boxes, badge: 'Stock', module: 'produits-stock' },
     ],
   },

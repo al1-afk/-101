@@ -32,6 +32,7 @@ const Domaines       = lazy(() => import('@/pages/Domaines'))
 const Hebergements   = lazy(() => import('@/pages/Hebergements'))
 const Vehicules      = lazy(() => import('@/pages/Vehicules'))
 const Produits       = lazy(() => import('@/pages/Produits'))
+const Services       = lazy(() => import('@/pages/Services'))
 const ProduitsStock  = lazy(() => import('@/pages/ProduitsStock'))
 const BonsCommande   = lazy(() => import('@/pages/BonsCommande'))
 const BonsLivraison       = lazy(() => import('@/pages/BonsLivraison'))
@@ -124,6 +125,7 @@ export default function App() {
               <Route path="bons-livraison"             element={<BonsLivraison />} />
               <Route path="bons-livraison/:id/preview" element={<BonLivraisonPreview />} />
               <Route path="produits"                   element={<Produits />} />
+              <Route path="services"                   element={<Services />} />
               <Route path="produits-stock"             element={<ProduitsStock />} />
               <Route path="paiements"                  element={<Paiements />} />
               <Route path="cheques-recus"              element={<ChequesRecus />} />
