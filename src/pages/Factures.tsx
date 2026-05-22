@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Plus, Search, Download, Receipt, Loader2, Edit2, Trash2, CheckCircle,
+  Plus, Search, Receipt, Loader2, Edit2, Trash2, CheckCircle,
   Eye, MoreHorizontal, Copy, Send, AlertTriangle, Clock, X,
   CreditCard, Calendar, FileText, MailOpen,
   ChevronLeft, ChevronRight, Check, Phone, Mail, MapPin,
@@ -28,7 +29,6 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { formatCurrency, formatCurrencyCompact, formatDate, getInitials, useIsMobileViewport } from '@/lib/utils'
-import { generateFacturePDF } from '@/lib/generatePdf'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { facturesSchema } from '@/lib/importExportSchemas'
 import {
@@ -158,6 +158,9 @@ function SendEmailDialog({
   onClose: () => void
   onMarkSent: () => void
 }) {
+  const navigate       = useNavigate()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const base           = tenantSlug ? `/${tenantSlug}` : ''
   const [emailTo, setEmailTo] = useState(facture?.client_email || '')
   const subject = `Facture ${facture?.numero} — GestiQ`
   const body = [
@@ -221,8 +224,16 @@ function SendEmailDialog({
           </p>
         </div>
         <div className="flex items-center justify-between pt-1">
-          <Button variant="secondary" size="sm" onClick={() => { generateFacturePDF(facture!); }}>
-            <Download className="w-4 h-4" /> Télécharger PDF
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (!facture) return
+              onClose()
+              navigate(`${base}/factures/${facture.id}/preview`)
+            }}
+          >
+            <Eye className="w-4 h-4" /> Ouvrir l'aperçu / PDF
           </Button>
           <div className="flex items-center gap-2">
             <Button variant="secondary" onClick={onClose}>Annuler</Button>
@@ -246,6 +257,9 @@ function FactureDetailModal({
   onEdit: () => void
   onMarkPaid: () => void
 }) {
+  const navigate       = useNavigate()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const base           = tenantSlug ? `/${tenantSlug}` : ''
   if (!facture) return null
   const pct     = paymentPercent(facture)
   const reste   = facture.montant_ttc - facture.montant_paye
@@ -355,8 +369,15 @@ function FactureDetailModal({
 
         {/* Footer actions */}
         <div className="flex items-center justify-between pt-2 border-t border-border">
-          <Button variant="secondary" size="sm" onClick={() => generateFacturePDF(facture)}>
-            <Download className="w-4 h-4" /> Télécharger PDF
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              onClose()
+              navigate(`${base}/factures/${facture.id}/preview`)
+            }}
+          >
+            <Eye className="w-4 h-4" /> Ouvrir l'aperçu / PDF
           </Button>
           <div className="flex items-center gap-2">
             <Button variant="secondary" onClick={onClose}>Fermer</Button>
@@ -976,6 +997,9 @@ function FactureWizard({
 
 /* ─── Main Page ──────────────────────────────────────────────────── */
 export default function Factures() {
+  const navigate         = useNavigate()
+  const { tenantSlug }   = useParams<{ tenantSlug: string }>()
+  const base             = tenantSlug ? `/${tenantSlug}` : ''
   const isMobile         = useIsMobileViewport()
   const fmtKpi           = isMobile ? fmtCurCompact : fmtCur
   const { data: factures = [], isLoading } = useFactures()
@@ -1238,10 +1262,10 @@ export default function Factures() {
                         {/* ── Row actions ── */}
                         <td>
                           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {/* View */}
+                            {/* View — full A4 preview */}
                             <Button
-                              variant="ghost" size="icon" className="h-7 w-7" title="Voir les détails"
-                              onClick={() => setViewTarget(f)}
+                              variant="ghost" size="icon" className="h-7 w-7" title="Voir l'aperçu A4"
+                              onClick={() => navigate(`${base}/factures/${f.id}/preview`)}
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </Button>
@@ -1278,13 +1302,13 @@ export default function Factures() {
                                   Dupliquer
                                 </DropdownMenuItem>
 
-                                {/* Télécharger PDF */}
+                                {/* Aperçu / Télécharger PDF */}
                                 <DropdownMenuItem
                                   className="gap-2 text-sm cursor-pointer"
-                                  onClick={() => generateFacturePDF(f)}
+                                  onClick={() => navigate(`${base}/factures/${f.id}/preview`)}
                                 >
-                                  <Download className="w-3.5 h-3.5" />
-                                  Télécharger PDF
+                                  <Eye className="w-3.5 h-3.5" />
+                                  Aperçu / PDF
                                 </DropdownMenuItem>
 
                                 {/* Envoyer par email */}

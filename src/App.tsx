@@ -17,6 +17,7 @@ const ClientDetail   = lazy(() => import('@/pages/ClientDetail'))
 const Devis          = lazy(() => import('@/pages/Devis'))
 const DevisPreview   = lazy(() => import('@/pages/DevisPreview'))
 const Factures       = lazy(() => import('@/pages/Factures'))
+const FacturePreview = lazy(() => import('@/pages/FacturePreview'))
 const Contrats       = lazy(() => import('@/pages/Contrats'))
 const Paiements      = lazy(() => import('@/pages/Paiements'))
 const ChequesRecus   = lazy(() => import('@/pages/ChequesRecus'))
@@ -117,6 +118,7 @@ export default function App() {
               {/* Backwards-compat: old shared links missing the /devis/ segment */}
               <Route path=":id/preview"                element={<DevisPreview />} />
               <Route path="factures"                   element={<Factures />} />
+              <Route path="factures/:id/preview"       element={<FacturePreview />} />
               <Route path="contrats"                   element={<Contrats />} />
               <Route path="bons-commande"              element={<BonsCommande />} />
               <Route path="bons-livraison"             element={<BonsLivraison />} />
