@@ -152,47 +152,59 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
     }]
 
     return (
-      /* A4 page wrapper */
+      /* A4 page wrapper.
+         Structure: <table> with <thead> + <tbody> + <tfoot> so the browser
+         natively repeats the header & footer on each printed page. */
       <div
         ref={ref}
         className="bg-white text-[#0a1a3c] font-sans"
         style={{
           width: '210mm',
-          padding: '14mm',
           boxSizing: 'border-box',
           fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
         }}
       >
+      <table
+        data-print-table="true"
+        style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          tableLayout: 'fixed',
+        }}
+      >
+        <thead data-print-header="true">
+          <tr><td style={{ padding: '14mm 14mm 0 14mm', verticalAlign: 'top' }}>
+            <div className="flex items-start justify-between mb-1">
+              {/* Left: logo + name */}
+              <div className="flex items-center gap-3">
+                <img
+                  src="/logo-gestiq.png"
+                  alt="NEXT GITAL"
+                  className="w-16 h-16 object-contain"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+                <div>
+                  <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
+                  <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
+                </div>
+              </div>
 
-        {/* ══ 1. HEADER (repeated on every printed page) ═════════ */}
-        <div data-print-header="true">
-          <div className="flex items-start justify-between mb-1">
-            {/* Left: logo + name */}
-            <div className="flex items-center gap-3">
-              <img
-                src="/logo-gestiq.png"
-                alt="NEXT GITAL"
-                className="w-16 h-16 object-contain"
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-              />
-              <div>
-                <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
-                <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
+              {/* Right: legal */}
+              <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
+                <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
+                <p>ICE: {CO.ice}</p>
+                <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
+                <p>{CO.email}  ·  {CO.web}</p>
               </div>
             </div>
 
-            {/* Right: legal */}
-            <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
-              <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
-              <p>ICE: {CO.ice}</p>
-              <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
-              <p>{CO.email}  ·  {CO.web}</p>
-            </div>
-          </div>
+            {/* Header rule */}
+            <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
+          </td></tr>
+        </thead>
 
-          {/* Header rule */}
-          <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
-        </div>
+        <tbody>
+          <tr><td style={{ padding: '0 14mm', verticalAlign: 'top' }}>
 
         {/* ══ 2. TITLE BADGE + REF ═══════════════════════════════ */}
         <div className="flex items-start justify-between mb-5">
@@ -395,14 +407,23 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
           </div>
         </div>
 
-        {/* ══ 8. FOOTER ═════════════════════════════════════════ */}
-        <div data-footer="true" className="border-t border-[#e2e8f0] pt-3 mt-6">
-          <p className="text-center text-[9px] text-[#94a3b8] mb-1">Page 1/1</p>
-          <p className="text-center text-[9px] text-[#94a3b8] leading-relaxed">
-            {CO.name}  ·  {CO.addr1}, {CO.addr2}  ·  Tél: {CO.tel}  ·  Fax: {CO.fax}  ·  {CO.email}  ·  {CO.web}
-          </p>
-        </div>
+          </td></tr>
+        </tbody>
 
+        {/* ══ 8. FOOTER (repeated on every printed page via <tfoot>) ═ */}
+        <tfoot data-footer="true">
+          <tr><td style={{ padding: '0 14mm 14mm 14mm', verticalAlign: 'top' }}>
+            <div className="border-t border-[#e2e8f0] pt-3 mt-6">
+              <p className="text-center text-[9px] text-[#94a3b8] mb-1">
+                {CO.name}
+              </p>
+              <p className="text-center text-[9px] text-[#94a3b8] leading-relaxed">
+                {CO.addr1}, {CO.addr2}  ·  Tél: {CO.tel}  ·  Fax: {CO.fax}  ·  {CO.email}  ·  {CO.web}
+              </p>
+            </div>
+          </td></tr>
+        </tfoot>
+      </table>
       </div>
     )
   }
