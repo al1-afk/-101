@@ -52,6 +52,7 @@ const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   contrats:             matrix(ALL,                             ['admin','manager'],                          ['admin','manager'],              ['admin']),
   produits:             matrix(ALL,                             ['admin','manager','commercial'],             ['admin','manager','commercial'], ['admin','manager']),
   fournisseurs:         matrix(['admin','manager','comptable'], ['admin','manager'],                          ['admin','manager'],              ['admin']),
+  contacts:             matrix(ALL,                             ['admin','manager','commercial'],             ['admin','manager','commercial'], ['admin','manager']),
   team_members:         matrix(['admin','manager','comptable'], ['admin'],                                    ['admin'],                        ['admin']),
   domaines:             matrix(ALL,                             ['admin','manager'],                          ['admin','manager'],              ['admin']),
   hebergements:         matrix(ALL,                             ['admin','manager'],                          ['admin','manager'],              ['admin']),

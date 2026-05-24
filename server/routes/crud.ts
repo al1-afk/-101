@@ -32,6 +32,8 @@ const ALLOWED_TABLES = new Set([
   'projets',
   /* Bons de livraison (handover projet + mots de passe + liens) */
   'bons_livraison',
+  /* Carnet d'adresses : freelances, candidats, artisans, etc. */
+  'contacts',
 ])
 
 const isProd = process.env.NODE_ENV === 'production'

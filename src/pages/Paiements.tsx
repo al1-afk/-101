@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -34,12 +34,125 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { usePaiements, useCreatePaiement, useDeletePaiement, type Paiement, type PaiementMethode, type PaiementStatus, type PaiementType } from '@/hooks/usePaiements'
-import { useClients } from '@/hooks/useClients'
+import { useClients, useCreateClient } from '@/hooks/useClients'
 import {
   DateRangeFilter, DEFAULT_RANGE, makeDatePredicate, type DateRange,
 } from '@/components/ui/DateRangeFilter'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { paiementsSchema, contratsSchema } from '@/lib/importExportSchemas'
+
+function ClientCombobox({
+  value, onChange, clients, onCreate, placeholder = 'Sélectionner un client',
+}: {
+  value: string
+  onChange: (id: string) => void
+  clients: { id: string; nom: string }[]
+  onCreate?: (nom: string) => Promise<{ id: string; nom: string } | null>
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [creating, setCreating] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const selected = clients.find(c => c.id === value)
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return clients
+    return clients.filter(c => c.nom.toLowerCase().includes(q))
+  }, [clients, query])
+
+  const trimmed = query.trim()
+  const exactExists = trimmed && clients.some(c => c.nom.toLowerCase() === trimmed.toLowerCase())
+  const showCreate = !!onCreate && trimmed.length > 0 && !exactExists
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const handleCreate = async () => {
+    if (!onCreate || !trimmed || creating) return
+    setCreating(true)
+    try {
+      const created = await onCreate(trimmed)
+      if (created) {
+        onChange(created.id)
+        setOpen(false)
+        setQuery('')
+      }
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div
+        role="combobox"
+        tabIndex={0}
+        onClick={() => setOpen(true)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setOpen(true) }}
+        className="flex items-center justify-between w-full h-10 px-3 rounded-md border border-input bg-background text-sm cursor-pointer hover:border-ring/60 transition-colors"
+      >
+        <span className={selected ? '' : 'text-muted-foreground'}>
+          {selected?.nom ?? placeholder}
+        </span>
+        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+      </div>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-border">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input
+                autoFocus
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && showCreate && filtered.length === 0) {
+                    e.preventDefault()
+                    handleCreate()
+                  }
+                }}
+                placeholder="Rechercher ou créer..."
+                className="pl-7 h-8 text-sm"
+              />
+            </div>
+          </div>
+          <div className="max-h-60 overflow-y-auto py-1">
+            {filtered.length === 0 && !showCreate && (
+              <div className="px-3 py-2 text-sm text-muted-foreground">Aucun client</div>
+            )}
+            {filtered.map(c => (
+              <div
+                key={c.id}
+                onClick={() => { onChange(c.id); setOpen(false); setQuery('') }}
+                className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-accent ${c.id === value ? 'bg-accent/60 font-medium' : ''}`}
+              >
+                {c.nom}
+              </div>
+            ))}
+            {showCreate && (
+              <div
+                onClick={handleCreate}
+                className="px-3 py-2 text-sm cursor-pointer hover:bg-accent border-t border-border flex items-center gap-2 text-blue-600 dark:text-blue-400"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {creating ? 'Création...' : <>Créer « <span className="font-medium">{trimmed}</span> »</>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const REF_PREFIX: Record<PaiementMethode, string> = {
   virement: 'VRS', especes: 'ESP', cheque: 'CHQ', carte_bancaire: 'CRT', paypal: 'PPL', prelevement: 'PRL',
@@ -129,6 +242,7 @@ export default function Paiements() {
   const qc = useQueryClient()
   const { data: paiements = [], isLoading } = usePaiements()
   const { data: clients   = [] } = useClients()
+  const createClient = useCreateClient()
   const { data: contrats  = [] } = useQuery<Contrat[]>({
     queryKey: ['contrats'],
     queryFn: () => contratsApi.list({ orderBy: 'created_at', order: 'desc' }) as Promise<Contrat[]>,
@@ -1100,12 +1214,17 @@ export default function Paiements() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Client *</label>
-                <Select value={form.client_id} onValueChange={v => setForm(p => ({ ...p, client_id: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Sélectionner un client" /></SelectTrigger>
-                  <SelectContent>
-                    {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.nom}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <ClientCombobox
+                  value={form.client_id}
+                  onChange={(id) => setForm(p => ({ ...p, client_id: id }))}
+                  clients={clients}
+                  onCreate={async (nom) => {
+                    try {
+                      const c: any = await createClient.mutateAsync({ nom } as any)
+                      return c ? { id: c.id, nom: c.nom } : null
+                    } catch { return null }
+                  }}
+                />
               </div>
 
               <div className="space-y-1.5">

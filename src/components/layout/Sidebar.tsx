@@ -7,7 +7,7 @@ import {
   Repeat, BarChart3, CheckSquare, Building2, ChevronDown,
   Settings, Briefcase, Banknote, Wallet, Activity, X,
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
-  BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench,
+  BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
@@ -52,6 +52,7 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'abonnements-clients', label: 'Abonnements clients' },
   { key: 'equipe',            label: 'Équipe' },
   { key: 'fournisseurs',      label: 'Fournisseurs' },
+  { key: 'contacts',          label: 'Contacts' },
   { key: 'vehicules',         label: 'Véhicules' },
   { key: 'domaines',          label: 'Domaines' },
   { key: 'hebergements',      label: 'Hébergements' },
@@ -112,6 +113,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'Équipe',         href: '/equipe',       icon: Briefcase, module: 'equipe' },
       { label: 'Fournisseurs',   href: '/fournisseurs', icon: Building2, module: 'fournisseurs' },
+      { label: 'Contacts',       href: '/contacts',     icon: Contact, module: 'contacts' },
       { label: 'Véhicules',      href: '/vehicules',    icon: Car, badge: 'Vehicles', module: 'vehicules' },
       { label: 'Domaines',       href: '/domaines',     icon: Globe, module: 'domaines' },
       { label: 'Hébergements',   href: '/hebergements', icon: Server, module: 'hebergements' },

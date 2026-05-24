@@ -28,6 +28,7 @@ const FinanceIA      = lazy(() => import('@/pages/FinanceIA'))
 const Abonnements    = lazy(() => import('@/pages/Abonnements'))
 const Equipe         = lazy(() => import('@/pages/Equipe'))
 const Fournisseurs   = lazy(() => import('@/pages/Fournisseurs'))
+const Contacts       = lazy(() => import('@/pages/Contacts'))
 const Domaines       = lazy(() => import('@/pages/Domaines'))
 const Hebergements   = lazy(() => import('@/pages/Hebergements'))
 const Vehicules      = lazy(() => import('@/pages/Vehicules'))
@@ -138,6 +139,7 @@ export default function App() {
               <Route path="integrations"               element={<Integrations />} />
               <Route path="equipe"                     element={<Equipe />} />
               <Route path="fournisseurs"               element={<Fournisseurs />} />
+              <Route path="contacts"                   element={<Contacts />} />
               <Route path="domaines"                   element={<Domaines />} />
               <Route path="hebergements"               element={<Hebergements />} />
               <Route path="vehicules"                  element={<Vehicules />} />
