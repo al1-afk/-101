@@ -73,19 +73,34 @@ export function useAuth() {
       })
   }, [])
 
-  /* Step 1 — validate password. Returns { needsVerification, email }.
-     Tokens are NOT issued here; the caller must follow up with
-     verifyLogin() once the user enters the emailed code. */
   const signIn = useCallback(async (
     email:       string,
     password:    string,
     tenantSlug?: string,
   ) => {
-    /* Purge leftover state from any previous user before we start
-       a new auth flow — prevents cross-user cache leakage. */
     await purgeClientSession()
-    return authApi.login(email, password, tenantSlug)
-  }, [])
+    const data: any = await authApi.login(email, password, tenantSlug)
+    tokenStore.set(data.token)
+    const payload = parseJwt(data.token)
+    let allowedModules: string[] | null = null
+    try {
+      const me = await authApi.me()
+      allowedModules = (me as any).allowed_modules ?? null
+    } catch { /* ignore */ }
+    setState({
+      loading:        false,
+      isAuthorized:   true,
+      tenantSlug:     data.tenantSlug,
+      tenantId:       data.tenantId,
+      userId:         payload?.userId ?? payload?.sub ?? null,
+      email,
+      name:           null,
+      role:           data.role,
+      allowedModules,
+    })
+    navigate(`/${data.tenantSlug}`, { replace: true })
+    return data
+  }, [navigate])
 
   /* Step 2 — submit the emailed code, receive tokens, finalise. */
   const verifyLogin = useCallback(async (

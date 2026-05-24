@@ -162,39 +162,14 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
 
     if (!memberRow) return res.status(403).json({ error: 'Accès refusé' })
 
-    /* ── 2FA: issue a 6-digit code instead of tokens ─────────────
-       The access/refresh tokens are NOT created here. The user
-       must POST the emailed code to /api/auth/verify-login to
-       complete the sign-in. */
-
-    /* Invalidate any prior unused codes for this user */
-    await query(
-      `UPDATE login_verification_codes SET used = true
-       WHERE user_id = $1 AND used = false`,
-      [user.id]
+    const { accessToken, tenantSlug: s } = await issueTokenPair(
+      res,
+      { id: user.id, email, role: memberRow.role, tenant_id: memberRow.tenant_id, slug: memberRow.slug },
+      req.ip ?? '',
+      req.headers['user-agent'] ?? '',
     )
 
-    const code     = String(Math.floor(100000 + Math.random() * 900000))
-    const codeHash = await bcrypt.hash(code, 10)
-
-    await query(
-      `INSERT INTO login_verification_codes
-         (user_id, tenant_id, email, code_hash, expires_at, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes', $5::inet, $6)`,
-      [user.id, memberRow.tenant_id, email, codeHash, req.ip ?? '0.0.0.0', req.headers['user-agent'] ?? '']
-    )
-
-    try {
-      const tpl = loginCodeEmail(code)
-      await sendEmail({ to: email, ...tpl })
-    } catch (e: any) {
-      console.error('[login:email]', e?.message ?? e)
-      /* Don't reveal email errors to the client — but still log so the
-         user can ask support. The dev-fallback in email.ts prints the
-         code to the server console, which keeps local dev usable. */
-    }
-
-    res.json({ needsVerification: true, email })
+    res.json({ token: accessToken, tenantSlug: s, tenantId: memberRow.tenant_id, role: memberRow.role })
   } catch (err: any) {
     console.error('[login]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })

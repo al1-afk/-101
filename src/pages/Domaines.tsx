@@ -65,7 +65,14 @@ export default function Domaines() {
           <ImportExportButtons
             schema={domainesSchema}
             data={domaines}
-            onImport={async (row) => { await create.mutateAsync(row as any) }}
+            onImport={async (row) => {
+              try {
+                await create.mutateAsync(row as any)
+              } catch (e: any) {
+                console.error('[import domaine]', row, e?.message, e)
+                throw e
+              }
+            }}
           />
           <Button size="sm" onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> Ajouter</Button>
         </div>

@@ -42,9 +42,6 @@ export default function Auth() {
     setLoading(true)
     try {
       await signIn(email, password)
-      setStage('verify')
-      setCode('')
-      setResendIn(30)
     } catch (err: any) {
       setError(err.message || 'Identifiants incorrects')
     } finally {
