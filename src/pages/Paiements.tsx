@@ -154,6 +154,111 @@ function ClientCombobox({
   )
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Revenus prévisionnels du mois — saisie libre (titre + montant)
+   Stocké localement par tenant + mois (YYYY-MM).
+   ───────────────────────────────────────────────────────────── */
+type PrevisionItem = { id: string; titre: string; montant: number }
+
+function PrevisionsRevenus() {
+  const monthKey = new Date().toISOString().slice(0, 7) // YYYY-MM
+  const storageKey = `gestiq_previsions_revenus_${monthKey}`
+
+  const [items, setItems] = useState<PrevisionItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+  })
+  const [titre, setTitre]   = useState('')
+  const [montant, setMontant] = useState('')
+
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify(items)) } catch { /* ignore */ }
+  }, [items, storageKey])
+
+  const total = items.reduce((s, i) => s + i.montant, 0)
+
+  const add = () => {
+    const m = Number(montant)
+    if (!titre.trim() || !Number.isFinite(m) || m <= 0) return
+    setItems(p => [...p, { id: crypto.randomUUID(), titre: titre.trim(), montant: m }])
+    setTitre('')
+    setMontant('')
+  }
+
+  const remove = (id: string) => setItems(p => p.filter(i => i.id !== id))
+
+  const monthLabel = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+
+  return (
+    <div className="card-premium p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            Revenus prévisionnels — {monthLabel}
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Ce que vous attendez d'encaisser ce mois-ci (hors contrats)
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total prévu</p>
+          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+            {formatCurrency(total)}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mb-3">
+        <Input
+          value={titre}
+          onChange={e => setTitre(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          placeholder="Titre (ex: Client X, Devis Y...)"
+          className="flex-1"
+        />
+        <Input
+          type="number"
+          value={montant}
+          onChange={e => setMontant(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          placeholder="Montant"
+          className="w-32"
+        />
+        <Button size="sm" onClick={add} disabled={!titre.trim() || !Number(montant)}>
+          <Plus className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="text-center text-xs text-muted-foreground py-4">
+          Aucune prévision ce mois. Ajoutez une ligne au-dessus ↑
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map(i => (
+            <div key={i.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-muted/40 hover:bg-muted/60 transition-colors group">
+              <span className="text-sm text-foreground flex-1 truncate">{i.titre}</span>
+              <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">
+                {formatCurrency(i.montant)}
+              </span>
+              <Button
+                variant="ghost" size="icon"
+                className="w-6 h-6 text-red-500 opacity-0 group-hover:opacity-100"
+                onClick={() => remove(i.id)}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const REF_PREFIX: Record<PaiementMethode, string> = {
   virement: 'VRS', especes: 'ESP', cheque: 'CHQ', carte_bancaire: 'CRT', paypal: 'PPL', prelevement: 'PRL',
 }
@@ -621,6 +726,9 @@ export default function Paiements() {
       <div className="card-premium p-3">
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
       </div>
+
+      {/* ── Revenus prévisionnels du mois (saisie libre) ── */}
+      <PrevisionsRevenus />
 
       {/* ── Volume total (CA) ── */}
       <div className="card-premium p-5 bg-gradient-to-br from-slate-900 to-slate-800 dark:from-slate-800 dark:to-slate-900 border-0 text-white">
