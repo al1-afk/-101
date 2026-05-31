@@ -543,15 +543,18 @@ function FactureWizard({
     }
     const notes = JSON.stringify(notesData)
 
-    /* Sequential numero: FAC-YYYY-001, FAC-YYYY-002… (no collision) */
-    const year   = new Date().getFullYear()
-    const maxSeq = allFactures
-      .filter(x => x.numero.startsWith(`FAC-${year}-`))
+    /* Sequential numero: AAA1/MM-YYYY, AAA2/MM-YYYY… counter resets each month */
+    const refDate = dateFacture ? new Date(dateFacture) : new Date()
+    const year    = refDate.getFullYear()
+    const month   = String(refDate.getMonth() + 1).padStart(2, '0')
+    const suffix  = `/${month}-${year}`
+    const maxSeq  = allFactures
+      .filter(x => x.numero.endsWith(suffix) && /^AAA\d+\//.test(x.numero))
       .reduce((max, x) => {
-        const m = x.numero.match(/FAC-\d{4}-(\d+)/)
+        const m = x.numero.match(/^AAA(\d+)\//)
         return m ? Math.max(max, parseInt(m[1], 10)) : max
       }, 0)
-    const newNumero = `FAC-${year}-${String(maxSeq + 1).padStart(3, '0')}`
+    const newNumero = `AAA${maxSeq + 1}${suffix}`
 
     const statut: FactureStatut = facture?.statut
       ?? computeAutoStatut(facture?.montant_paye ?? 0, montantTTC, 'brouillon')
@@ -585,7 +588,7 @@ function FactureWizard({
     const previewFacture: Facture = {
       id:            facture?.id ?? 'preview',
       created_at:    new Date().toISOString(),
-      numero:        facture?.numero ?? `FAC-${new Date().getFullYear()}-XXXX`,
+      numero:        facture?.numero ?? `AAA?/${String(new Date(dateFacture || Date.now()).getMonth() + 1).padStart(2, '0')}-${new Date(dateFacture || Date.now()).getFullYear()}`,
       client_id:     selectedId,
       client_nom:    client?.entreprise ?? client?.nom,
       statut:        facture?.statut ?? 'brouillon',

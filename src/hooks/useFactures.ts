@@ -92,8 +92,9 @@ export function useDuplicateFacture() {
   return useMutation({
     mutationFn: async (facture: Facture) => {
       const now = new Date()
+      const mm  = String(now.getMonth() + 1).padStart(2, '0')
       return facturesApi.create({
-        numero:        `FAC-${now.getFullYear()}-${String(Date.now()).slice(-4)}`,
+        numero:        `AAA${String(Date.now()).slice(-3)}/${mm}-${now.getFullYear()}`,
         client_id:     facture.client_id,
         statut:        'brouillon',
         date_emission: now.toISOString().slice(0, 10),
