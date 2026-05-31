@@ -63,13 +63,13 @@ function dueDate(s: string, days = 30) {
 /* ─── Company constants ──────────────────────────────────────── */
 const CO = {
   name:    'NEXT GITAL',
-  sub:     'Agence Digitale & Web Solutions',
-  addr1:   'Rue Mohamed V, Hôtel Aswan, Immeuble Kissi, 4ème Étage, Bureau N°7',
-  addr2:   'Oujda, Maroc',
-  tel:     '+212 620002066',
-  fax:     '0536683707',
-  email:   'info@gestiq.com',
-  web:     'www.gestiq.com',
+  sub:     'Agence Web & Solutions Digitales',
+  addr1:   'Rue Mohamed V, Imm. Kissi',
+  addr2:   '4ème étage, Bureau N°7, Oujda',
+  tel:     '+212 620 002 066',
+  fax:     '0536 683 707',
+  email:   'info@nextgital.com',
+  web:     'www.nextgital.com',
   rc:      '42415',
   if_:     '60270023',
   patente: '10301120',
@@ -159,21 +159,27 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
       >
         <thead data-print-header="true">
           <tr><td style={{ padding: '14mm 14mm 0 14mm', verticalAlign: 'top' }}>
-            <div className="flex items-start justify-between mb-1">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/logo-gestiq.png"
-                  alt="NEXT GITAL"
-                  className="w-16 h-16 object-contain"
-                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                />
-                <div>
-                  <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
-                  <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
-                </div>
+            <div className="flex items-center justify-between mb-3">
+              {/* FACTURE badge — left */}
+              <div
+                className="px-7 py-2 rounded-lg text-white font-extrabold text-[16px] tracking-wider"
+                style={{ backgroundColor: '#1e64c4' }}
+              >
+                FACTURE
               </div>
 
-              <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
+              {/* Logo + name — center */}
+              <div className="flex flex-col items-center">
+                <img
+                  src="/logo-nextgital.png"
+                  alt="NEXT GITAL"
+                  className="h-16 object-contain"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              </div>
+
+              {/* Company info — right */}
+              <div className="text-right text-[9px] text-[#64748b] space-y-0.5 leading-relaxed">
                 <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
                 <p>ICE: {CO.ice}</p>
                 <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
@@ -181,55 +187,21 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
               </div>
             </div>
 
-            <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
+            <div className="h-px bg-[#cbd5e1] mb-4" />
           </td></tr>
         </thead>
 
         <tbody>
           <tr><td style={{ padding: '0 14mm', verticalAlign: 'top' }}>
 
-        {/* ══ TITLE BADGE + REF ═══════════════════════════════ */}
-        <div className="flex items-start justify-between mb-5">
-          <div
-            className="px-8 py-2 rounded-lg text-white font-extrabold text-[18px] tracking-wider"
-            style={{ backgroundColor: '#1e64c4' }}
-          >
-            FACTURE
-          </div>
-
-          <div className="text-right text-[11px] space-y-1">
-            {[
-              { label: 'Réf :',      val: f.numero },
-              { label: 'Date :',     val: fmtDate(f.date_emission) },
-              { label: 'Échéance :', val: f.date_echeance ? fmtDate(f.date_echeance) : dueDate(f.date_emission) },
-            ].map(row => (
-              <div key={row.label} className="flex items-center justify-end gap-4">
-                <span className="text-[#64748b]">{row.label}</span>
-                <span className="font-bold text-[#0a1a3c] w-32 text-right">{row.val}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ══ ÉMETTEUR / CLIENT ═══════════════════════════════ */}
-        <div className="grid grid-cols-2 gap-4 mb-5">
-          <div className="border border-[#e2e8f0] rounded-lg p-3 bg-[#f8fafc]">
-            <p className="text-[9px] font-bold text-[#1e64c4] uppercase tracking-widest mb-2">Émetteur</p>
-            <p className="text-[13px] font-bold text-[#0a1a3c] mb-1">{CO.name}</p>
-            <div className="text-[10px] text-[#374151] space-y-0.5">
-              <p>{CO.addr1}</p>
-              <p>{CO.addr2}</p>
-              <p>Tél: {CO.tel}</p>
-              <p>{CO.email}</p>
-            </div>
-          </div>
-
-          <div className="border border-[#e2e8f0] rounded-lg p-3 bg-[#f8fafc]">
-            <p className="text-[9px] font-bold text-[#1e64c4] uppercase tracking-widest mb-2">Client</p>
-            <p className="text-[13px] font-bold text-[#0a1a3c] mb-1">
+        {/* ══ CLIENT + REF/DATE/ECHEANCE (compact) ═══════════════ */}
+        <div className="grid grid-cols-2 gap-6 mb-3">
+          <div>
+            <p className="text-[9px] font-semibold text-[#64748b] uppercase tracking-wider mb-0.5">Client</p>
+            <p className="text-[12px] font-extrabold text-[#0a1a3c] leading-snug">
               {client?.entreprise ?? f.client_nom ?? '—'}
             </p>
-            <div className="text-[10px] text-[#374151] space-y-0.5">
+            <div className="text-[10px] text-[#374151] leading-snug">
               {f.client_nom && client?.entreprise && <p>{f.client_nom}</p>}
               {client?.email     && <p>{client.email}</p>}
               {client?.telephone && <p>{client.telephone}</p>}
@@ -238,7 +210,22 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
               )}
             </div>
           </div>
+
+          <div className="text-right text-[10px] space-y-0.5 self-start">
+            {[
+              { label: 'Réf :',      val: f.numero },
+              { label: 'Date :',     val: fmtDate(f.date_emission) },
+              { label: 'Échéance :', val: f.date_echeance ? fmtDate(f.date_echeance) : dueDate(f.date_emission) },
+            ].map(row => (
+              <div key={row.label} className="flex items-center justify-end gap-3">
+                <span className="text-[#64748b]">{row.label}</span>
+                <span className="font-bold text-[#0a1a3c] w-28 text-right">{row.val}</span>
+              </div>
+            ))}
+          </div>
         </div>
+
+        <div className="h-px bg-[#e2e8f0] mb-3" />
 
         {/* ══ SERVICES TABLE ══════════════════════════════════ */}
         {(() => {

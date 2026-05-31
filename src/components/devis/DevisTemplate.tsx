@@ -178,7 +178,7 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
               {/* Left: logo + name */}
               <div className="flex items-center gap-3">
                 <img
-                  src="/logo-gestiq.png"
+                  src="/logo-nextgital.png"
                   alt="NEXT GITAL"
                   className="w-16 h-16 object-contain"
                   onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
