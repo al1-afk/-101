@@ -197,36 +197,45 @@ export function ImportExportButtons<T>({ schema, data, onImport }: Props<T>) {
                 <SummaryCard label="Erreurs"      value={result.invalid.length} color="text-red-600 dark:text-red-400" icon={<AlertTriangle className="w-3.5 h-3.5" />} />
               </div>
 
-              {/* Preview table */}
-              {result.rows.length > 0 && (
-                <div className="border border-border rounded-lg overflow-hidden">
-                  <div className="max-h-72 overflow-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-muted/40 sticky top-0">
-                        <tr>
-                          <th className="px-2 py-2 text-left font-semibold text-muted-foreground w-10">#</th>
-                          {schema.fields.slice(0, 5).map(f => (
-                            <th key={f.key} className="px-2 py-2 text-left font-semibold text-muted-foreground">
-                              {f.label}
-                            </th>
+              {/* Preview table — affiche uniquement les colonnes qui ont au moins
+                  une valeur dans les lignes parsées (le 'nom' est toujours là). */}
+              {result.rows.length > 0 && (() => {
+                const visibleFields = schema.fields.filter(f =>
+                  f.required || result.rows.some(r => {
+                    const v = (r.data as any)[f.key]
+                    return v != null && v !== ''
+                  })
+                ).slice(0, 8)
+                return (
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <div className="max-h-72 overflow-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40 sticky top-0">
+                          <tr>
+                            <th className="px-2 py-2 text-left font-semibold text-muted-foreground w-10">#</th>
+                            {visibleFields.map(f => (
+                              <th key={f.key} className="px-2 py-2 text-left font-semibold text-muted-foreground">
+                                {f.label}
+                              </th>
+                            ))}
+                            <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Statut</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.rows.slice(0, 50).map(row => (
+                            <PreviewRow key={row.index} row={row} fields={visibleFields} />
                           ))}
-                          <th className="px-2 py-2 text-left font-semibold text-muted-foreground">Statut</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.rows.slice(0, 50).map(row => (
-                          <PreviewRow key={row.index} row={row} schema={schema} />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {result.rows.length > 50 && (
-                    <div className="px-3 py-2 text-xs text-muted-foreground bg-muted/20 border-t border-border">
-                      … et {result.rows.length - 50} ligne{result.rows.length - 50 > 1 ? 's' : ''} supplémentaire{result.rows.length - 50 > 1 ? 's' : ''}
+                        </tbody>
+                      </table>
                     </div>
-                  )}
-                </div>
-              )}
+                    {result.rows.length > 50 && (
+                      <div className="px-3 py-2 text-xs text-muted-foreground bg-muted/20 border-t border-border">
+                        … et {result.rows.length - 50} ligne{result.rows.length - 50 > 1 ? 's' : ''} supplémentaire{result.rows.length - 50 > 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Import progress */}
               {importing && (
@@ -303,12 +312,12 @@ function SummaryCard({ label, value, color, icon }: { label: string; value: numb
   )
 }
 
-function PreviewRow<T>({ row, schema }: { row: ParsedRow<T>; schema: EntitySchema<T> }) {
+function PreviewRow<T>({ row, fields }: { row: ParsedRow<T>; fields: { key: string; label: string }[] }) {
   const ok = row.errors.length === 0
   return (
     <tr className={`border-t border-border ${ok ? '' : 'bg-red-500/5'}`}>
       <td className="px-2 py-1.5 text-muted-foreground">{row.index}</td>
-      {schema.fields.slice(0, 5).map(f => {
+      {fields.map(f => {
         const v = (row.data as any)[f.key]
         return (
           <td key={f.key} className="px-2 py-1.5 text-foreground truncate max-w-[160px]">

@@ -28,15 +28,63 @@ export const clientsSchema: EntitySchema<any> = {
   entity: 'client',
   filename: 'clients',
   fields: [
-    { key: 'nom',        label: 'Nom',         required: true },
-    { key: 'entreprise', label: 'Entreprise' },
-    { key: 'email',      label: 'Email' },
-    { key: 'telephone',  label: 'Téléphone' },
-    { key: 'adresse',    label: 'Adresse' },
-    { key: 'ville',      label: 'Ville' },
-    { key: 'pays',       label: 'Pays' },
+    { key: 'nom',        label: 'Nom',         required: true,
+      aliases: ['ID Client', 'Client', 'Nom client', 'Name', 'Identifiant client'] },
+    { key: 'entreprise', label: 'Entreprise',
+      aliases: ['Société', 'Company', 'Enterprise'] },
+    { key: 'email',      label: 'Email',
+      aliases: ['E-mail', 'Mail', 'Courriel'] },
+    { key: 'telephone',  label: 'Téléphone',
+      aliases: ['Tel', 'Tél', 'Phone', 'Mobile', 'GSM'] },
+    { key: 'adresse',    label: 'Adresse',
+      aliases: ['Address'] },
+    { key: 'ville',      label: 'Ville',
+      aliases: ['City'] },
+    { key: 'pays',       label: 'Pays',
+      aliases: ['Country'] },
     { key: 'notes',      label: 'Notes' },
+    /* ── Champs métier (migration 057) ─────────────────────────── */
+    { key: 'type_service', label: 'Type de service',
+      aliases: ['Sélectionner', 'Type', 'Service', 'Prestation'] },
+    { key: 'sous_categorie', label: 'Sous-catégorie',
+      aliases: ['Sélectionner 1', 'Catégorie', 'Category', 'Sous catégorie'] },
+    { key: 'date_debut_contrat', label: 'Date début contrat', kind: 'date',
+      aliases: ['date de dubut', 'Date de début', 'Date début', 'Start date'] },
+    { key: 'montant_ttc_annuel', label: 'Montant TTC annuel', kind: 'number',
+      aliases: ['Montant Total', 'Montant TTC', 'Montant', 'Total', 'Amount'] },
+    { key: 'prix_renouvellement', label: 'Prix renouvellement', kind: 'number',
+      aliases: ['Renovlemnt', 'Renouvellement', 'Renouv', 'Renewal', 'Renoulvelment'] },
   ],
+  /* Merge raw extra columns (dates domaine/hébergement) into the notes
+     JSON envelope. Triggered after the field-level mapping above. */
+  postParse: (data, raw) => {
+    const parseFr = (s: string | undefined): string | undefined => {
+      if (!s) return undefined
+      const m = String(s).trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/)
+      if (!m) return undefined
+      const [, d, mo, y] = m
+      const yyyy = y.length === 2 ? `20${y}` : y
+      return `${yyyy}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`
+    }
+    /* Find raw values by header (try several common spellings). */
+    const findRaw = (...names: string[]): string | undefined => {
+      const lower = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.toLowerCase().trim(), v]))
+      for (const n of names) {
+        const v = lower[n.toLowerCase().trim()]
+        if (v != null && String(v).trim() !== '') return String(v)
+      }
+      return undefined
+    }
+    const domainExpiry  = parseFr(findRaw('demain name', 'domain name', 'Domaine', 'Domain expiry'))
+    const hostingExpiry = parseFr(findRaw("l'hébergement", 'hebergement', 'Hosting', 'Hosting expiry'))
+    if (domainExpiry || hostingExpiry) {
+      const meta: any = {}
+      if (domainExpiry)  meta.domainExpiry  = domainExpiry
+      if (hostingExpiry) meta.hostingExpiry = hostingExpiry
+      data.notes = JSON.stringify({ sentinel: '__client_meta__', _meta: meta, text: '', blocks: [] })
+    }
+    return data
+  },
 }
 
 /* ─── Devis ─────────────────────────────────────────────────────── */

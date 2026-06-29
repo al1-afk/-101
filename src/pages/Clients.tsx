@@ -17,65 +17,60 @@ import {
 } from '@/components/ui/DateRangeFilter'
 import { parseClientNotes, serializeClientNotes, daysUntil } from '@/lib/clientNotes'
 
-/* ─── Domain / hosting cell with countdown badge (inline editable) ─────────────────── */
+/* ─── Domain / hosting cell — single line (Notion-style) ─────────────────── */
 function DomainCell({
-  name, expiry, icon: Icon, onSave,
+  expiry, onSave,
 }: {
+  /** name field is kept in the schema but not rendered here to stay tight.
+      The full edit (with name) is available via the row's edit dialog. */
   name?:   string
   expiry?: string
   icon:    React.ElementType
   onSave:  (patch: { name?: string; expiry?: string }) => void
 }) {
   const days = daysUntil(expiry)
-  let badgeCls = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-  let BadgeIcon: React.ElementType | null = Clock
-  let badgeTxt = ''
+  /* Couleur de la date selon expiration. Pas de badge séparé : la couleur de
+     la date suffit (rouge = imminent, ambre = bientôt, neutre = OK). */
+  let dateCls = 'text-muted-foreground'
+  let badgeIcon: React.ElementType | null = null
   if (days !== null) {
-    if (days < 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `-${Math.abs(days)}j` }
-    else if (days === 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `0j` }
-    else if (days <= 7) { badgeCls = 'bg-red-500/10 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `${days}j` }
-    else if (days <= 30) { badgeCls = 'bg-amber-500/15 text-amber-600 dark:text-amber-400'; BadgeIcon = Clock; badgeTxt = `${days}j` }
-    else { BadgeIcon = Clock; badgeTxt = `${days}j` }
+    if (days < 30) {
+      dateCls = 'text-red-600 dark:text-red-400 font-semibold'
+      badgeIcon = AlertTriangle
+    } else if (days <= 90) {
+      dateCls = 'text-amber-600 dark:text-amber-400'
+      badgeIcon = Clock
+    } else {
+      dateCls = 'text-blue-600 dark:text-blue-400'
+      badgeIcon = Clock
+    }
   }
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
-      <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-      <div className="min-w-0 space-y-0.5">
-        <input
-          type="text"
-          defaultValue={name ?? ''}
-          key={`n-${name ?? ''}`}
-          onBlur={e => {
-            const v = e.target.value.trim()
-            if (v !== (name ?? '')) onSave({ name: v || undefined })
-          }}
-          placeholder="—"
-          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0.5 text-xs font-semibold text-foreground w-24 outline-none"
-          title="Cliquer pour modifier"
-        />
-        <div className="flex items-center gap-1">
-          <input
-            type="date"
-            defaultValue={expiry ?? ''}
-            key={`e-${expiry ?? ''}`}
-            onChange={e => onSave({ expiry: e.target.value || undefined })}
-            className={`bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0.5 text-[10px] cursor-pointer outline-none ${badgeTxt && days !== null && days <= 30 ? 'text-red-600 dark:text-red-400 font-bold' : 'text-muted-foreground'}`}
-            title="Date d'expiration"
-          />
-          {badgeTxt && (
-            <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1 py-0.5 rounded ${badgeCls}`}>
-              {BadgeIcon && <BadgeIcon className="w-2 h-2" />}
-              {badgeTxt}
-            </span>
-          )}
-        </div>
-      </div>
+    <div className="flex items-center gap-0.5 min-w-0">
+      <input
+        type="date"
+        defaultValue={(expiry ?? '').slice(0, 10)}
+        key={`e-${expiry ?? ''}`}
+        onChange={e => onSave({ expiry: e.target.value || undefined })}
+        className={`bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0 text-[10px] cursor-pointer w-20 outline-none ${dateCls}`}
+        title="Cliquer pour modifier"
+      />
+      {badgeIcon && expiry && (() => {
+        const I = badgeIcon
+        return <I className={`w-2.5 h-2.5 flex-shrink-0 ${dateCls}`} />
+      })()}
     </div>
   )
 }
 
-const TYPE_SERVICES = ['Site web', 'Social Media', 'SEO', 'Ads', 'Identité visuelle', 'Maintenance', 'Autre'] as const
-const SOUS_CATEGORIES = ['SEO', 'Ads', 'Les messages', 'Création contenu', 'Refonte', 'Autre'] as const
+const TYPE_SERVICES = [
+  'Site web', 'social media', 'maps', 'application',
+  'Identité visuelle', 'Maintenance', 'Autre',
+] as const
+const SOUS_CATEGORIES = [
+  'SEO', 'ads', 'bouchori', 'les message', 'client', 'deplacment',
+  'Création contenu', 'Refonte', 'Autre',
+] as const
 
 function ClientForm({ client, onClose }: { client?: Client; onClose: () => void }) {
   const create = useCreateClient()
@@ -92,7 +87,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
     notes: parsed.text,
     type_service:        client?.type_service        || '',
     sous_categorie:      client?.sous_categorie      || '',
-    date_debut_contrat:  client?.date_debut_contrat  || '',
+    date_debut_contrat:  (client?.date_debut_contrat || '').slice(0, 10),
     montant_ttc_annuel:  client?.montant_ttc_annuel  ?? '',
     prix_renouvellement: client?.prix_renouvellement ?? '',
   })
@@ -262,84 +257,86 @@ export default function Clients() {
         <div className="card-premium overflow-hidden">
           <div className="table-scroll">
             <table className="w-full">
-              <thead className="table-header">
-                <tr className="table-header">
-                  <th>Client</th>
-                  <th>Contact</th>
-                  <th>Type</th>
-                  <th>Catégorie</th>
-                  <th>Début contrat</th>
-                  <th className="text-right">Montant TTC</th>
-                  <th>Domaine</th>
-                  <th>Hébergement</th>
-                  <th className="text-right">Renouv.</th>
-                  <th className="text-right">Actions</th>
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <th className="w-8 text-center py-1.5 px-2">#</th>
+                  <th className="text-left py-1.5 px-2">Client</th>
+                  <th className="text-left py-1.5 px-2">Contact</th>
+                  <th className="text-left py-1.5 px-2">Type</th>
+                  <th className="text-left py-1.5 px-2">Catégorie</th>
+                  <th className="text-left py-1.5 px-2">Début</th>
+                  <th className="text-right py-1.5 px-2">Montant</th>
+                  <th className="text-left py-1.5 px-2">Domaine</th>
+                  <th className="text-left py-1.5 px-2">Hébergement</th>
+                  <th className="text-right py-1.5 px-2">Renouv.</th>
+                  <th className="text-right py-1.5 px-2 w-20">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(c => {
+                {filtered.map((c, idx) => {
                   const meta = parseClientNotes(c.notes).meta
                   return (
-                    <tr key={c.id} className="table-row group">
-                      <td>
+                    <tr key={c.id} className="border-b border-border hover:bg-muted/30 group">
+                      <td className="text-center text-[10px] font-mono text-muted-foreground py-1 px-2">{idx + 1}</td>
+                      <td className="py-1 px-2">
                         <button
                           onClick={() => navigate(c.id)}
-                          className="flex items-center gap-3 text-left"
+                          className="flex items-center gap-2 text-left"
                         >
-                          <div className="avatar-initials w-9 h-9 flex-shrink-0">
-                            <span className="font-bold text-xs">{getInitials(c.nom)}</span>
+                          <div className="avatar-initials w-6 h-6 flex-shrink-0">
+                            <span className="font-bold text-[9px]">{getInitials(c.nom)}</span>
                           </div>
                           <div className="min-w-0">
-                            <p className="font-semibold text-foreground truncate hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{c.nom}</p>
+                            <p className="text-[12px] font-semibold text-foreground truncate hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{c.nom}</p>
                             {c.entreprise && (
-                              <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
-                                <Building2 className="w-3 h-3" /> {c.entreprise}
+                              <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5">
+                                <Building2 className="w-2.5 h-2.5" /> {c.entreprise}
                               </p>
                             )}
                           </div>
                         </button>
                       </td>
-                      <td>
-                        <div className="space-y-0.5 text-xs">
+                      <td className="py-1 px-2">
+                        <div className="text-[10px] space-y-0">
                           {c.email && (
-                            <div className="flex items-center gap-1.5 text-muted-foreground">
-                              <Mail className="w-3 h-3" />
-                              <span className="truncate max-w-[180px]" title={c.email}>{c.email}</span>
+                            <div className="flex items-center gap-1 text-muted-foreground">
+                              <Mail className="w-2.5 h-2.5" />
+                              <span className="truncate max-w-[140px]" title={c.email}>{c.email}</span>
                             </div>
                           )}
                           {c.telephone && (
-                            <div className="flex items-center gap-1.5 text-muted-foreground">
-                              <Phone className="w-3 h-3" /> {c.telephone}
+                            <div className="flex items-center gap-1 text-muted-foreground">
+                              <Phone className="w-2.5 h-2.5" /> {c.telephone}
                             </div>
                           )}
                           {!c.email && !c.telephone && <span className="text-muted-foreground/50">—</span>}
                         </div>
                       </td>
-                      <td>
+                      <td className="py-1 px-2">
                         {c.type_service ? (
-                          <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                          <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
                             {c.type_service}
                           </span>
-                        ) : <span className="text-muted-foreground/50">—</span>}
+                        ) : <span className="text-muted-foreground/50 text-[10px]">—</span>}
                       </td>
-                      <td>
+                      <td className="py-1 px-2">
                         {c.sous_categorie ? (
-                          <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                          <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
                             {c.sous_categorie}
                           </span>
-                        ) : <span className="text-muted-foreground/50">—</span>}
+                        ) : <span className="text-muted-foreground/50 text-[10px]">—</span>}
                       </td>
-                      <td className="text-xs whitespace-nowrap">
+                      <td className="py-1 px-2 text-[10px] whitespace-nowrap">
                         <input
                           type="date"
-                          defaultValue={c.date_debut_contrat ?? ''}
+                          defaultValue={(c.date_debut_contrat ?? '').slice(0, 10)}
                           key={`d-${c.id}-${c.date_debut_contrat ?? ''}`}
                           onChange={e => updateClient.mutate({ id: c.id, date_debut_contrat: e.target.value || null })}
-                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1.5 py-1 text-xs cursor-pointer w-32 outline-none"
+                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0 text-[10px] cursor-pointer w-20 outline-none"
                           title="Cliquer pour modifier"
                         />
                       </td>
-                      <td className="text-xs text-right whitespace-nowrap">
+                      <td className="py-1 px-2 text-[10px] text-right whitespace-nowrap">
                         <input
                           type="number"
                           step="0.01"
@@ -351,7 +348,7 @@ export default function Clients() {
                               updateClient.mutate({ id: c.id, montant_ttc_annuel: v })
                           }}
                           placeholder="—"
-                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1.5 py-1 text-xs cursor-pointer w-24 text-right font-semibold outline-none"
+                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0 text-[10px] cursor-pointer w-16 text-right font-semibold outline-none"
                           title="Cliquer pour modifier (Tab/Entrée pour sauvegarder)"
                         />
                       </td>
@@ -371,7 +368,7 @@ export default function Clients() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="py-1 px-2">
                         <DomainCell
                           name={meta.hostingName}
                           expiry={meta.hostingExpiry}
@@ -387,7 +384,7 @@ export default function Clients() {
                           }}
                         />
                       </td>
-                      <td className="text-xs text-right whitespace-nowrap">
+                      <td className="py-1 px-2 text-[10px] text-right whitespace-nowrap">
                         <input
                           type="number"
                           step="0.01"
@@ -399,23 +396,23 @@ export default function Clients() {
                               updateClient.mutate({ id: c.id, prix_renouvellement: v })
                           }}
                           placeholder="—"
-                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-emerald-400 rounded px-1.5 py-1 text-xs cursor-pointer w-24 text-right font-semibold text-emerald-600 dark:text-emerald-400 outline-none"
+                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-emerald-400 rounded px-1 py-0 text-[10px] cursor-pointer w-16 text-right font-semibold text-emerald-600 dark:text-emerald-400 outline-none"
                           title="Cliquer pour modifier (Tab/Entrée pour sauvegarder)"
                         />
                       </td>
-                      <td>
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="w-7 h-7 text-blue-600 dark:text-blue-400" onClick={() => navigate(c.id)} title="Voir détails">
-                            <Eye className="w-3.5 h-3.5" />
+                      <td className="py-1 px-2">
+                        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" className="w-6 h-6 text-blue-600 dark:text-blue-400" onClick={() => navigate(c.id)} title="Voir">
+                            <Eye className="w-3 h-3" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => { setEditingClient(c); setShowForm(true) }} title="Modifier">
-                            <Edit2 className="w-3.5 h-3.5" />
+                          <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => { setEditingClient(c); setShowForm(true) }} title="Modifier">
+                            <Edit2 className="w-3 h-3" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="w-7 h-7 text-red-400 hover:bg-red-500/10"
+                          <Button variant="ghost" size="icon" className="w-6 h-6 text-red-400 hover:bg-red-500/10"
                             onClick={() => { if (confirm(`Supprimer ${c.nom} ?`)) deleteClient.mutate(c.id) }}
                             title="Supprimer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3 h-3" />
                           </Button>
                         </div>
                       </td>
@@ -424,7 +421,7 @@ export default function Clients() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={10}>
+                    <td colSpan={11}>
                       <div className="empty-state">
                         <User className="empty-state-icon" />
                         <p className="empty-state-title">Aucun client trouvé</p>

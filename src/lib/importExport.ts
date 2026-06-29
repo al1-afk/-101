@@ -16,6 +16,10 @@ export interface FieldDef<T = any> {
   format?:   (value: any) => string
   /** Constrain to enum values */
   enum?:     readonly string[]
+  /** Alternative header names (case-insensitive). Useful when importing
+      CSVs exported from other tools (Notion, Airtable, Excel) where
+      headers are in another language or different wording. */
+  aliases?:  string[]
 }
 
 export interface EntitySchema<T = any> {
@@ -25,6 +29,10 @@ export interface EntitySchema<T = any> {
   filename: string
   /** Field definitions in the order they should appear in CSV columns */
   fields: FieldDef<T>[]
+  /** Optional post-processing run on each parsed row after field mapping.
+      Used to merge multiple CSV columns into a single complex field
+      (e.g. domain/hosting dates → notes JSON envelope). */
+  postParse?: (data: Record<string, any>, raw: Record<string, string>) => Record<string, any>
 }
 
 /* ─── CSV parser (handles quotes, escaped quotes, commas in fields) ── */
@@ -108,21 +116,31 @@ function parseValue(raw: string, field: FieldDef): any {
   if (field.parse) return field.parse(trimmed)
   switch (field.kind) {
     case 'number': {
-      const n = parseFloat(trimmed.replace(/\s/g, '').replace(',', '.'))
+      /* Strip all whitespace (including   /   non-breaking spaces),
+         currency symbols (€ $ £ MAD etc.) and convert French comma decimal. */
+      const cleaned = trimmed
+        .replace(/[\s  ]/g, '')
+        .replace(/[€$£¥]|MAD|EUR|USD|DH/gi, '')
+        .replace(',', '.')
+      const n = parseFloat(cleaned)
       return Number.isFinite(n) ? n : null
     }
     case 'boolean':
       return /^(true|1|oui|yes)$/i.test(trimmed)
     case 'date': {
-      // Accept YYYY-MM-DD, DD/MM/YYYY, ISO
-      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10)
-      const m = trimmed.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/)
+      /* Accept date ranges like "05/07/2025 – 20/07/2025" : prendre la première.
+         Couvre tiret (-), en dash (–), em dash (—), minus (−), "to" / "à". */
+      const first = trimmed.split(/\s*[-–—−]\s*|\s+(?:to|à|au)\s+/i)[0].trim()
+      // YYYY-MM-DD or ISO
+      if (/^\d{4}-\d{2}-\d{2}/.test(first)) return first.slice(0, 10)
+      // DD/MM/YYYY or DD.MM.YYYY or DD-MM-YYYY
+      const m = first.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/)
       if (m) {
         const [, d, mo, y] = m
         const yyyy = y.length === 2 ? `20${y}` : y
         return `${yyyy}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`
       }
-      return trimmed
+      return first
     }
     default:
       return trimmed
@@ -169,20 +187,22 @@ export function parseImportFile<T>(text: string, schema: EntitySchema<T>, format
     })
   }
 
-  // Build label→field and key→field maps for header matching
-  const byLabel = new Map<string, FieldDef>()
-  const byKey   = new Map<string, FieldDef>()
+  /* Build a header lookup that matches against label, key OR any alias.
+     All comparisons are case-insensitive and trim whitespace. */
+  const byHeader = new Map<string, FieldDef>()
+  const norm = (s: string) => s.toLowerCase().trim()
   schema.fields.forEach(f => {
-    byLabel.set(f.label.toLowerCase(), f)
-    byKey.set(f.key.toLowerCase(), f)
+    byHeader.set(norm(f.label), f)
+    byHeader.set(norm(f.key),   f)
+    if (f.aliases) f.aliases.forEach(a => byHeader.set(norm(a), f))
   })
 
   const rows: ParsedRow<T>[] = rawRows.map((raw, i) => {
-    const data: Record<string, any> = {}
+    let data: Record<string, any> = {}
     const errors: string[] = []
 
     Object.entries(raw).forEach(([col, val]) => {
-      const field = byLabel.get(col.toLowerCase()) || byKey.get(col.toLowerCase())
+      const field = byHeader.get(norm(col))
       if (!field) return
       const parsed = parseValue(val, field)
       if (field.enum && parsed != null && parsed !== '' && !field.enum.includes(String(parsed))) {
@@ -190,6 +210,10 @@ export function parseImportFile<T>(text: string, schema: EntitySchema<T>, format
       }
       data[field.key] = parsed
     })
+
+    /* Optional schema-level transform : let the schema merge raw extra
+       columns into composite fields (e.g. notes JSON envelope). */
+    if (schema.postParse) data = schema.postParse(data, raw)
 
     schema.fields.forEach(f => {
       if (f.required) {
