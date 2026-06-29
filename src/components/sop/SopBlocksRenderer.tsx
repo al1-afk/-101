@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { Check, Copy, Info, Lightbulb, AlertTriangle, XCircle, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { parseRichText } from './parseRichText'
+import { detectVideo } from './videoEmbed'
 
 interface SopBlock {
   type:    string
@@ -17,6 +18,7 @@ interface SopBlock {
   steps?:  Array<{ text: string; icon?: string; time?: string; status?: string }>
   image?:  { url: string; caption?: string; size?: string; align?: string }
   table?:  { headers: string[]; rows: string[][] }
+  video?:  { url: string; caption?: string; size?: string; align?: string }
 }
 
 const CALLOUT_STYLES: Record<string, { bg: string; border: string; icon: React.ElementType; iconColor: string }> = {
@@ -205,6 +207,38 @@ function BlockOne({ block, idx, checked, onCheck }: {
           {block.image.caption && <figcaption className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center">{block.image.caption}</figcaption>}
         </figure>
       ) : null
+    case 'video': {
+      const v = block.video
+      if (!v?.url) return null
+      const info = detectVideo(v.url)
+      const sizeClass = v.size === 'small' ? 'max-w-xs' : v.size === 'medium' ? 'max-w-sm' : v.size === 'large' ? 'max-w-md' : 'w-full'
+      const alignClass = v.align === 'left' ? 'mr-auto' : v.align === 'right' ? 'ml-auto' : 'mx-auto'
+      return (
+        <figure className={cn('my-3', sizeClass, alignClass)}>
+          <div className="aspect-video w-full rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-black">
+            {info.embedUrl ? (
+              info.kind === 'file' ? (
+                <video src={info.embedUrl} controls className="w-full h-full" />
+              ) : (
+                <iframe
+                  src={info.embedUrl}
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title={v.caption || 'Vidéo'}
+                />
+              )
+            ) : (
+              <a href={v.url} target="_blank" rel="noreferrer"
+                className="flex items-center justify-center w-full h-full text-sm text-white/90 hover:underline">
+                Ouvrir la vidéo : {v.url}
+              </a>
+            )}
+          </div>
+          {v.caption && <figcaption className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center">{v.caption}</figcaption>}
+        </figure>
+      )
+    }
     default:
       return block.text ? <p className="text-sm text-slate-600 dark:text-slate-400">{block.text}</p> : null
   }

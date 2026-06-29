@@ -207,16 +207,24 @@ router.get('/tasks', async (req: Request, res: Response) => {
   try {
     const tasks = await tenantQuery(
       m.tenantId,
-      `SELECT id, title, description, priority, status, due_date, created_at, completed_at
-         FROM public.team_member_tasks WHERE team_member_id = $1
-         ORDER BY (status = 'done'), due_date NULLS LAST, created_at DESC`,
+      `SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date,
+              t.category, t.elapsed_seconds, t.is_request, t.request_price,
+              t.project_id, p.nom AS project_name,
+              t.created_at, t.completed_at
+         FROM public.team_member_tasks t
+         LEFT JOIN public.projets p ON p.id = t.project_id
+         WHERE t.team_member_id = $1
+         ORDER BY (t.status = 'done'), (t.status = 'cancelled'), t.due_date NULLS LAST, t.created_at DESC`,
       [m.id],
     )
     res.json(tasks)
-  } catch (err: any) { res.status(500).json({ error: 'Erreur serveur' }) }
+  } catch (err: any) {
+    console.error('[my-space:tasks]', err?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
 })
 
-/* PATCH /api/my-space/tasks/:id — member can only update status */
+/* PATCH /api/my-space/tasks/:id — member can update status + elapsed_seconds */
 router.patch('/tasks/:id', async (req: Request, res: Response) => {
   const m = await resolveMember(req)
   if (!m) return res.status(403).json({ error: 'Compte inactif' })
@@ -225,25 +233,56 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
 
   const status = req.body.status
-  if (!['todo','in_progress','done'].includes(status)) {
+  /* Allow 'validation' — member's "Terminer" → status goes to validation,
+     the manager then validates from his side. */
+  if (status !== undefined && !['todo','in_progress','validation','done'].includes(status)) {
     return res.status(400).json({ error: 'Statut invalide' })
   }
 
+  /* Optional elapsed_seconds patch (timer Pause/Stop saves it) */
+  const elapsed = req.body.elapsed_seconds
+  const hasElapsed = typeof elapsed === 'number' && elapsed >= 0
+  const hasStatus  = status !== undefined
+  /* Optional description (member can add details, subtasks, comments via dialog) */
+  const description = req.body.description
+  const hasDesc = typeof description === 'string'
+
+  if (!hasStatus && !hasElapsed && !hasDesc) {
+    return res.status(400).json({ error: 'Aucun champ à mettre à jour' })
+  }
+
   try {
+    const sets: string[] = ['updated_at = NOW()']
+    const params: any[] = []
+    let i = 1
+    if (hasStatus) {
+      sets.push(`status = $${i++}`)
+      params.push(status)
+      sets.push(`completed_at = CASE WHEN $${i - 1} = 'done' THEN NOW() ELSE completed_at END`)
+    }
+    if (hasElapsed) {
+      sets.push(`elapsed_seconds = $${i++}`)
+      params.push(elapsed)
+    }
+    if (hasDesc) {
+      sets.push(`description = $${i++}`)
+      params.push(description)
+    }
+    params.push(id, m.id)
     const row = await tenantQueryOne(
       m.tenantId,
-      `UPDATE public.team_member_tasks
-          SET status = $1, updated_at = NOW(),
-              completed_at = CASE WHEN $1 = 'done' THEN NOW() ELSE NULL END
-        WHERE id = $2 AND team_member_id = $3 RETURNING id, title`,
-      [status, id, m.id],
+      `UPDATE public.team_member_tasks SET ${sets.join(', ')}
+        WHERE id = $${i++} AND team_member_id = $${i} RETURNING id, title`,
+      params,
     )
     if (!row) return res.status(404).json({ error: 'Tâche introuvable' })
-    await logActivity(
-      m.tenantId, m.id,
-      status === 'done' ? 'task_completed' : 'task_updated',
-      { taskId: id, title: (row as any).title, status },
-    )
+    if (hasStatus) {
+      await logActivity(
+        m.tenantId, m.id,
+        status === 'done' ? 'task_completed' : 'task_updated',
+        { taskId: id, title: (row as any).title, status },
+      )
+    }
     res.json({ success: true })
   } catch (err: any) {
     console.error('[my-space:task-patch]', err.message)
@@ -350,6 +389,179 @@ router.post('/sops/activity', async (req: Request, res: Response) => {
     res.json({ success: true })
   } catch (err: any) {
     console.error('[my-space:sop-activity]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ── GET /api/my-space/projets — projects this member is assigned to ── */
+router.get('/projets', async (req: Request, res: Response) => {
+  const m = await resolveMember(req)
+  if (!m) return res.status(403).json({ error: 'Compte inactif' })
+  try {
+    const rows = await tenantQuery(
+      m.tenantId,
+      `SELECT p.id, p.nom, p.description, p.statut, p.priorite,
+              p.date_debut, p.date_fin_prevue, p.date_fin_reelle,
+              p.budget, p.progression,
+              p.client_id, c.nom AS client_nom, c.entreprise AS client_entreprise,
+              pa.role AS my_role,
+              (SELECT COUNT(*)::int FROM public.team_member_tasks t
+                WHERE t.project_id = p.id AND t.team_member_id = $1) AS my_tasks_count,
+              (SELECT COUNT(*)::int FROM public.team_member_tasks t
+                WHERE t.project_id = p.id AND t.team_member_id = $1 AND t.status = 'done') AS my_tasks_done
+         FROM public.projet_assignees pa
+         JOIN public.projets p ON p.id = pa.projet_id
+         LEFT JOIN public.clients c ON c.id = p.client_id
+        WHERE pa.team_member_id = $1
+        ORDER BY p.updated_at DESC`,
+      [m.id],
+    )
+    res.json(rows)
+  } catch (err: any) {
+    console.error('[my-space:projets]', err?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ── GET /api/my-space/projets/:id — single project (only if assigned) ── */
+router.get('/projets/:id', async (req: Request, res: Response) => {
+  const m = await resolveMember(req)
+  if (!m) return res.status(403).json({ error: 'Compte inactif' })
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+
+  try {
+    /* Check assignment first + récupère share_infos */
+    const assigned = await tenantQueryOne<{ role: string; share_infos: boolean }>(
+      m.tenantId,
+      `SELECT role, COALESCE(share_infos, TRUE) AS share_infos FROM public.projet_assignees
+        WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
+      [m.id, id],
+    )
+    if (!assigned) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
+    const shareInfos = assigned.share_infos !== false
+
+    let projet: any
+    if (shareInfos) {
+      projet = await tenantQueryOne(
+        m.tenantId,
+        `SELECT p.*, c.nom AS client_nom, c.entreprise AS client_entreprise,
+                c.email AS client_email, c.telephone AS client_telephone,
+                c.adresse AS client_adresse, c.ville AS client_ville, c.pays AS client_pays
+           FROM public.projets p
+           LEFT JOIN public.clients c ON c.id = p.client_id
+          WHERE p.id = $1`,
+        [id],
+      )
+    } else {
+      /* Mode restreint : pas d'infos client ni de notes/credentials */
+      projet = await tenantQueryOne(
+        m.tenantId,
+        `SELECT id, tenant_id, nom, description, statut, priorite,
+                date_debut, date_fin_prevue, date_fin_reelle,
+                progression, created_at, updated_at,
+                NULL::text AS notes,
+                NULL::text AS client_nom, NULL::text AS client_entreprise,
+                NULL::text AS client_email, NULL::text AS client_telephone,
+                NULL::text AS client_adresse, NULL::text AS client_ville, NULL::text AS client_pays
+           FROM public.projets WHERE id = $1`,
+        [id],
+      )
+    }
+    if (!projet) return res.status(404).json({ error: 'Projet introuvable' })
+
+    /* Also pull the member's tasks on this project */
+    const myTasks = await tenantQuery(
+      m.tenantId,
+      `SELECT id, title, status, priority, due_date, category, elapsed_seconds, is_request
+         FROM public.team_member_tasks
+        WHERE project_id = $1 AND team_member_id = $2
+        ORDER BY (status = 'done'), due_date NULLS LAST, created_at DESC`,
+      [id, m.id],
+    )
+
+    /* And all assignees of this project (for the "team" panel) */
+    const teammates = await tenantQuery(
+      m.tenantId,
+      `SELECT pa.role, tm.prenom AS first_name, tm.nom AS last_name, tm.email, tm.job_title
+         FROM public.projet_assignees pa
+         JOIN public.team_members tm ON tm.id = pa.team_member_id
+        WHERE pa.projet_id = $1
+        ORDER BY (pa.role = 'lead') DESC, tm.prenom`,
+      [id],
+    )
+
+    res.json({ ...projet, my_role: (assigned as any).role, share_infos: shareInfos, my_tasks: myTasks, teammates })
+  } catch (err: any) {
+    console.error('[my-space:projet-detail]', err?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ── GET /api/my-space/projets/:id/messages — chat du projet ── */
+router.get('/projets/:id/messages', async (req: Request, res: Response) => {
+  const m = await resolveMember(req)
+  if (!m) return res.status(403).json({ error: 'Compte inactif' })
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+
+  try {
+    /* Verify assignment */
+    const assigned = await tenantQueryOne(
+      m.tenantId,
+      `SELECT 1 FROM public.projet_assignees WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
+      [m.id, id],
+    )
+    if (!assigned) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
+
+    const rows = await tenantQuery(
+      m.tenantId,
+      `SELECT id, projet_id, author_user_id, author_team_member_id, author_name, is_admin, text, created_at
+         FROM public.projet_messages WHERE projet_id = $1 ORDER BY created_at ASC`,
+      [id],
+    )
+    res.json(rows)
+  } catch (err: any) {
+    console.error('[my-space:projet-messages]', err?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ── POST /api/my-space/projets/:id/messages — poster un message ── */
+router.post('/projets/:id/messages', async (req: Request, res: Response) => {
+  const m = await resolveMember(req)
+  if (!m) return res.status(403).json({ error: 'Compte inactif' })
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  const text = String(req.body?.text ?? '').trim()
+  if (!text) return res.status(400).json({ error: 'Message vide' })
+  if (text.length > 4000) return res.status(400).json({ error: 'Message trop long (4000 max)' })
+
+  try {
+    const assigned = await tenantQueryOne(
+      m.tenantId,
+      `SELECT 1 FROM public.projet_assignees WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
+      [m.id, id],
+    )
+    if (!assigned) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
+
+    const me = await tenantQueryOne<{ prenom: string; nom: string }>(
+      m.tenantId,
+      `SELECT prenom, nom FROM public.team_members WHERE id = $1`,
+      [m.id],
+    )
+    const authorName = me ? `${me.prenom ?? ''} ${me.nom ?? ''}`.trim() || 'Membre' : 'Membre'
+
+    const row = await tenantQueryOne(
+      m.tenantId,
+      `INSERT INTO public.projet_messages
+         (tenant_id, projet_id, author_team_member_id, author_name, is_admin, text)
+         VALUES ($1, $2, $3, $4, FALSE, $5) RETURNING *`,
+      [m.tenantId, id, m.id, authorName, text],
+    )
+    res.status(201).json(row)
+  } catch (err: any) {
+    console.error('[my-space:post-message]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })

@@ -3,7 +3,7 @@
    Toutes les requêtes sont envoyées à Express + PostgreSQL
 ───────────────────────────────────────────────────────────────── */
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000'
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000'
 
 /* ── Token storage ───────────────────────────────────────────── */
 export const tokenStore = {
@@ -283,6 +283,15 @@ export const mySpaceApi = {
   tasks:    () => memberApi.get<any[]>('/api/my-space/tasks'),
   updateTaskStatus: (id: string, status: string) =>
     memberApi.patch<{ success: true }>(`/api/my-space/tasks/${id}`, { status }),
+  updateTaskElapsed: (id: string, elapsed_seconds: number, status?: string) =>
+    memberApi.patch<{ success: true }>(`/api/my-space/tasks/${id}`, { elapsed_seconds, ...(status && { status }) }),
+  updateTaskDescription: (id: string, description: string) =>
+    memberApi.patch<{ success: true }>(`/api/my-space/tasks/${id}`, { description }),
+
+  projets:    () => memberApi.get<any[]>('/api/my-space/projets'),
+  projet:     (id: string) => memberApi.get<any>(`/api/my-space/projets/${id}`),
+  projetMessages:     (id: string) => memberApi.get<any[]>(`/api/my-space/projets/${id}/messages`),
+  postProjetMessage:  (id: string, text: string) => memberApi.post<any>(`/api/my-space/projets/${id}/messages`, { text }),
 
   sops:     (category?: string) => memberApi.get<any[]>(`/api/my-space/sops${category ? `?category=${category}` : ''}`),
   sop:      (id: string) => memberApi.get<any>(`/api/my-space/sops/${id}`),
@@ -355,6 +364,10 @@ export const stagiairesApi              = tableApi('stagiaires')
 
 /* ── Projets (gestion de projets clients & internes) ─────────── */
 export const projetsApi                 = tableApi('projets')
+export const projetAssigneesApi         = tableApi('projet_assignees')
+export const projetMessagesApi          = tableApi('projet_messages')
+export const projetTemplatesApi         = tableApi('projet_templates')
+export const teamMemberTasksApi         = tableApi('team_member_tasks')
 
 /* ── Bons de livraison (handover client + mots de passe + liens) ── */
 export const bonsLivraisonApi           = tableApi('bons_livraison')

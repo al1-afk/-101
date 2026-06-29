@@ -37,8 +37,9 @@ import {
 import {
   PrestationRow, A4Preview, StepBar,
   parseDevisNotes, DEFAULT_BANK,
-  type Prestation, type BankInfo, type DescriptionBlock,
+  type Prestation, type BankInfo, type DescriptionBlock, type Currency,
 } from '@/pages/Devis'
+import { Globe2 } from 'lucide-react'
 import FactureTemplate from '@/components/facture/FactureTemplate'
 import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
 import { toast } from 'sonner'
@@ -57,8 +58,22 @@ const STATUT_CONFIG: Record<FactureStatut, { label: string; variant: BadgeVarian
 }
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
-const fmtCur = (v: number) => (v === 0 ? '—' : formatCurrency(v))
-const fmtCurCompact = (v: number) => (v === 0 ? '—' : formatCurrencyCompact(v))
+const fmtCur = (v: number, c: Currency = 'MAD') => (v === 0 ? '—' : formatCurrency(v, c))
+const fmtCurCompact = (v: number, c: Currency = 'MAD') => (v === 0 ? '—' : formatCurrencyCompact(v, c))
+
+/** Read currency + intl flag from a Facture's notes JSON (safe for legacy rows). */
+function factureMeta(f: Facture): { isInternational: boolean; currency: Currency } {
+  if (!f.notes) return { isInternational: false, currency: 'MAD' }
+  try {
+    const d = JSON.parse(f.notes)
+    return {
+      isInternational: !!d?.isInternational,
+      currency:        (d?.currency as Currency) ?? 'MAD',
+    }
+  } catch {
+    return { isInternational: false, currency: 'MAD' }
+  }
+}
 
 function paymentPercent(f: Facture): number {
   if (!f.montant_ttc || f.montant_ttc === 0) return 0
@@ -308,21 +323,22 @@ function FactureDetailModal({
           </div>
 
           {/* Amounts */}
+          {(() => { const cur = factureMeta(facture).currency; return (
           <div className="rounded-xl border border-border overflow-hidden">
             <div className="grid grid-cols-3 divide-x divide-border">
               <div className="p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Montant HT</p>
-                <p className="text-base font-semibold text-foreground">{fmtCur(facture.montant_ht)}</p>
+                <p className="text-base font-semibold text-foreground">{fmtCur(facture.montant_ht, cur)}</p>
               </div>
               <div className="p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">TVA ({facture.tva}%)</p>
                 <p className="text-base font-semibold text-foreground">
-                  {fmtCur(facture.montant_ttc - facture.montant_ht)}
+                  {fmtCur(facture.montant_ttc - facture.montant_ht, cur)}
                 </p>
               </div>
               <div className="p-4 text-center bg-[var(--surface-card)]">
                 <p className="text-xs text-muted-foreground mb-1">Total TTC</p>
-                <p className="text-xl font-bold text-foreground">{fmtCur(facture.montant_ttc)}</p>
+                <p className="text-xl font-bold text-foreground">{fmtCur(facture.montant_ttc, cur)}</p>
               </div>
             </div>
 
@@ -330,12 +346,12 @@ function FactureDetailModal({
             <div className="px-4 py-3 border-t border-border bg-muted/40">
               <div className="flex items-center justify-between mb-2 text-xs">
                 <span className="text-muted-foreground">
-                  Payé : <span className="font-medium text-foreground">{fmtCur(facture.montant_paye)}</span>
+                  Payé : <span className="font-medium text-foreground">{fmtCur(facture.montant_paye, cur)}</span>
                 </span>
                 <span className="text-muted-foreground">
                   {facture.statut === 'payee'
                     ? <span className="text-[#27500A] dark:text-emerald-400 font-medium">✓ Soldé</span>
-                    : <>Reste : <span className="font-medium text-[#A32D2D] dark:text-red-400">{fmtCur(reste)}</span></>
+                    : <>Reste : <span className="font-medium text-[#A32D2D] dark:text-red-400">{fmtCur(reste, cur)}</span></>
                   }
                 </span>
               </div>
@@ -355,6 +371,7 @@ function FactureDetailModal({
               )}
             </div>
           </div>
+          )})()}
 
           {/* Notes */}
           {facture.notes && (
@@ -402,9 +419,10 @@ function FactureDetailModal({
    Step 2 : Full-screen prestations editor + live A4 preview
    ═══════════════════════════════════════════════════════════════════ */
 function FactureWizard({
-  facture, onClose, onStepChange,
+  facture, defaultScope = 'maroc', onClose, onStepChange,
 }: {
   facture?:      Facture
+  defaultScope?: 'maroc' | 'international'
   onClose:       () => void
   onStepChange?: (step: number) => void
 }) {
@@ -418,14 +436,28 @@ function FactureWizard({
   const plus30 = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
 
   /* ── Wizard state ── */
-  const [step,         setStep]         = useState(facture ? 2 : 1)
+  /* Read one-shot prefill from localStorage (set by ProjetDetail's "Créer la facture") */
+  const prefill = useMemo(() => {
+    if (facture) return null
+    try {
+      const raw = localStorage.getItem('gestiq_prefill_facture')
+      if (!raw) return null
+      localStorage.removeItem('gestiq_prefill_facture')   // consume once
+      return JSON.parse(raw) as { client_id?: string | null; lignes?: any[] }
+    } catch { return null }
+  }, [facture])
+
+  const [step,         setStep]         = useState(facture ? 2 : (prefill ? 2 : 1))
   useEffect(() => { onStepChange?.(step) }, [step]) // eslint-disable-line
   const [clientSearch, setClientSearch] = useState('')
-  const [selectedId,   setSelectedId]   = useState(facture?.client_id ?? '')
+  const [selectedId,   setSelectedId]   = useState(facture?.client_id ?? prefill?.client_id ?? '')
   const [dateFacture,  setDateFacture]  = useState(facture?.date_emission ?? today)
   const [dateEcheance, setDateEcheance] = useState(facture?.date_echeance ?? plus30)
 
   const [prestations,  setPrestations]  = useState<Prestation[]>(() => {
+    if (!facture?.notes && prefill?.lignes?.length) {
+      return prefill.lignes.map((x: any, i: number) => ({ id: String(i + 1), ...x })) as Prestation[]
+    }
     if (!facture?.notes) return [{ id: '1', titre: '', description: [], quantite: 1, prix_unitaire: 0 }]
     const { prestations: p } = parseDevisNotes(facture.notes)
     return p.length
@@ -433,7 +465,18 @@ function FactureWizard({
       : [{ id: '1', titre: '', description: [], quantite: 1, prix_unitaire: 0 }]
   })
 
-  const [tvaEnabled, setTvaEnabled] = useState(() => facture ? facture.tva > 0 : true)
+  /* ── International invoice state (persisted inside notes JSON) ── */
+  const initialMeta = facture
+    ? (() => { try { const d = JSON.parse(facture.notes ?? '{}'); return { isInternational: !!d.isInternational, currency: (d.currency as Currency) ?? 'MAD', bilingual: !!d.bilingual } } catch { return { isInternational: false, currency: 'MAD' as Currency, bilingual: false } } })()
+    : { isInternational: defaultScope === 'international', currency: (defaultScope === 'international' ? 'EUR' : 'MAD') as Currency, bilingual: defaultScope === 'international' }
+  const [isInternational, setIsInternational] = useState(initialMeta.isInternational)
+  const [currency,        setCurrency]        = useState<Currency>(initialMeta.currency)
+  const [bilingual,       setBilingual]       = useState(initialMeta.bilingual)
+
+  /* International factures default to no TVA (export tax-free). */
+  const [tvaEnabled, setTvaEnabled] = useState(() =>
+    facture ? facture.tva > 0 : !initialMeta.isInternational
+  )
   const [tvaRate,    setTvaRate]    = useState(() => (facture?.tva ?? 0) > 0 ? facture!.tva : 20)
 
   const [bankInfo,  setBankInfo]  = useState<BankInfo>(() =>
@@ -540,21 +583,37 @@ function FactureWizard({
       conditions,
       bankInfo,
       signature,
+      isInternational,
+      currency,
+      bilingual,
     }
     const notes = JSON.stringify(notesData)
 
-    /* Sequential numero: AAA1/MM-YYYY, AAA2/MM-YYYY… counter resets each month */
+    /* Numero generator:
+       · Maroc        → AAA{n}/MM-YYYY (counter resets each month)
+       · International → INV-YYYY-NNN  (sequential per year) */
     const refDate = dateFacture ? new Date(dateFacture) : new Date()
     const year    = refDate.getFullYear()
-    const month   = String(refDate.getMonth() + 1).padStart(2, '0')
-    const suffix  = `/${month}-${year}`
-    const maxSeq  = allFactures
-      .filter(x => x.numero.endsWith(suffix) && /^AAA\d+\//.test(x.numero))
-      .reduce((max, x) => {
-        const m = x.numero.match(/^AAA(\d+)\//)
-        return m ? Math.max(max, parseInt(m[1], 10)) : max
-      }, 0)
-    const newNumero = `AAA${maxSeq + 1}${suffix}`
+    let newNumero: string
+    if (isInternational) {
+      const maxSeq = allFactures
+        .filter(x => new RegExp(`^INV-${year}-\\d+$`).test(x.numero))
+        .reduce((max, x) => {
+          const m = x.numero.match(/^INV-\d{4}-(\d+)$/)
+          return m ? Math.max(max, parseInt(m[1], 10)) : max
+        }, 0)
+      newNumero = `INV-${year}-${String(maxSeq + 1).padStart(3, '0')}`
+    } else {
+      const month  = String(refDate.getMonth() + 1).padStart(2, '0')
+      const suffix = `/${month}-${year}`
+      const maxSeq = allFactures
+        .filter(x => x.numero.endsWith(suffix) && /^AAA\d+\//.test(x.numero))
+        .reduce((max, x) => {
+          const m = x.numero.match(/^AAA(\d+)\//)
+          return m ? Math.max(max, parseInt(m[1], 10)) : max
+        }, 0)
+      newNumero = `AAA${maxSeq + 1}${suffix}`
+    }
 
     const statut: FactureStatut = facture?.statut
       ?? computeAutoStatut(facture?.montant_paye ?? 0, montantTTC, 'brouillon')
@@ -588,7 +647,9 @@ function FactureWizard({
     const previewFacture: Facture = {
       id:            facture?.id ?? 'preview',
       created_at:    new Date().toISOString(),
-      numero:        facture?.numero ?? `AAA?/${String(new Date(dateFacture || Date.now()).getMonth() + 1).padStart(2, '0')}-${new Date(dateFacture || Date.now()).getFullYear()}`,
+      numero:        facture?.numero ?? (isInternational
+        ? `INV-${new Date(dateFacture || Date.now()).getFullYear()}-???`
+        : `AAA?/${String(new Date(dateFacture || Date.now()).getMonth() + 1).padStart(2, '0')}-${new Date(dateFacture || Date.now()).getFullYear()}`),
       client_id:     selectedId,
       client_nom:    client?.entreprise ?? client?.nom,
       statut:        facture?.statut ?? 'brouillon',
@@ -601,6 +662,7 @@ function FactureWizard({
       notes: JSON.stringify({
         prestations: prestations.map(({ id: _id, ...p }) => p),
         conditions, bankInfo, signature,
+        isInternational, currency, bilingual,
       }),
     }
 
@@ -692,11 +754,54 @@ function FactureWizard({
                   <Plus className="w-3.5 h-3.5" /> Ajouter une prestation
                 </button>
 
+                {/* International invoice block */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 divide-y divide-slate-200 dark:divide-slate-600">
+                  <div className="flex items-center justify-between p-2.5">
+                    <div className="flex items-center gap-2">
+                      <Globe2 className="w-3.5 h-3.5 text-slate-400" />
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Facture internationale</p>
+                    </div>
+                    <button onClick={() => {
+                      const next = !isInternational
+                      setIsInternational(next)
+                      if (next) { setCurrency(currency === 'MAD' ? 'EUR' : currency); setBilingual(true); setTvaEnabled(false) }
+                      else      { setCurrency('MAD'); setBilingual(false); setTvaEnabled(true) }
+                    }}>
+                      {isInternational
+                        ? <ToggleRight className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                        : <ToggleLeft  className="w-7 h-7 text-slate-400" />}
+                    </button>
+                  </div>
+                  {isInternational && (
+                    <>
+                      <div className="flex items-center justify-between p-2.5">
+                        <p className="text-xs text-slate-600 dark:text-slate-300">Devise</p>
+                        <Select value={currency} onValueChange={v => setCurrency(v as Currency)}>
+                          <SelectTrigger className="w-28 h-7 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="EUR">€ EUR</SelectItem>
+                            <SelectItem value="USD">$ USD</SelectItem>
+                            <SelectItem value="GBP">£ GBP</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center justify-between p-2.5">
+                        <p className="text-xs text-slate-600 dark:text-slate-300">Bilingue FR / EN</p>
+                        <button onClick={() => setBilingual(v => !v)}>
+                          {bilingual
+                            ? <ToggleRight className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                            : <ToggleLeft  className="w-7 h-7 text-slate-400" />}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 {/* TVA */}
                 <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30">
                   <div>
                     <p className="text-xs font-medium text-slate-700 dark:text-slate-200">TVA</p>
-                    {tvaEnabled && <p className="text-[10px] text-slate-400">{tvaRate}% · +{formatCurrency(montantTVA)}</p>}
+                    {tvaEnabled && <p className="text-[10px] text-slate-400">{tvaRate}% · +{formatCurrency(montantTVA, currency)}</p>}
                   </div>
                   <div className="flex items-center gap-2">
                     {tvaEnabled && (
@@ -721,17 +826,17 @@ function FactureWizard({
                 <div className="rounded-xl bg-slate-50 dark:bg-slate-700/30 border border-slate-200 dark:border-slate-600 divide-y divide-slate-200 dark:divide-slate-600 text-xs">
                   <div className="flex justify-between px-3 py-2">
                     <span className="text-slate-500">Sous-total HT</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(montantHT)}</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(montantHT, currency)}</span>
                   </div>
                   {tvaEnabled && (
                     <div className="flex justify-between px-3 py-2">
                       <span className="text-slate-500">TVA {tvaRate}%</span>
-                      <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(montantTVA)}</span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(montantTVA, currency)}</span>
                     </div>
                   )}
                   <div className="flex justify-between px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-b-xl">
                     <span className="font-bold text-slate-700 dark:text-slate-100">TOTAL TTC</span>
-                    <span className="font-bold text-[#1e64c4]">{formatCurrency(montantTTC)}</span>
+                    <span className="font-bold text-[#1e64c4]">{formatCurrency(montantTTC, currency)}</span>
                   </div>
                 </div>
               </div>
@@ -1023,6 +1128,7 @@ export default function Factures() {
   const [search,       setSearch]      = useState('')
   const [filterStatut, setFilterStatut]= useState('all')
   const [dateRange,    setDateRange]   = useState<DateRange>(DEFAULT_RANGE)
+  const [scope,        setScope]       = useState<'maroc' | 'international'>('maroc')
 
   // Modal states
   const [showForm,     setShowForm]    = useState(false)
@@ -1034,35 +1140,71 @@ export default function Factures() {
 
   const closeWizard = () => { setShowForm(false); setEditing(undefined); setWizardStep(1) }
 
+  /* ── Scoped list (Maroc vs International) ──────────────────────── */
+  const scopedFactures = useMemo(
+    () => factures.filter(f => {
+      const meta = factureMeta(f)
+      return scope === 'international' ? meta.isInternational : !meta.isInternational
+    }),
+    [factures, scope]
+  )
+
+  const scopeCounts = useMemo(() => {
+    let maroc = 0, intl = 0
+    for (const f of factures) factureMeta(f).isInternational ? intl++ : maroc++
+    return { maroc, intl }
+  }, [factures])
+
   /* ── Filtered list ─────────────────────────────────────────────── */
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
   const filtered = useMemo(() =>
-    factures.filter(f => {
+    scopedFactures.filter(f => {
       const q = search.toLowerCase()
       const matchSearch = !search || [f.numero, f.client_nom].some(x => x?.toLowerCase().includes(q))
       const matchStatut = filterStatut === 'all' || f.statut === filterStatut
       const matchDate   = dateMatch(f.date_emission)
       return matchSearch && matchStatut && matchDate
     }),
-    [factures, search, filterStatut, dateMatch]
+    [scopedFactures, search, filterStatut, dateMatch]
   )
 
-  /* ── KPI stats ─────────────────────────────────────────────────── */
-  const stats = useMemo(() => ({
-    totalTTC: factures.reduce((s, f) => s + f.montant_ttc, 0),
-    encaisse: factures.filter(f => f.statut === 'payee').reduce((s, f) => s + f.montant_ttc, 0),
-    impaye:   factures
-      .filter(f => !['payee', 'annulee', 'brouillon', 'refusee'].includes(f.statut))
-      .reduce((s, f) => s + Math.max(0, f.montant_ttc - f.montant_paye), 0),
-    parStatut: Object.entries(STATUT_CONFIG).reduce((acc, [key]) => {
-      acc[key as FactureStatut] = factures.filter(f => f.statut === key).length
-      return acc
-    }, {} as Record<FactureStatut, number>),
-  }), [factures])
+  /* ── KPI stats (scoped to current tab) ─────────────────────────── */
+  const stats = useMemo(() => {
+    /* For Maroc → MAD aggregated; for Intl → per-currency map */
+    const totalsByCurrency: Record<string, { total: number; encaisse: number; impaye: number }> = {}
+    for (const f of scopedFactures) {
+      const cur = factureMeta(f).currency
+      const t = totalsByCurrency[cur] ?? (totalsByCurrency[cur] = { total: 0, encaisse: 0, impaye: 0 })
+      t.total += f.montant_ttc
+      if (f.statut === 'payee') t.encaisse += f.montant_ttc
+      if (!['payee', 'annulee', 'brouillon', 'refusee'].includes(f.statut)) {
+        t.impaye += Math.max(0, f.montant_ttc - f.montant_paye)
+      }
+    }
+    return {
+      byCurrency: totalsByCurrency,
+      parStatut:  Object.entries(STATUT_CONFIG).reduce((acc, [key]) => {
+        acc[key as FactureStatut] = scopedFactures.filter(f => f.statut === key).length
+        return acc
+      }, {} as Record<FactureStatut, number>),
+    }
+  }, [scopedFactures])
 
   /* ── Action handlers ───────────────────────────────────────────── */
   const openEdit = (f: Facture) => { setEditing(f); setViewTarget(null); setShowForm(true) }
   const openNew  = () => { setEditing(undefined); setShowForm(true) }
+
+  /* If we landed here via "Créer la facture" from a ProjetDetail page,
+     auto-open the new-facture wizard. The prefill payload is read by
+     FactureWizard from localStorage. */
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('gestiq_prefill_facture')) {
+        setEditing(undefined)
+        setShowForm(true)
+      }
+    } catch {}
+  }, [])
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return
@@ -1084,6 +1226,16 @@ export default function Factures() {
     duplicate.mutate(f)
   }
 
+  /* Multi-currency KPI string : "1 200,00 €  ·  500,00 $" */
+  const renderMulti = (pick: 'total' | 'encaisse' | 'impaye') => {
+    const entries = Object.entries(stats.byCurrency)
+      .filter(([, v]) => v[pick] > 0)
+    if (entries.length === 0) return '—'
+    return entries
+      .map(([cur, v]) => fmtKpi(v[pick], cur as Currency))
+      .join('  ·  ')
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* ── Page header ─────────────────────────────────────────── */}
@@ -1091,11 +1243,11 @@ export default function Factures() {
         <div>
           <h1 className="page-title">Factures</h1>
           <p className="text-sm mt-0.5 text-muted-foreground">
-            {factures.length} facture{factures.length !== 1 ? 's' : ''}
+            {scopedFactures.length} facture{scopedFactures.length !== 1 ? 's' : ''}
             {' · '}
-            <span className="text-[#27500A] dark:text-emerald-400 font-medium">{fmtCur(stats.encaisse)} encaissé</span>
-            {stats.impaye > 0 && (
-              <> · <span className="text-[#A32D2D] dark:text-red-400 font-medium">{fmtCur(stats.impaye)} impayé</span></>
+            <span className="text-[#27500A] dark:text-emerald-400 font-medium">{renderMulti('encaisse')} encaissé</span>
+            {Object.values(stats.byCurrency).some(v => v.impaye > 0) && (
+              <> · <span className="text-[#A32D2D] dark:text-red-400 font-medium">{renderMulti('impaye')} impayé</span></>
             )}
           </p>
         </div>
@@ -1111,6 +1263,34 @@ export default function Factures() {
         </div>
       </div>
 
+      {/* ── Scope tabs : Maroc | International ─────────────────── */}
+      <div className="flex items-center gap-1 p-1 rounded-xl border border-border bg-muted/30 w-fit">
+        <button
+          onClick={() => { setScope('maroc'); setFilterStatut('all') }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+            scope === 'maroc'
+              ? 'bg-background shadow-sm text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <MapPin className="w-4 h-4" />
+          Maroc
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">{scopeCounts.maroc}</span>
+        </button>
+        <button
+          onClick={() => { setScope('international'); setFilterStatut('all') }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+            scope === 'international'
+              ? 'bg-background shadow-sm text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Globe2 className="w-4 h-4" />
+          International
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">{scopeCounts.intl}</span>
+        </button>
+      </div>
+
       {/* ── KPI cards ───────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}
@@ -1119,7 +1299,7 @@ export default function Factures() {
             <Receipt className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </div>
           <div className="min-w-0">
-            <p className="text-lg sm:text-xl font-extrabold text-foreground truncate">{fmtKpi(stats.totalTTC)}</p>
+            <p className="text-base sm:text-lg font-extrabold text-foreground truncate">{renderMulti('total')}</p>
             <p className="kpi-label mt-0.5">Total facturé</p>
           </div>
         </motion.div>
@@ -1129,19 +1309,24 @@ export default function Factures() {
             <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div className="min-w-0">
-            <p className="text-lg sm:text-xl font-extrabold text-emerald-600 dark:text-emerald-400 truncate">{fmtKpi(stats.encaisse)}</p>
+            <p className="text-base sm:text-lg font-extrabold text-emerald-600 dark:text-emerald-400 truncate">{renderMulti('encaisse')}</p>
             <p className="kpi-label mt-0.5">Encaissé</p>
           </div>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
           className="card-premium p-5 flex items-center gap-4">
-          <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${stats.impaye > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}>
-            <Clock className={`w-5 h-5 ${stats.impaye > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
-          </div>
-          <div className="min-w-0">
-            <p className={`text-lg sm:text-xl font-extrabold truncate ${stats.impaye > 0 ? 'text-red-600 dark:text-red-400' : 'text-foreground'}`}>{fmtKpi(stats.impaye)}</p>
-            <p className="kpi-label mt-0.5">En attente</p>
-          </div>
+          {(() => {
+            const hasImpaye = Object.values(stats.byCurrency).some(v => v.impaye > 0)
+            return <>
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${hasImpaye ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}>
+                <Clock className={`w-5 h-5 ${hasImpaye ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
+              </div>
+              <div className="min-w-0">
+                <p className={`text-base sm:text-lg font-extrabold truncate ${hasImpaye ? 'text-red-600 dark:text-red-400' : 'text-foreground'}`}>{renderMulti('impaye')}</p>
+                <p className="kpi-label mt-0.5">En attente</p>
+              </div>
+            </>
+          })()}
         </motion.div>
       </div>
 
@@ -1160,7 +1345,7 @@ export default function Factures() {
               : 'border-border text-muted-foreground hover:border-blue-400'
           }`}
         >
-          Toutes ({factures.length})
+          Toutes ({scopedFactures.length})
         </button>
         {(Object.entries(STATUT_CONFIG) as [FactureStatut, { label: string; variant: BadgeVariant }][]).map(([key, cfg]) => {
           const count = stats.parStatut[key]
@@ -1241,11 +1426,11 @@ export default function Factures() {
                         <td className="text-foreground/80">{f.client_nom || '—'}</td>
                         <td className="text-muted-foreground text-sm">{formatDate(f.date_emission)}</td>
                         <td><EcheanceCell date={f.date_echeance} statut={f.statut} /></td>
-                        <td className="font-semibold text-foreground">{fmtCur(f.montant_ttc)}</td>
+                        <td className="font-semibold text-foreground">{fmtCur(f.montant_ttc, factureMeta(f).currency)}</td>
                         <td>
                           <div className="space-y-1 min-w-[80px]">
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-muted-foreground">{fmtCur(f.montant_paye)}</span>
+                              <span className="text-muted-foreground">{fmtCur(f.montant_paye, factureMeta(f).currency)}</span>
                               {pct > 0 && pct < 100 && (
                                 <span className="text-muted-foreground">{pct}%</span>
                               )}
@@ -1433,6 +1618,7 @@ export default function Factures() {
           )}
           <FactureWizard
             facture={editing}
+            defaultScope={scope}
             onClose={closeWizard}
             onStepChange={setWizardStep}
           />

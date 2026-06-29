@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   TrendingUp, Users, FileText, Receipt, DollarSign, AlertTriangle,
   Clock, CheckCircle2, Globe, Server, ArrowUpRight, ArrowDownRight,
@@ -24,6 +24,7 @@ import { formatCurrency, formatCurrencyCompact, formatDate, useIsMobileViewport 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import VisionWidgets from '@/components/VisionWidgets'
+import TeamPipelinePanel from '@/components/equipe/TeamPipelinePanel'
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 function relativeTime(iso: string): string {
@@ -149,6 +150,8 @@ function ChartTooltip({ active, payload, label }: any) {
 
 /* ─── Dashboard ───────────────────────────────────────────────────── */
 export default function Dashboard() {
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const basePath = tenantSlug ? `/${tenantSlug}` : ''
   const { data: prospects = [] } = useProspects()
   const { data: clients   = [] } = useClients()
   const { data: factures  = [] } = useFactures()
@@ -418,6 +421,9 @@ export default function Dashboard() {
           sparkData={spPipeline} sparkColor="#0F766E" delay={240}
         />
       </div>
+
+      {/* ══ PIPELINE ÉQUIPE — stand-up quotidien ════════════════════════ */}
+      <TeamPipelinePanel basePath={basePath} />
 
       {/* ══ MAIN CHART + ACTIVITY ════════════════════════════════════ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

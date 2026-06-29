@@ -11,7 +11,8 @@ import {
 } from 'lucide-react'
 import { StagiairesTab } from '@/components/equipe/StagiairesTab'
 import TeamSpaceTab from '@/components/equipe/TeamSpaceTab'
-import { tenantApi } from '@/lib/api'
+import StatsTab     from '@/components/equipe/StatsTab'
+import { tenantApi, teamMgmtApi, type TeamMemberAccess } from '@/lib/api'
 import { ALL_MODULES } from '@/components/layout/Sidebar'
 import { useAuth } from '@/hooks/useAuth'
 import { useTeam, useCreateTeamMember, useUpdateTeamMember, useDeleteTeamMember, type TeamMember } from '@/hooks/useTeam'
@@ -661,65 +662,200 @@ function SalairesTab({ members }: { members: TeamMember[] }) {
 /* ═══════════════════════════════════════════════════════════════════
    INVITE FORM
 ═══════════════════════════════════════════════════════════════════ */
+/* ─── SOP categories pour les permissions ─────────────────────── */
+const SOP_CATEGORIES = [
+  { key: 'whatsapp',    label: 'Scripts WhatsApp' },
+  { key: 'quick',       label: 'Réponses rapides' },
+  { key: 'sales',       label: 'Process Commercial' },
+  { key: 'onboarding',  label: 'Onboarding Client' },
+  { key: 'delivery',    label: 'Livraison Projet' },
+  { key: 'support',     label: 'Support Client' },
+  { key: 'marketing',   label: 'Marketing & Ads' },
+  { key: 'faq',         label: 'FAQ Interne' },
+  { key: 'ai',          label: 'IA & Automatisation' },
+  { key: 'projets',     label: 'Chef de projet' },
+  { key: 'dev',         label: 'Développeur' },
+  { key: 'media_buyer', label: 'Media Buyer' },
+  { key: 'prospection', label: 'Prospection' },
+  { key: 'designer',    label: 'Designer / Graphiste' },
+  { key: 'commercial',  label: 'Commercial' },
+  { key: 'community_manager', label: 'Community Manager' },
+]
+
+type AccessLevel = 'read' | 'complete' | 'edit'
+
 function InviteForm({ onClose }: { onClose: () => void }) {
-  const [email, setEmail] = useState('')
-  const [role, setRole]   = useState<Role>('commercial')
+  const qc = useQueryClient()
+  const [firstName,   setFirstName]   = useState('')
+  const [lastName,    setLastName]    = useState('')
+  const [email,       setEmail]       = useState('')
+  const [phone,       setPhone]       = useState('')
+  const [jobTitle,    setJobTitle]    = useState('')
+  const [memberType,  setMemberType]  = useState<'employee' | 'trainer' | 'freelance'>('employee')
+  /* Per-SOP-category access (sop_categories field of the invite payload) */
+  const [sopAccess, setSopAccess] = useState<Record<string, AccessLevel | 'none'>>({})
   const [loading, setLoading] = useState(false)
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+
+  const setCat = (cat: string, lvl: AccessLevel | 'none') => setSopAccess(p => ({ ...p, [cat]: lvl }))
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email.trim()) return
-    setLoading(true)
-    await new Promise(r => setTimeout(r, 600))
-    const members = getWorkspaceMembers()
-    if (members.some(m => m.email === email)) {
-      toast.error('Cet email a déjà été invité'); setLoading(false); return
+    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
+      toast.error('Prénom, nom et email sont requis'); return
     }
-    saveWorkspaceMembers([...members, { id: crypto.randomUUID(), email, role, status: 'pending', invited: new Date().toISOString() }])
-    toast.success(`Invitation envoyée à ${email}`)
-    setLoading(false); onClose()
+    setLoading(true)
+    try {
+      const sop_categories: TeamMemberAccess[] = Object.entries(sopAccess)
+        .filter(([, lvl]) => lvl && lvl !== 'none')
+        .map(([category, level]) => ({ category, level: level as AccessLevel }))
+
+      const res = await teamMgmtApi.invite({
+        first_name:    firstName.trim(),
+        last_name:     lastName.trim(),
+        email:         email.trim(),
+        phone:         phone.trim() || undefined,
+        job_title:     jobTitle.trim() || undefined,
+        member_type:   memberType,
+        sop_categories,
+      })
+
+      qc.invalidateQueries({ queryKey: ['team_members'] })
+      qc.invalidateQueries({ queryKey: ['team', 'members'] })
+      toast.success(`Invitation créée pour ${email}`)
+      setInviteUrl(res.invitation_url)
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Erreur lors de l\'invitation')
+    } finally {
+      setLoading(false)
+    }
   }
 
+  const copyUrl = () => {
+    if (!inviteUrl) return
+    navigator.clipboard.writeText(inviteUrl)
+    toast.success('Lien copié')
+  }
+
+  /* ── Step 2 : invitation créée, afficher le lien ── */
+  if (inviteUrl) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Invitation envoyée !</p>
+            <p className="text-xs text-emerald-600/80 dark:text-emerald-400/80">
+              Le membre va recevoir un email avec un lien pour définir son mot de passe.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            🔗 Lien d'invitation (pour test local sans email)
+          </p>
+          <div className="flex items-center gap-2">
+            <input type="text" readOnly value={inviteUrl}
+              className="flex-1 px-2 py-1.5 rounded border border-border bg-background text-xs font-mono" />
+            <Button size="sm" variant="secondary" onClick={copyUrl}>Copier</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Ouvre ce lien dans un onglet privé pour finaliser l'invitation.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end pt-2">
+          <Button onClick={onClose}>Terminer</Button>
+        </div>
+      </div>
+    )
+  }
+
+  /* ── Step 1 : formulaire ── */
   return (
     <form onSubmit={handleInvite} className="space-y-4">
-      <div className="space-y-1.5">
-        <label className="form-label">Adresse email *</label>
-        <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="collaborateur@entreprise.com" required />
+      {/* Identité */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="form-label">Prénom *</label>
+          <Input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Ahmed" required />
+        </div>
+        <div className="space-y-1.5">
+          <label className="form-label">Nom *</label>
+          <Input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Tazi" required />
+        </div>
+        <div className="space-y-1.5 col-span-2">
+          <label className="form-label">Email *</label>
+          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="ahmed@nextgital.com" required />
+        </div>
+        <div className="space-y-1.5">
+          <label className="form-label">Téléphone</label>
+          <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="06XXXXXXXX" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="form-label">Poste</label>
+          <Input value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="Développeur Web" />
+        </div>
+        <div className="space-y-1.5 col-span-2">
+          <label className="form-label">Type</label>
+          <Select value={memberType} onValueChange={v => setMemberType(v as any)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="employee">👔 Salarié</SelectItem>
+              <SelectItem value="freelance">💼 Freelance</SelectItem>
+              <SelectItem value="trainer">🎓 Stagiaire</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      <div className="space-y-1.5">
-        <label className="form-label">Rôle</label>
-        <Select value={role} onValueChange={v => setRole(v as Role)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {(Object.entries(ROLE_LABELS) as [Role, string][]).map(([k, v]) => (
-              <SelectItem key={k} value={k}>
-                <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-bold mr-2', ROLE_COLORS[k])}>{v}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="rounded-lg border border-border p-3 bg-muted/30">
-        <p className="text-xs font-semibold text-muted-foreground mb-2">
-          Accès du rôle <span className={cn('px-1.5 py-0.5 rounded', ROLE_COLORS[role])}>{ROLE_LABELS[role]}</span>
+
+      {/* Permissions SOP par catégorie */}
+      <div className="rounded-lg border border-border p-3 bg-muted/30 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-500" /> Accès aux SOPs
+          </p>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setSopAccess(Object.fromEntries(SOP_CATEGORIES.map(c => [c.key, 'read' as const])))}
+              className="text-[10px] px-2 py-0.5 rounded bg-background border border-border hover:border-blue-400">
+              Tout lire
+            </button>
+            <button type="button" onClick={() => setSopAccess({})}
+              className="text-[10px] px-2 py-0.5 rounded bg-background border border-border hover:border-red-400">
+              Tout effacer
+            </button>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Définis pour chaque catégorie ce que le membre peut faire (lecture seule, marquer comme fait, ou éditer).
         </p>
-        <div className="grid grid-cols-2 gap-1">
-          {(Object.entries(MODULE_LABELS) as [Module, string][]).slice(0, 10).map(([mod, label]) => {
-            const hasAccess = ROLE_PERMISSIONS[role][mod]?.view
+        <div className="space-y-1 max-h-60 overflow-y-auto">
+          {SOP_CATEGORIES.map(cat => {
+            const lvl = sopAccess[cat.key] ?? 'none'
             return (
-              <div key={mod} className="flex items-center gap-1.5 text-xs">
-                {hasAccess ? <Check className="w-3 h-3 text-emerald-500 flex-shrink-0" /> : <X className="w-3 h-3 text-slate-400 flex-shrink-0" />}
-                <span className={hasAccess ? 'text-foreground' : 'text-muted-foreground'}>{label}</span>
+              <div key={cat.key} className="flex items-center gap-2 text-xs">
+                <span className="flex-1 truncate">{cat.label}</span>
+                <Select value={lvl} onValueChange={v => setCat(cat.key, v as any)}>
+                  <SelectTrigger className="w-32 h-7 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Aucun —</SelectItem>
+                    <SelectItem value="read">👁 Lecture</SelectItem>
+                    <SelectItem value="complete">✓ Compléter</SelectItem>
+                    <SelectItem value="edit">✏ Édition</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             )
           })}
         </div>
       </div>
-      <div className="flex items-center justify-end gap-3 pt-2">
+
+      <div className="flex items-center justify-end gap-3 pt-2 border-t border-border">
         <Button type="button" variant="secondary" onClick={onClose}>Annuler</Button>
         <Button type="submit" disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-          Envoyer l'invitation
+          Créer l'invitation
         </Button>
       </div>
     </form>
@@ -1073,6 +1209,210 @@ function MemberAccessDialog({ member, onClose }: { member: TenantMember; onClose
   )
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   TEAM MEMBERS ACCESS MANAGER — manage SOP category access per team_member
+═══════════════════════════════════════════════════════════════════ */
+function TeamMembersAccessManager() {
+  const { data: members = [], isLoading } = useQuery({
+    queryKey: ['team', 'members'],
+    queryFn:  () => teamMgmtApi.list(),
+    staleTime: 1000 * 60,
+  })
+  const [editing, setEditing] = useState<any | null>(null)
+
+  const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+    active:    { label: 'Actif',     cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+    invited:   { label: 'Invité',    cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+    suspended: { label: 'Suspendu',  cls: 'bg-red-500/10 text-red-600 dark:text-red-400' },
+    archived:  { label: 'Archivé',   cls: 'bg-slate-500/10 text-slate-600 dark:text-slate-400' },
+  }
+
+  const TYPE_LABEL: Record<string, string> = {
+    employee:  '👔 Salarié',
+    freelance: '💼 Freelance',
+    trainer:   '🎓 Stagiaire',
+  }
+
+  return (
+    <>
+      <div className="card-premium p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-violet-500" />
+            <h3 className="font-semibold text-sm">Membres d'équipe</h3>
+            <Badge variant="outline" className="text-[10px]">{members.length}</Badge>
+          </div>
+          <span className="text-[11px] text-muted-foreground italic">
+            Accès aux catégories SOP pour les collaborateurs (connexion via /team-login)
+          </span>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : members.length === 0 ? (
+          <div className="text-xs text-muted-foreground italic text-center py-4">
+            Aucun membre d'équipe. Va sur l'onglet <strong>Invitations</strong> pour en créer un.
+          </div>
+        ) : (
+          <div className="rounded-md border border-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-2">Membre</th>
+                  <th className="text-left px-3 py-2">Type</th>
+                  <th className="text-left px-3 py-2">Statut</th>
+                  <th className="text-left px-3 py-2">Catégories</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {members.map((m: any) => {
+                  const status = STATUS_BADGE[m.account_status] ?? STATUS_BADGE.invited
+                  const catCount = m.access?.length ?? 0
+                  return (
+                    <tr key={m.id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-sm">{m.first_name} {m.last_name}</div>
+                        <div className="text-xs text-muted-foreground">{m.email}</div>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {TYPE_LABEL[m.member_type] ?? m.member_type}
+                        {m.job_title && <div className="text-[10px]">{m.job_title}</div>}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', status.cls)}>
+                          {status.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        {catCount > 0
+                          ? <span className="text-xs text-blue-600 dark:text-blue-400 font-semibold">{catCount} catégorie{catCount > 1 ? 's' : ''}</span>
+                          : <span className="text-xs text-amber-500">Aucun accès</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
+                          <KeyRound className="w-3.5 h-3.5" /> Gérer accès
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <TeamMemberAccessDialog member={editing} onClose={() => setEditing(null)} />
+      )}
+    </>
+  )
+}
+
+function TeamMemberAccessDialog({ member, onClose }: { member: any; onClose: () => void }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['team', 'member', member.id],
+    queryFn:  () => teamMgmtApi.get(member.id),
+  })
+
+  type AccessLevel = 'read' | 'complete' | 'edit'
+  const [access, setAccess] = useState<Record<string, AccessLevel | 'none'>>({})
+
+  useEffect(() => {
+    if (!data?.access) return
+    const initial: Record<string, AccessLevel | 'none'> = {}
+    for (const a of data.access) initial[a.sop_category ?? a.category] = (a.access_level ?? a.level) as AccessLevel
+    setAccess(initial)
+  }, [data])
+
+  const save = useMutation({
+    mutationFn: () => {
+      const entries: TeamMemberAccess[] = Object.entries(access)
+        .filter(([, lvl]) => lvl && lvl !== 'none')
+        .map(([category, level]) => ({ category, level: level as AccessLevel }))
+      return teamMgmtApi.setAccess(member.id, entries)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['team', 'members'] })
+      qc.invalidateQueries({ queryKey: ['team', 'member', member.id] })
+      toast.success(`Accès mis à jour pour ${member.first_name} ${member.last_name}`)
+      onClose()
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
+  })
+
+  const setCat = (key: string, lvl: AccessLevel | 'none') => setAccess(p => ({ ...p, [key]: lvl }))
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-blue-500" />
+            Accès SOPs — {member.first_name} {member.last_name}
+          </DialogTitle>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin" />
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Pour chaque catégorie SOP, choisis le niveau d'accès dans <strong>My Space</strong> du membre.
+            </p>
+            <div className="flex items-center gap-1 -mt-1">
+              <button type="button" onClick={() => setAccess(Object.fromEntries(SOP_CATEGORIES.map(c => [c.key, 'read' as const])))}
+                className="text-[10px] px-2 py-0.5 rounded bg-background border border-border hover:border-blue-400">
+                Tout lire
+              </button>
+              <button type="button" onClick={() => setAccess(Object.fromEntries(SOP_CATEGORIES.map(c => [c.key, 'complete' as const])))}
+                className="text-[10px] px-2 py-0.5 rounded bg-background border border-border hover:border-blue-400">
+                Tout compléter
+              </button>
+              <button type="button" onClick={() => setAccess({})}
+                className="text-[10px] px-2 py-0.5 rounded bg-background border border-border hover:border-red-400">
+                Tout effacer
+              </button>
+            </div>
+            <div className="space-y-1 max-h-[50vh] overflow-y-auto pr-2">
+              {SOP_CATEGORIES.map(cat => {
+                const lvl = access[cat.key] ?? 'none'
+                return (
+                  <div key={cat.key} className="flex items-center gap-2 text-xs py-1.5 border-b border-border/40">
+                    <span className="flex-1 truncate">{cat.label}</span>
+                    <Select value={lvl} onValueChange={v => setCat(cat.key, v as any)}>
+                      <SelectTrigger className="w-32 h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— Aucun —</SelectItem>
+                        <SelectItem value="read">👁 Lecture</SelectItem>
+                        <SelectItem value="complete">✓ Compléter</SelectItem>
+                        <SelectItem value="edit">✏ Édition</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <Button variant="secondary" onClick={onClose}>Annuler</Button>
+              <Button onClick={() => save.mutate()} disabled={save.isPending}>
+                {save.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <Save className="w-3.5 h-3.5" /> Enregistrer
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function PermissionsMatrix() {
   const roles   = Object.keys(ROLE_LABELS) as Role[]
   const modules = Object.keys(MODULE_LABELS) as Module[]
@@ -1235,6 +1575,9 @@ export default function Equipe() {
           <TabsTrigger value="permissions">
             <ShieldCheck className="w-4 h-4 mr-1.5" /> Permissions
           </TabsTrigger>
+          <TabsTrigger value="stats">
+            <TrendingUp className="w-4 h-4 mr-1.5" /> Stats
+          </TabsTrigger>
         </TabsList>
 
         {/* ── Membres ── */}
@@ -1363,7 +1706,12 @@ export default function Equipe() {
         {/* ── Permissions ── */}
         <TabsContent value="permissions" className="mt-4 space-y-6">
           <MemberAccessManager />
+          <TeamMembersAccessManager />
           <PermissionsMatrix />
+        </TabsContent>
+
+        <TabsContent value="stats" className="mt-4">
+          <StatsTab />
         </TabsContent>
       </Tabs>
 

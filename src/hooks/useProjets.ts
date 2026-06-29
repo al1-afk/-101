@@ -66,3 +66,9 @@ export function useDeleteProjet() {
     onError:   (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
 }
+
+/** Get a single project from the cached list (no extra API call). */
+export function useProjet(id: string | undefined): Projet | undefined {
+  const { data } = useProjets()
+  return id ? data?.find(p => p.id === id) : undefined
+}

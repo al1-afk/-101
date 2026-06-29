@@ -5,24 +5,36 @@
 import { NavLink, Outlet, Navigate, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, BookOpen, CheckSquare, User, LogOut, Loader2, Menu, X,
+  LayoutDashboard, BookOpen, CheckSquare, User, LogOut, Loader2, Menu, X, Briefcase, Bell, MessageSquare,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useMember } from '@/hooks/useMember'
 import ThemeToggle from '@/components/ui/ThemeToggle'
+import NotificationBell from '@/components/NotificationBell'
+import { useTaskNotifier } from '@/hooks/useTaskNotifier'
+import { readNotifications, subscribe } from '@/lib/notificationStore'
+import { useSyncExternalStore } from 'react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
-  { to: '/my-space',         label: 'Tableau de bord', icon: LayoutDashboard, end: true },
-  { to: '/my-space/sops',    label: 'Mes SOPs',         icon: BookOpen },
-  { to: '/my-space/tasks',   label: 'Mes tâches',       icon: CheckSquare },
-  { to: '/my-space/profile', label: 'Mon profil',       icon: User },
+  { to: '/my-space',              label: 'Tableau de bord', icon: LayoutDashboard, end: true },
+  { to: '/my-space/projets',      label: 'Mes projets',      icon: Briefcase },
+  { to: '/my-space/tasks',        label: 'Mes tâches',       icon: CheckSquare },
+  { to: '/my-space/messages',     label: 'Messages',         icon: MessageSquare },
+  { to: '/my-space/notifications', label: 'Notifications',   icon: Bell },
+  { to: '/my-space/sops',         label: 'Mes SOPs',         icon: BookOpen },
+  { to: '/my-space/profile',      label: 'Mon profil',       icon: User },
 ]
 
 export default function MySpaceLayout() {
   const { loading, isAuth, member, signOut } = useMember()
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
+  /* Poll new tasks + toast on assignment + badge counter */
+  const { unreadCount } = useTaskNotifier()
+  /* Count unread notifications in store (live) */
+  const notifJson = useSyncExternalStore(subscribe, () => JSON.stringify(readNotifications('member')))
+  const notifUnread = (JSON.parse(notifJson) as any[]).filter(n => !n.is_read).length
 
   if (loading) {
     return (
@@ -43,7 +55,10 @@ export default function MySpaceLayout() {
           <Menu className="w-5 h-5" />
         </button>
         <span className="font-semibold text-sm text-slate-700 dark:text-slate-200">Mon espace</span>
-        <ThemeToggle />
+        <div className="flex items-center gap-1">
+          <NotificationBell scope="member" />
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* Sidebar (desktop persistent, mobile drawer) */}
@@ -90,6 +105,9 @@ export default function MySpaceLayout() {
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
           {NAV.map(item => {
             const Icon = item.icon
+            const isTasksLink = item.to === '/my-space/tasks'
+            const isNotifLink = item.to === '/my-space/notifications'
+            const badge = isTasksLink ? unreadCount : isNotifLink ? notifUnread : 0
             return (
               <NavLink
                 key={item.to}
@@ -97,14 +115,19 @@ export default function MySpaceLayout() {
                 end={item.end}
                 onClick={() => setOpen(false)}
                 className={({ isActive }) => cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors',
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors relative',
                   isActive
                     ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium'
                     : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800',
                 )}
               >
                 <Icon className="w-4 h-4" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {badge > 0 && (
+                  <span className="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold animate-pulse">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
               </NavLink>
             )
           })}
@@ -112,6 +135,7 @@ export default function MySpaceLayout() {
 
         {/* Footer */}
         <div className="border-t border-slate-200 dark:border-slate-800 p-3 flex items-center gap-2">
+          <NotificationBell scope="member" direction="up" align="left" />
           <ThemeToggle />
           <button
             onClick={async () => { await signOut() }}

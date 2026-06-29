@@ -53,12 +53,22 @@ export interface Prestation {
 
 export interface BankInfo { banque: string; iban: string; swift: string }
 
+export type Currency = 'MAD' | 'EUR' | 'USD' | 'GBP'
+
+export const CURRENCY_SYMBOL: Record<Currency, string> = {
+  MAD: 'MAD', EUR: '€', USD: '$', GBP: '£',
+}
+
 /* ─── Notes JSON structure ─────────────────────────────────────────── */
 export interface DevisNotesData {
   prestations: Omit<Prestation, 'id'>[]
   conditions:  string[]
   bankInfo:    BankInfo
   signature?:  string | null
+  /* International invoice extensions (optional → backward compatible) */
+  isInternational?: boolean
+  currency?:        Currency
+  bilingual?:       boolean    // FR + EN labels on the PDF
 }
 
 export const DEFAULT_BANK: BankInfo = { banque: 'CIH', iban: '230 570 6435881221008400 29', swift: 'CIHMMAMC' }
@@ -67,7 +77,9 @@ export function parseDevisNotes(notes: string | null): DevisNotesData {
   if (!notes) return { prestations: [], conditions: [], bankInfo: DEFAULT_BANK }
   try {
     const d = JSON.parse(notes) as DevisNotesData
-    if (d.conditions && d.bankInfo) return d
+    if (d.conditions && d.bankInfo) {
+      return { currency: 'MAD', isInternational: false, bilingual: false, ...d }
+    }
     throw new Error('legacy')
   } catch {
     // Legacy format: bullet conditions + bank line

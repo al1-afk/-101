@@ -7,7 +7,7 @@ export type SopBlockType =
   | 'heading' | 'heading2' | 'heading3'
   | 'paragraph' | 'list' | 'numbered' | 'checklist' | 'steps'
   | 'callout' | 'template' | 'code' | 'divider'
-  | 'image' | 'table' | 'quote'
+  | 'image' | 'table' | 'quote' | 'video'
 
 /* Marks pour formatage inline (paragraphes, headings, items de liste).
    Stockées dans block.marks et appliquées au rendu via parseRichText.
@@ -27,6 +27,13 @@ export interface SopTableMeta {
   rows:    string[][]                             // rows[row][col]
 }
 
+export interface SopVideoMeta {
+  url:      string                                // YouTube/Vimeo/Loom/MP4
+  caption?: string
+  size?:    'small' | 'medium' | 'large' | 'full'
+  align?:   'left' | 'center' | 'right'
+}
+
 export interface SopStepItem {
   text:   string
   icon?:  string                                  // emoji ou nom lucide
@@ -44,6 +51,7 @@ export interface SopBlock {
   title?:  string
   image?:  SopImageMeta
   table?:  SopTableMeta
+  video?:  SopVideoMeta
 }
 
 export interface Sop {

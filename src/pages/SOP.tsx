@@ -17,6 +17,7 @@ import SopEditor from '@/components/SopEditor'
 import { useSops, useDeleteSop, type Sop as DbSop } from '@/hooks/useSops'
 import { useAuth } from '@/hooks/useAuth'
 import { parseRichText } from '@/components/sop/parseRichText'
+import { detectVideo } from '@/components/sop/videoEmbed'
 import { SopShareDialog } from '@/components/sop/SopShareDialog'
 import { SopTrainingMode } from '@/components/sop/SopTrainingMode'
 import { useSopShares } from '@/hooks/useSopCollab'
@@ -43,7 +44,7 @@ type BlockType =
   | 'heading' | 'heading2' | 'heading3'
   | 'paragraph' | 'list' | 'numbered' | 'checklist' | 'steps'
   | 'callout' | 'template' | 'code' | 'divider'
-  | 'image' | 'table' | 'quote'
+  | 'image' | 'table' | 'quote' | 'video'
 
 interface SOPImageMeta {
   url:     string
@@ -57,6 +58,13 @@ interface SOPTableMeta {
   rows:    string[][]
 }
 
+interface SOPVideoMeta {
+  url:      string
+  caption?: string
+  size?:    'small' | 'medium' | 'large' | 'full'
+  align?:   'left' | 'center' | 'right'
+}
+
 interface SOPBlock {
   type:    BlockType
   text?:   string
@@ -65,6 +73,7 @@ interface SOPBlock {
   title?:  string
   image?:  SOPImageMeta
   table?:  SOPTableMeta
+  video?:  SOPVideoMeta
 }
 
 interface SOP {
@@ -1015,6 +1024,39 @@ function BlockRenderer({ block, blockKey, checked, onCheck, onCopy }: {
         <figure className={cn('my-2', sizeClass, alignClass)}>
           <img src={img.url} alt={img.caption ?? ''} className="w-full rounded-lg border border-border shadow-sm" />
           {img.caption && <figcaption className="text-xs text-muted-foreground text-center mt-1.5 italic">{img.caption}</figcaption>}
+        </figure>
+      )
+    }
+
+    case 'video': {
+      const v = block.video
+      if (!v?.url) return null
+      const info = detectVideo(v.url)
+      const sizeClass = v.size === 'small' ? 'max-w-xs' : v.size === 'medium' ? 'max-w-sm' : v.size === 'large' ? 'max-w-md' : 'w-full'
+      const alignClass = v.align === 'left' ? 'mr-auto' : v.align === 'right' ? 'ml-auto' : 'mx-auto'
+      return (
+        <figure className={cn('my-2', sizeClass, alignClass)}>
+          <div className="aspect-video w-full rounded-lg overflow-hidden border border-border shadow-sm bg-black">
+            {info.embedUrl ? (
+              info.kind === 'file' ? (
+                <video src={info.embedUrl} controls className="w-full h-full" />
+              ) : (
+                <iframe
+                  src={info.embedUrl}
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title={v.caption || 'Vidéo'}
+                />
+              )
+            ) : (
+              <a href={v.url} target="_blank" rel="noreferrer"
+                className="flex items-center justify-center w-full h-full text-sm text-white/90 hover:underline">
+                Ouvrir la vidéo : {v.url}
+              </a>
+            )}
+          </div>
+          {v.caption && <figcaption className="text-xs text-muted-foreground text-center mt-1.5 italic">{v.caption}</figcaption>}
         </figure>
       )
     }

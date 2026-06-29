@@ -5,7 +5,7 @@ import {
   Plus, Search, Folder, ChevronRight, ChevronDown, Trash2, Pencil,
   TrendingUp, TrendingDown, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, FileText, Wallet,
-  Trophy, Calendar, Crown, BarChart3, Minus, FileSignature,
+  Trophy, Calendar, Crown, BarChart3, Minus, FileSignature, Printer,
 } from 'lucide-react'
 import { contratsApi } from '@/lib/api'
 import { toast } from 'sonner'
@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/DateRangeFilter'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { paiementsSchema, contratsSchema } from '@/lib/importExportSchemas'
+import { generatePaiementReceiptPDF } from '@/lib/generatePaiementReceiptPDF'
 
 function ClientCombobox({
   value, onChange, clients, onCreate, placeholder = 'Sélectionner un client',
@@ -882,9 +883,19 @@ export default function Paiements() {
                                     <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(Number(p.montant))}</p>
                                   </div>
                                   <button
+                                    type="button"
+                                    title="Imprimer le reçu"
+                                    aria-label={`Imprimer le reçu ${p.reference}`}
+                                    onClick={() => generatePaiementReceiptPDF(p, nom)}
+                                    className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                  >
+                                    <Printer className="w-4 h-4" />
+                                  </button>
+                                  <button
                                     onClick={() => {
                                       if (confirm(`Supprimer le paiement ${p.reference} ?`)) deleteP.mutate(p.id)
                                     }}
+                                    title="Supprimer"
                                     className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
                                   >
                                     <Trash2 className="w-4 h-4" />

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -7,12 +7,17 @@ import {
   CreditCard, FileCheck, DollarSign, Package, Upload,
   ChevronDown, ChevronRight, Calendar,
   Loader2, AlertCircle, Circle, CheckCircle2, AlertTriangle,
-  TrendingUp, Star, FolderKanban,
+  TrendingUp, Star, FolderKanban, Globe, Server,
 } from 'lucide-react'
+import { parseClientNotes, serializeClientNotes, daysUntil, type ClientMeta } from '@/lib/clientNotes'
+import BlockEditor from '@/components/BlockEditor'
+import type { SopBlock } from '@/hooks/useSops'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useClients, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
+import { useQueryClient } from '@tanstack/react-query'
+import { clientsApi } from '@/lib/api'
 import { useFactures }  from '@/hooks/useFactures'
 import { useDevis }     from '@/hooks/useDevis'
 import { useProjets }   from '@/hooks/useProjets'
@@ -120,6 +125,7 @@ interface ClientNote {
 
 function ClientEditForm({ client, onClose }: { client: Client; onClose: () => void }) {
   const update = useUpdateClient()
+  const initial = parseClientNotes(client.notes)
   const [form, setForm] = useState({
     nom:        client.nom,
     email:      client.email ?? '',
@@ -128,14 +134,16 @@ function ClientEditForm({ client, onClose }: { client: Client; onClose: () => vo
     adresse:    client.adresse ?? '',
     ville:      client.ville ?? '',
     pays:       client.pays ?? 'Maroc',
-    notes:      client.notes ?? '',
+    notes:      initial.text,
   })
   const s = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }))
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    update.mutate({ id: client.id, ...form }, { onSuccess: onClose })
+    /* Preserve existing meta (domain / hosting) when saving free-text notes */
+    const merged = { ...form, notes: serializeClientNotes(initial.meta, form.notes) }
+    update.mutate({ id: client.id, ...merged }, { onSuccess: onClose })
   }
 
   return (
@@ -197,16 +205,55 @@ export default function ClientDetail() {
   const devis    = useMemo(() => allDevis.filter(d => d.client_id === id),    [allDevis, id])
   const projets  = useMemo(() => allProjets.filter(p => p.client_id === id),  [allProjets, id])
 
+  /* Parse client.notes into structured meta (domain/hosting) + free text + blocks */
+  const clientNotes = useMemo(() => parseClientNotes(client?.notes), [client?.notes])
+
+  /* ── Notion-style documentation blocks (auto-saved on change) ── */
+  const [blocks,    setBlocks]    = useState<SopBlock[]>(clientNotes.blocks)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const lastSerialized = useRef<string>(client?.notes ?? '')
+  const qc = useQueryClient()
+
+  /* Reset blocks when switching to a different client */
+  useEffect(() => {
+    setBlocks(clientNotes.blocks)
+    lastSerialized.current = client?.notes ?? ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client?.id])
+
+  /* Auto-save with 600ms debounce, silent (no toast) */
+  useEffect(() => {
+    if (!client) return
+    const next = serializeClientNotes(clientNotes.meta, clientNotes.text, blocks)
+    if (next === lastSerialized.current) return
+    setSaveState('saving')
+    const t = setTimeout(async () => {
+      try {
+        await clientsApi.update(client.id, { notes: next })
+        lastSerialized.current = next
+        qc.invalidateQueries({ queryKey: ['clients'] })
+        setSaveState('saved')
+        setTimeout(() => setSaveState('idle'), 1500)
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erreur de sauvegarde')
+        setSaveState('idle')
+      }
+    }, 600)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks])
+
   const [tasks,      setTasks]      = useState<{ id: string; titre: string; done: boolean }[]>([])
   const [notes,      setNotes]      = useState<ClientNote[]>([
-    client?.notes
-      ? { id: '0', created_at: new Date().toISOString(), tag: 'Info', text: client.notes }
+    clientNotes.text
+      ? { id: '0', created_at: new Date().toISOString(), tag: 'Info', text: clientNotes.text }
       : null,
   ].filter(Boolean) as ClientNote[])
   const [newNote,    setNewNote]    = useState('')
   const [noteTag,    setNoteTag]    = useState('Info')
   const [newTask,    setNewTask]    = useState('')
   const [editOpen,   setEditOpen]   = useState(false)
+  const [hostingOpen,setHostingOpen]= useState(false)
   const [delConfirm, setDelConfirm] = useState(false)
 
   if (!client) {
@@ -578,6 +625,25 @@ export default function ClientDetail() {
               <p className="text-sm text-muted-foreground">Glisser-déposer ou cliquer pour uploader</p>
             </div>
           </Section>
+
+          {/* Documentation — Notion-style block editor */}
+          <Section title="Documentation" icon={FileText} count={blocks.length} color="#0ea5e9">
+            <div className="space-y-3 pl-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-muted-foreground">
+                  Notes libres, spécifications, instructions — utilisez <kbd className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono">/</kbd> pour insérer un bloc.
+                </p>
+                <span className={`text-[11px] font-medium ${
+                  saveState === 'saving' ? 'text-amber-500' :
+                  saveState === 'saved'  ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'
+                }`}>
+                  {saveState === 'saving' && '💾 Enregistrement…'}
+                  {saveState === 'saved'  && '✓ Enregistré'}
+                </span>
+              </div>
+              <BlockEditor value={blocks} onChange={setBlocks} placeholder="Cliquer pour commencer à écrire — tapez « / » pour insérer un bloc" />
+            </div>
+          </Section>
         </div>
 
         {/* RIGHT sidebar */}
@@ -647,6 +713,12 @@ export default function ClientDetail() {
             </div>
           </div>
 
+          {/* Domaine & Hébergement */}
+          <DomainHostingCard
+            meta={clientNotes.meta}
+            onEdit={() => setHostingOpen(true)}
+          />
+
           {/* Stats */}
           <div className="card p-5 space-y-3">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Statistiques</p>
@@ -696,6 +768,23 @@ export default function ClientDetail() {
         </DialogContent>
       </Dialog>
 
+      {/* Domain & hosting dialog */}
+      <Dialog open={hostingOpen} onOpenChange={setHostingOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-blue-500" /> Domaine & Hébergement
+            </DialogTitle>
+          </DialogHeader>
+          <DomainHostingForm
+            client={client}
+            initialMeta={clientNotes.meta}
+            initialText={clientNotes.text}
+            onClose={() => setHostingOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Delete confirm */}
       <Dialog open={delConfirm} onOpenChange={setDelConfirm}>
         <DialogContent className="max-w-sm">
@@ -718,5 +807,196 @@ export default function ClientDetail() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/* ─── Domain & Hosting card (right sidebar) ────────────────────────── */
+function DomainHostingCard({ meta, onEdit }: { meta: ClientMeta; onEdit: () => void }) {
+  const empty = !meta.domainName && !meta.domainExpiry && !meta.hostingName && !meta.hostingExpiry
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Domaine & Hébergement</p>
+        <button
+          onClick={onEdit}
+          className="p-1 rounded text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
+          title="Modifier"
+        >
+          <Edit2 className="w-3 h-3" />
+        </button>
+      </div>
+
+      {empty ? (
+        <button
+          onClick={onEdit}
+          className="w-full flex flex-col items-center justify-center gap-1.5 py-4 rounded-lg border-2 border-dashed border-border hover:border-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-all"
+        >
+          <Globe className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Ajouter domaine / hébergement</span>
+        </button>
+      ) : (
+        <div className="space-y-2.5">
+          <ExpiryRow
+            icon={Globe}
+            iconColor="text-blue-600 dark:text-blue-400"
+            iconBg="bg-blue-500/10"
+            label="Domaine"
+            name={meta.domainName}
+            expiry={meta.domainExpiry}
+          />
+          <ExpiryRow
+            icon={Server}
+            iconColor="text-violet-600 dark:text-violet-400"
+            iconBg="bg-violet-500/10"
+            label="Hébergement"
+            name={meta.hostingName}
+            expiry={meta.hostingExpiry}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ExpiryRow({
+  icon: Icon, iconColor, iconBg, label, name, expiry,
+}: {
+  icon:      React.ElementType
+  iconColor: string
+  iconBg:    string
+  label:     string
+  name?:     string
+  expiry?:   string
+}) {
+  if (!name && !expiry) return null
+  const days = daysUntil(expiry)
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-2.5">
+      <div className="flex items-start gap-2.5">
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${iconBg}`}>
+          <Icon className={`w-3.5 h-3.5 ${iconColor}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">{label}</p>
+          <p className="text-sm font-semibold text-foreground truncate" title={name}>{name || '—'}</p>
+          {expiry && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="text-[11px] text-muted-foreground">Expire le {formatDate(expiry)}</span>
+              {days !== null && <ExpiryBadge days={days} />}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExpiryBadge({ days }: { days: number }) {
+  let cls = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+  let txt = `Reste ${days} j`
+  if (days < 0) {
+    cls = 'bg-red-500/15 text-red-600 dark:text-red-400'
+    txt = `Expiré (-${Math.abs(days)} j)`
+  } else if (days === 0) {
+    cls = 'bg-red-500/15 text-red-600 dark:text-red-400'
+    txt = `Expire aujourd'hui`
+  } else if (days <= 7) {
+    cls = 'bg-red-500/10 text-red-600 dark:text-red-400'
+  } else if (days <= 30) {
+    cls = 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+  }
+  return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${cls}`}>{txt}</span>
+}
+
+/* ─── Form dialog for domain & hosting ─────────────────────────────── */
+function DomainHostingForm({
+  client, initialMeta, initialText, onClose,
+}: {
+  client:       Client
+  initialMeta:  ClientMeta
+  initialText:  string
+  onClose:      () => void
+}) {
+  const update = useUpdateClient()
+  const [domainName,    setDomainName]    = useState(initialMeta.domainName ?? '')
+  const [domainExpiry,  setDomainExpiry]  = useState(initialMeta.domainExpiry ?? '')
+  const [hostingName,   setHostingName]   = useState(initialMeta.hostingName ?? '')
+  const [hostingExpiry, setHostingExpiry] = useState(initialMeta.hostingExpiry ?? '')
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const meta: ClientMeta = {
+      domainName:    domainName.trim()    || undefined,
+      domainExpiry:  domainExpiry         || undefined,
+      hostingName:   hostingName.trim()   || undefined,
+      hostingExpiry: hostingExpiry        || undefined,
+    }
+    update.mutate(
+      { id: client.id, notes: serializeClientNotes(meta, initialText) },
+      { onSuccess: onClose }
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Ces informations apparaîtront dans la fiche client avec un compteur de jours restants.
+      </p>
+
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Globe className="w-3.5 h-3.5 text-blue-500" />
+          <p className="text-xs font-bold uppercase tracking-wider text-foreground">Nom de domaine</p>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          <Input
+            className="col-span-3"
+            placeholder="ex. exemple.com"
+            value={domainName}
+            onChange={e => setDomainName(e.target.value)}
+          />
+          <Input
+            className="col-span-2"
+            type="date"
+            value={domainExpiry}
+            onChange={e => setDomainExpiry(e.target.value)}
+            title="Date d'expiration"
+          />
+        </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Server className="w-3.5 h-3.5 text-violet-500" />
+          <p className="text-xs font-bold uppercase tracking-wider text-foreground">Hébergement</p>
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          <Input
+            className="col-span-3"
+            placeholder="ex. OVH, Dokploy, Hostinger…"
+            value={hostingName}
+            onChange={e => setHostingName(e.target.value)}
+          />
+          <Input
+            className="col-span-2"
+            type="date"
+            value={hostingExpiry}
+            onChange={e => setHostingExpiry(e.target.value)}
+            title="Date d'expiration"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-2">
+        <Button type="button" variant="secondary" size="sm" onClick={onClose}>Annuler</Button>
+        <Button type="submit" size="sm" disabled={update.isPending}>
+          {update.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          Enregistrer
+        </Button>
+      </div>
+    </form>
   )
 }

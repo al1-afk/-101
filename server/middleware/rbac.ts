@@ -99,6 +99,15 @@ const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   /* Projets — lecture pour tous, création/édition admin+manager+commercial,
      suppression admin+manager */
   projets:                   matrix(ALL,                  ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
+  /* Projet assignees — qui peut assigner des membres aux projets */
+  projet_assignees:          matrix(ALL,                  ['admin','manager'],              ['admin','manager'],              ['admin','manager']),
+  /* Templates de projet personnalisés — lecture pour tous, édition admin/manager */
+  projet_templates:          matrix(ALL,                  ['admin','manager'],              ['admin','manager'],              ['admin','manager']),
+  /* Messages projet — chat équipe : tous peuvent lire/écrire, admin/manager peut supprimer */
+  projet_messages:           matrix(ALL,                  ALL,                              ALL,                              ['admin','manager']),
+  /* Tâches assignées aux membres — chacun peut voir + modifier ses tâches,
+     admin/manager peuvent tout faire */
+  team_member_tasks:         rw(ALL),
   /* Bons de livraison — handover projet (contient mots de passe → accès restreint) */
   bons_livraison:            matrix(['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
 }

@@ -1,6 +1,7 @@
 /**
- * DevisTemplate — A4 HTML template that mirrors the PDF layout exactly.
- * Exported as a forwardRef so DevisActions can capture it for print / PDF.
+ * DevisTemplate — A4 HTML template that mirrors the FactureTemplate layout.
+ * Same compact header (badge DEVIS · logo · legal info), client section,
+ * services table, totals, and rich footer with bank info.
  */
 import { forwardRef } from 'react'
 import type { Devis }  from '@/hooks/useDevis'
@@ -75,17 +76,20 @@ function dueDate(s: string, days = 30) {
 /* ─── Company constants ──────────────────────────────────────── */
 const CO = {
   name:    'NEXT GITAL',
-  sub:     'Agence Digitale & Web Solutions',
-  addr1:   'Rue Mohamed V, Hôtel Aswan, Immeuble Kissi, 4ème Étage, Bureau N°7',
-  addr2:   'Oujda, Maroc',
-  tel:     '+212 620002066',
-  fax:     '0536683707',
-  email:   'info@gestiq.com',
-  web:     'www.gestiq.com',
+  sub:     'Agence Web & Solutions Digitales',
+  addr1:   'Rue Mohamed V, Imm. Kissi',
+  addr2:   '4ème étage, Bureau N°7, Oujda',
+  tel:     '+212 620 002 066',
+  fax:     '0536 683 707',
+  email:   'info@nextgital.com',
+  web:     'www.nextgital.com',
   rc:      '42415',
   if_:     '60270023',
   patente: '10301120',
   ice:     '003453451000013',
+  banque:  'CIH Bank',
+  rib:     '230 670 6430581221008400 29',
+  swift:   'CIHMMAC',
 }
 
 const DEFAULT_CONDITIONS = [
@@ -152,9 +156,6 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
     }]
 
     return (
-      /* A4 page wrapper.
-         Structure: <table> with <thead> + <tbody> + <tfoot> so the browser
-         natively repeats the header & footer on each printed page. */
       <div
         ref={ref}
         className="bg-white text-[#0a1a3c] font-sans"
@@ -174,23 +175,27 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
       >
         <thead data-print-header="true">
           <tr><td style={{ padding: '14mm 14mm 0 14mm', verticalAlign: 'top' }}>
-            <div className="flex items-start justify-between mb-1">
-              {/* Left: logo + name */}
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between mb-3">
+              {/* DEVIS badge — left */}
+              <div
+                className="px-7 py-2 rounded-lg text-white font-extrabold text-[16px] tracking-wider"
+                style={{ backgroundColor: '#1e64c4' }}
+              >
+                DEVIS
+              </div>
+
+              {/* Logo — center */}
+              <div className="flex flex-col items-center">
                 <img
                   src="/logo-nextgital.png"
                   alt="NEXT GITAL"
-                  className="w-16 h-16 object-contain"
+                  className="h-16 object-contain"
                   onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
                 />
-                <div>
-                  <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-tight tracking-tight">{CO.name}</p>
-                  <p className="text-[11px] text-[#64748b] mt-0.5">{CO.sub}</p>
-                </div>
               </div>
 
-              {/* Right: legal */}
-              <div className="text-right text-[10px] text-[#64748b] space-y-0.5 leading-relaxed">
+              {/* Company info — right */}
+              <div className="text-right text-[9px] text-[#64748b] space-y-0.5 leading-relaxed">
                 <p>RC: {CO.rc}  ·  IF: {CO.if_}  ·  Patente: {CO.patente}</p>
                 <p>ICE: {CO.ice}</p>
                 <p>Tél: {CO.tel}  ·  Fax: {CO.fax}</p>
@@ -198,60 +203,21 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
               </div>
             </div>
 
-            {/* Header rule */}
-            <div className="h-[2px] bg-[#1e64c4] rounded-full mb-5" />
+            <div className="h-px bg-[#cbd5e1] mb-4" />
           </td></tr>
         </thead>
 
         <tbody>
           <tr><td style={{ padding: '0 14mm', verticalAlign: 'top' }}>
 
-        {/* ══ 2. TITLE BADGE + REF ═══════════════════════════════ */}
-        <div className="flex items-start justify-between mb-5">
-          {/* Badge */}
-          <div
-            className="px-8 py-2 rounded-lg text-white font-extrabold text-[18px] tracking-wider"
-            style={{ backgroundColor: '#1e64c4' }}
-          >
-            DEVIS
-          </div>
-
-          {/* Ref block */}
-          <div className="text-right text-[11px] space-y-1">
-            {[
-              { label: 'Réf :', val: d.numero },
-              { label: 'Date :', val: fmtDate(d.date_emission) },
-              { label: 'Échéance :', val: d.date_expiration ? fmtDate(d.date_expiration) : dueDate(d.date_emission) },
-            ].map(row => (
-              <div key={row.label} className="flex items-center justify-end gap-4">
-                <span className="text-[#64748b]">{row.label}</span>
-                <span className="font-bold text-[#0a1a3c] w-32 text-right">{row.val}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ══ 3. ÉMETTEUR / CLIENT ═══════════════════════════════ */}
-        <div className="grid grid-cols-2 gap-4 mb-5">
-          {/* Émetteur */}
-          <div className="border border-[#e2e8f0] rounded-lg p-3 bg-[#f8fafc]">
-            <p className="text-[9px] font-bold text-[#1e64c4] uppercase tracking-widest mb-2">Émetteur</p>
-            <p className="text-[13px] font-bold text-[#0a1a3c] mb-1">{CO.name}</p>
-            <div className="text-[10px] text-[#374151] space-y-0.5">
-              <p>{CO.addr1}</p>
-              <p>{CO.addr2}</p>
-              <p>Tél: {CO.tel}</p>
-              <p>{CO.email}</p>
-            </div>
-          </div>
-
-          {/* Client */}
-          <div className="border border-[#e2e8f0] rounded-lg p-3 bg-[#f8fafc]">
-            <p className="text-[9px] font-bold text-[#1e64c4] uppercase tracking-widest mb-2">Client</p>
-            <p className="text-[13px] font-bold text-[#0a1a3c] mb-1">
+        {/* ══ CLIENT + REF/DATE/ECHEANCE (compact) ═══════════════ */}
+        <div className="grid grid-cols-2 gap-6 mb-3">
+          <div>
+            <p className="text-[9px] font-semibold text-[#64748b] uppercase tracking-wider mb-0.5">Client</p>
+            <p className="text-[12px] font-extrabold text-[#0a1a3c] leading-snug">
               {client?.entreprise ?? d.client_nom ?? '—'}
             </p>
-            <div className="text-[10px] text-[#374151] space-y-0.5">
+            <div className="text-[10px] text-[#374151] leading-snug">
               {d.client_nom && client?.entreprise && <p>{d.client_nom}</p>}
               {client?.email     && <p>{client.email}</p>}
               {client?.telephone && <p>{client.telephone}</p>}
@@ -260,15 +226,30 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
               )}
             </div>
           </div>
+
+          <div className="text-right text-[10px] space-y-0.5 self-start">
+            {[
+              { label: 'Réf :',      val: d.numero },
+              { label: 'Date :',     val: fmtDate(d.date_emission) },
+              { label: 'Échéance :', val: d.date_expiration ? fmtDate(d.date_expiration) : dueDate(d.date_emission) },
+            ].map(row => (
+              <div key={row.label} className="flex items-center justify-end gap-3">
+                <span className="text-[#64748b]">{row.label}</span>
+                <span className="font-bold text-[#0a1a3c] w-28 text-right">{row.val}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* ══ 4. SERVICES TABLE ══════════════════════════════════ */}
+        <div className="h-px bg-[#e2e8f0] mb-3" />
+
+        {/* ══ SERVICES TABLE ══════════════════════════════════ */}
         {(() => {
           const anyQty  = serviceRows.some(r => r.showQuantite ?? true)
           const anyPrix = serviceRows.some(r => r.showPrixUnit ?? true)
           const headers = [
             'Désignation',
-            ...(anyQty  ? ['Qté']          : []),
+            ...(anyQty  ? ['Qté']           : []),
             ...(anyPrix ? ['Prix unitaire'] : []),
             'Prix HT',
           ]
@@ -325,10 +306,8 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
           )
         })()}
 
-        {/* ══ 5. TOTALS + SIGNATURE (même ligne) ═══════════════════ */}
+        {/* ══ TOTALS + SIGNATURE ═══════════════════════════════ */}
         <div className="flex items-end justify-between mb-5">
-
-          {/* Signature — gauche */}
           <div>
             <p className="text-[9px] font-bold text-[#64748b] uppercase tracking-widest mb-1">Signature &amp; Cachet</p>
             <div className="w-44 h-[88px] border border-[#e2e8f0] rounded-lg bg-white flex items-center justify-center overflow-hidden">
@@ -339,21 +318,17 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
             </div>
           </div>
 
-          {/* Totaux — droite */}
           <div className="w-64">
-            {/* HT */}
             <div className="flex justify-between items-center py-1.5 px-3 bg-[#f8fafc] border border-[#e2e8f0]">
               <span className="text-[10px] text-[#64748b]">Sous-total HT</span>
               <span className="text-[11px] font-bold text-[#0a1a3c]">{fmt(d.montant_ht)}</span>
             </div>
-            {/* TVA */}
             {hasTVA && (
               <div className="flex justify-between items-center py-1.5 px-3 bg-[#f8fafc] border border-t-0 border-[#e2e8f0]">
                 <span className="text-[10px] text-[#64748b]">TVA ({d.tva}%)</span>
                 <span className="text-[11px] font-bold text-[#0a1a3c]">{fmt(tvaMontant)}</span>
               </div>
             )}
-            {/* TTC */}
             <div
               className="flex justify-between items-center py-2.5 px-3 mt-1 rounded-sm"
               style={{ backgroundColor: '#1a3460' }}
@@ -362,13 +337,11 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
               <span className="text-[13px] font-extrabold text-white">{fmt(d.montant_ttc)}</span>
             </div>
           </div>
-
         </div>
 
-        {/* ══ 7. CONDITIONS + BANK ══════════════════════════════ */}
+        {/* ══ CONDITIONS + BANK ═══════════════════════════════ */}
         <div className="h-px bg-[#e2e8f0] mb-4" />
         <div className="grid grid-cols-2 gap-6 mb-6">
-          {/* Coordonnées bancaires */}
           <div>
             <p className="text-[10px] font-bold text-[#0a1a3c] uppercase tracking-wider mb-2">
               Coordonnées Bancaires
@@ -391,7 +364,6 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
             )}
           </div>
 
-          {/* Conditions générales */}
           <div>
             <p className="text-[10px] font-bold text-[#0a1a3c] uppercase tracking-wider mb-2">
               Conditions Générales
@@ -410,15 +382,28 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
           </td></tr>
         </tbody>
 
-        {/* ══ 8. FOOTER (repeated on every printed page via <tfoot>) ═ */}
+        {/* ══ FOOTER (repeated on every printed page via <tfoot>) ═ */}
         <tfoot data-footer="true">
-          <tr><td style={{ padding: '0 14mm 14mm 14mm', verticalAlign: 'top' }}>
-            <div className="border-t border-[#e2e8f0] pt-3 mt-6">
-              <p className="text-center text-[9px] text-[#94a3b8] mb-1">
-                {CO.name}
-              </p>
-              <p className="text-center text-[9px] text-[#94a3b8] leading-relaxed">
-                {CO.addr1}, {CO.addr2}  ·  Tél: {CO.tel}  ·  Fax: {CO.fax}  ·  {CO.email}  ·  {CO.web}
+          <tr><td style={{ padding: '0 14mm 10mm 14mm', verticalAlign: 'top' }}>
+            <div className="border-t border-[#cbd5e1] pt-2 mt-4">
+              <div className="flex items-start justify-between text-[9px] text-[#475569] leading-relaxed">
+                <p>
+                  <span className="font-bold text-[#0a1a3c]">{CO.name}</span>, {CO.addr1} {CO.addr2}
+                </p>
+                <p className="text-right">
+                  <span className="font-semibold text-[#0a1a3c]">{CO.tel}</span><br />
+                  {CO.email}<br />
+                  {CO.web}
+                </p>
+              </div>
+              <p className="text-[8.5px] text-[#64748b] mt-1.5 leading-relaxed">
+                <span className="font-semibold">RC:</span> {CO.rc} &nbsp;·&nbsp;
+                <span className="font-semibold">Patente N°</span> {CO.patente} &nbsp;·&nbsp;
+                <span className="font-semibold">IF N°</span> {CO.if_} &nbsp;·&nbsp;
+                <span className="font-semibold">ICE:</span> {CO.ice} &nbsp;·&nbsp;
+                <span className="font-semibold">Banque</span> {CO.banque} &nbsp;·&nbsp;
+                <span className="font-semibold">RIB</span> {CO.rib} &nbsp;·&nbsp;
+                <span className="font-semibold">SWIFT</span> {CO.swift}
               </p>
             </div>
           </td></tr>

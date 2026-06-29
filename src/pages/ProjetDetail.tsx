@@ -1,0 +1,1259 @@
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import {
+  ArrowLeft, Edit2, Trash2, Loader2, AlertCircle,
+  Users, CheckSquare, FileText, Briefcase, Plus, X,
+  Calendar, Clock, CircleDot, Check, MoreHorizontal,
+  Crown, User as UserIcon, LayoutGrid, List as ListIcon,
+  Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
+  MessageSquare, Settings,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input }  from '@/components/ui/input'
+import { Badge }  from '@/components/ui/badge'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { useProjet, useUpdateProjet, useDeleteProjet, type Projet, type ProjetStatut } from '@/hooks/useProjets'
+import { PROJET_TEMPLATES, type ProjetTemplate } from '@/lib/projetTemplates'
+import { useCustomTemplates, rowToTemplate } from '@/hooks/useProjetTemplates'
+import TemplateEditorDialog from '@/components/projet/TemplateEditorDialog'
+import { teamMemberTasksApi } from '@/lib/api'
+import { useClients } from '@/hooks/useClients'
+import { useTeam, type TeamMember } from '@/hooks/useTeam'
+import {
+  useAssigneesOf, useAddProjetAssignee, useRemoveProjetAssignee, useUpdateProjetAssignee,
+  type ProjetAssignee, type ProjetAssigneeRole,
+} from '@/hooks/useProjetAssignees'
+import {
+  useProjectTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask, useDeleteTeamMemberTask,
+  type TaskStatus, type TaskPriority, type TeamMemberTask,
+} from '@/hooks/useTeamMemberTasks'
+import BlockEditor from '@/components/BlockEditor'
+import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
+import InfosAccesTab from '@/components/projet/InfosAccesTab'
+import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
+import ProjetChat, { type ProjetMessage } from '@/components/projet/ProjetChat'
+import { getActiveTimer, setActiveTimer, formatHMS } from '@/lib/taskTimer'
+import { useAuth } from '@/hooks/useAuth'
+import { projetMessagesApi } from '@/lib/api'
+import type { SopBlock } from '@/hooks/useSops'
+import { useQueryClient } from '@tanstack/react-query'
+import { projetsApi } from '@/lib/api'
+import { formatDate, formatCurrency, getInitials, cn } from '@/lib/utils'
+import { toast } from 'sonner'
+
+/* ─── Status & priority config ─────────────────────────────────── */
+const STATUT_CFG: Record<ProjetStatut, { label: string; cls: string }> = {
+  planifie: { label: 'Planifié',  cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+  en_cours: { label: 'En cours',  cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  en_pause: { label: 'En pause',  cls: 'bg-slate-500/10 text-slate-600 dark:text-slate-400' },
+  termine:  { label: 'Terminé',   cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+  annule:   { label: 'Annulé',    cls: 'bg-red-500/10 text-red-600 dark:text-red-400' },
+}
+
+const TASK_STATUS_CFG: Record<TaskStatus, { label: string; cls: string; emoji: string }> = {
+  todo:        { label: 'À faire',    cls: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',       emoji: '○' },
+  in_progress: { label: 'En cours',   cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',       emoji: '◐' },
+  validation:  { label: 'Validation', cls: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',    emoji: '⚑' },
+  done:        { label: 'Validé',     cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', emoji: '●' },
+  cancelled:   { label: 'Annulé',     cls: 'bg-red-500/10 text-red-600 dark:text-red-400',             emoji: '×' },
+}
+
+const TASK_PRIORITY_CFG: Record<TaskPriority, { label: string; cls: string }> = {
+  low:    { label: 'Basse',   cls: 'text-slate-500' },
+  normal: { label: 'Normale', cls: 'text-blue-500' },
+  high:   { label: 'Haute',   cls: 'text-amber-500' },
+  urgent: { label: 'Urgente', cls: 'text-red-500' },
+}
+
+/* ─── Helpers ──────────────────────────────────────────────────── */
+function parseProjetNotes(notes: string | null | undefined): { text: string; blocks: SopBlock[] } {
+  if (!notes) return { text: '', blocks: [] }
+  const trimmed = notes.trim()
+  if (trimmed.startsWith('{') && trimmed.includes('__projet_meta__')) {
+    try {
+      const d = JSON.parse(trimmed) as { text?: string; blocks?: SopBlock[] }
+      return { text: d.text ?? '', blocks: d.blocks ?? [] }
+    } catch { /* fall through */ }
+  }
+  return { text: notes, blocks: [] }
+}
+
+function serializeProjetNotes(text: string, blocks: SopBlock[]): string {
+  if (!text.trim() && blocks.length === 0) return ''
+  if (blocks.length === 0) return text
+  return JSON.stringify({ sentinel: '__projet_meta__', text, blocks })
+}
+
+const memberName = (m?: TeamMember) => m ? `${m.prenom ?? ''} ${m.nom ?? ''}`.trim() || (m.email ?? '—') : '—'
+
+/* ─── Date input helper — ISO string → YYYY-MM-DD (local timezone) ── */
+function toDateInput(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/* ─── Timer helpers maintenant centralisés dans @/lib/taskTimer ─── */
+
+/* ═══════════════════════════════════════════════════════════════════
+   MAIN PAGE
+═══════════════════════════════════════════════════════════════════ */
+type Tab = 'overview' | 'team' | 'tasks' | 'chat' | 'infos' | 'docs'
+
+export default function ProjetDetail() {
+  const { id, tenantSlug } = useParams<{ id: string; tenantSlug: string }>()
+  const navigate = useNavigate()
+  const base = tenantSlug ? `/${tenantSlug}` : ''
+
+  const projet = useProjet(id)
+  const { data: clients = [] } = useClients()
+  const { data: members = [] } = useTeam()
+  const assignees = useAssigneesOf(id)
+  const tasks     = useProjectTasks(id)
+  const auth      = useAuth()
+
+  const updateProjet = useUpdateProjet()
+  const deleteProjet = useDeleteProjet()
+
+  const [tab, setTab] = useState<Tab>('tasks')
+  const [delConfirm, setDelConfirm] = useState(false)
+
+  if (!projet) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 gap-4">
+        <AlertCircle className="w-10 h-10 text-muted-foreground" />
+        <p className="text-muted-foreground">Projet introuvable.</p>
+        <Button size="sm" variant="secondary" onClick={() => navigate(`${base}/projets`)}>
+          <ArrowLeft className="w-4 h-4" /> Retour aux projets
+        </Button>
+      </div>
+    )
+  }
+
+  const client    = clients.find(c => c.id === projet.client_id)
+  const statutCfg = STATUT_CFG[projet.statut]
+
+  /* Auto-progression from tasks (read-only display, optional override) */
+  const taskProgression = useMemo(() => {
+    if (tasks.length === 0) return null
+    const done = tasks.filter(t => t.status === 'done').length
+    return Math.round((done / tasks.length) * 100)
+  }, [tasks])
+
+  const handleDelete = async () => {
+    await deleteProjet.mutateAsync(projet.id)
+    navigate(`${base}/projets`)
+  }
+
+  return (
+    <div className="space-y-5 animate-fade-in">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2">
+        <button onClick={() => navigate(`${base}/projets`)}
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Projets
+        </button>
+        <span className="text-muted-foreground/40">/</span>
+        <span className="text-sm font-medium text-foreground">{projet.nom}</span>
+      </div>
+
+      {/* Hero */}
+      <div className="card-premium p-5 md:p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-md shadow-blue-500/20 flex-shrink-0">
+            <Briefcase className="w-7 h-7 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold text-foreground">{projet.nom}</h1>
+              <Badge className={cn('text-[11px] font-bold', statutCfg.cls)}>{statutCfg.label}</Badge>
+            </div>
+            {projet.description && <p className="text-sm text-muted-foreground mt-1">{projet.description}</p>}
+            <div className="flex items-center flex-wrap gap-4 mt-2 text-xs text-muted-foreground">
+              {client && (
+                <span className="flex items-center gap-1.5">
+                  <UserIcon className="w-3.5 h-3.5" />
+                  Client : <span className="font-semibold text-foreground">{client.entreprise || client.nom}</span>
+                </span>
+              )}
+              {projet.date_debut && (
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5" />
+                  Du {formatDate(projet.date_debut)}
+                  {projet.date_fin_prevue && ` au ${formatDate(projet.date_fin_prevue)}`}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <CreateInvoiceButton projet={projet} client={client} tasks={tasks} base={base} />
+            <Button variant="ghost" size="sm" className="text-red-400 hover:bg-red-500/10" onClick={() => setDelConfirm(true)}>
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+          <Kpi label="Budget"        value={projet.budget != null ? formatCurrency(projet.budget) : '—'} sub={projet.cout_reel ? `Réel : ${formatCurrency(projet.cout_reel)}` : undefined} />
+          <Kpi label="Progression"   value={`${taskProgression ?? projet.progression}%`} sub={tasks.length > 0 ? `${tasks.filter(t => t.status === 'done').length}/${tasks.length} tâches` : undefined} />
+          <Kpi label="Équipe"        value={String(assignees.length)} sub={`membre${assignees.length > 1 ? 's' : ''}`} />
+          <Kpi label="Tâches"        value={String(tasks.length)}     sub={`${tasks.filter(t => t.status === 'in_progress').length} en cours`} />
+        </div>
+
+        {/* Progress bar */}
+        <div className="mt-4">
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${taskProgression ?? projet.progression}%` }}
+              transition={{ duration: 0.6 }}
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 p-1 rounded-xl border border-border bg-muted/30 w-fit">
+        {([
+          { key: 'tasks',    label: 'Tâches',          icon: CheckSquare},
+          { key: 'infos',    label: 'Infos & Accès',   icon: KeyRound   },
+          { key: 'team',     label: 'Équipe',          icon: Users      },
+          { key: 'chat',     label: 'Discussion',      icon: MessageSquare },
+          { key: 'docs',     label: 'Documentation',   icon: FileText   },
+          { key: 'overview', label: 'Vue d\'ensemble', icon: Briefcase },
+        ] as const).map(t => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+                active ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}>
+              <Icon className="w-4 h-4" />
+              {t.label}
+              {t.key === 'team' && assignees.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono">{assignees.length}</span>}
+              {t.key === 'tasks' && tasks.length > 0     && <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono">{tasks.length}</span>}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Tab content */}
+      {tab === 'overview' && (
+        <OverviewTab projet={projet} onUpdate={(patch) => updateProjet.mutate({ id: projet.id, ...patch })} />
+      )}
+      {tab === 'team' && (
+        <TeamTab projet={projet} assignees={assignees} members={members} tasks={tasks} />
+      )}
+      {tab === 'tasks' && (
+        <TasksTab projet={projet} tasks={tasks} assignees={assignees} members={members} />
+      )}
+      {tab === 'chat' && (
+        <ProjetChat
+          projetId={projet.id}
+          currentUserName={auth.name ?? auth.email ?? 'Admin'}
+          isAdmin={true}
+          queryKey={['projet_messages', projet.id]}
+          fetchMessages={async () => {
+            const all = await projetMessagesApi.list({ orderBy: 'created_at', order: 'asc', limit: 1000 }) as ProjetMessage[]
+            return all.filter(m => m.projet_id === projet.id)
+          }}
+          postMessage={(text) =>
+            projetMessagesApi.create({
+              projet_id:   projet.id,
+              text,
+              is_admin:    true,
+              author_name: auth.name ?? auth.email ?? 'Admin',
+            } as any)
+          }
+        />
+      )}
+      {tab === 'infos' && (
+        <InfosAccesTab projet={projet} client={client} />
+      )}
+      {tab === 'docs' && (
+        <DocsTab projet={projet} />
+      )}
+
+      {/* Delete confirm */}
+      <Dialog open={delConfirm} onOpenChange={setDelConfirm}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <AlertCircle className="w-5 h-5" /> Supprimer ce projet ?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            Toutes les données liées à <strong className="text-foreground">{projet.nom}</strong> seront perdues (tâches, équipe assignée, documentation).
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" size="sm" onClick={() => setDelConfirm(false)}>Annuler</Button>
+            <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white border-0"
+              onClick={handleDelete} disabled={deleteProjet.isPending}>
+              {deleteProjet.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              Supprimer définitivement
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/* ─── Create invoice from project ──────────────────────────────── */
+function CreateInvoiceButton({ projet, client, tasks, base }: { projet: Projet; client?: { id: string; nom?: string; entreprise?: string | null }; tasks: TeamMemberTask[]; base: string }) {
+  const navigate = useNavigate()
+  /* Eligible when project is done OR has budget set */
+  const validatedRequests = tasks.filter(t => t.is_request && (t.status === 'done' || t.status === 'validation'))
+  const extras = validatedRequests.reduce((s, t) => s + (t.request_price ?? 0), 0)
+  const totalHT = (projet.budget ?? 0) + extras
+  if ((projet.budget ?? 0) === 0 && extras === 0) return null
+  return (
+    <Button size="sm" variant="secondary" className="text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40"
+      onClick={() => {
+        try {
+          localStorage.setItem('gestiq_prefill_facture', JSON.stringify({
+            client_id: client?.id ?? null,
+            client_nom: client?.entreprise ?? client?.nom ?? '',
+            projet_id:  projet.id,
+            projet_nom: projet.nom,
+            montant_ht: totalHT,
+            lignes: [
+              { titre: projet.nom, description: [], quantite: 1, prix_unitaire: projet.budget ?? 0 },
+              ...validatedRequests.map(t => ({
+                titre:         `📌 ${t.title}`,
+                description:   [],
+                quantite:      1,
+                prix_unitaire: t.request_price ?? 0,
+              })),
+            ],
+          }))
+        } catch {}
+        toast.success(`Facture pré-remplie : ${formatCurrency(totalHT)}${extras > 0 ? ` (dont ${formatCurrency(extras)} de demandes)` : ''}`)
+        navigate(`${base}/factures`)
+      }}>
+      <Receipt className="w-3.5 h-3.5" /> Créer la facture
+    </Button>
+  )
+}
+
+/* ─── KPI tile ─────────────────────────────────────────────────── */
+function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground">{label}</p>
+      <p className="text-xl font-extrabold text-foreground mt-1">{value}</p>
+      {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OVERVIEW TAB
+═══════════════════════════════════════════════════════════════════ */
+function OverviewTab({ projet, onUpdate }: { projet: Projet; onUpdate: (patch: Partial<Projet>) => void }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="card-premium p-5 space-y-3">
+        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Statut & Priorité</p>
+        <div className="flex items-center gap-2">
+          <Select value={projet.statut} onValueChange={v => onUpdate({ statut: v as ProjetStatut })}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(STATUT_CFG) as [ProjetStatut, { label: string; cls: string }][]).map(([k, v]) => (
+                <SelectItem key={k} value={k}>{v.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={projet.priorite} onValueChange={v => onUpdate({ priorite: v as any })}>
+            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="basse">🟢 Basse</SelectItem>
+              <SelectItem value="normale">🔵 Normale</SelectItem>
+              <SelectItem value="haute">🟠 Haute</SelectItem>
+              <SelectItem value="urgente">🔴 Urgente</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="card-premium p-5 space-y-3">
+        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Budget & coûts</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Budget</label>
+            <Input type="number" value={projet.budget ?? ''} onChange={e => onUpdate({ budget: e.target.value ? Number(e.target.value) : null })} placeholder="0" />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Coût réel</label>
+            <Input type="number" value={projet.cout_reel ?? ''} onChange={e => onUpdate({ cout_reel: e.target.value ? Number(e.target.value) : null })} placeholder="0" />
+          </div>
+        </div>
+      </div>
+
+      <div className="card-premium p-5 space-y-3 md:col-span-2">
+        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Dates</p>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Début</label>
+            <Input type="date" value={toDateInput(projet.date_debut)} onChange={e => onUpdate({ date_debut: e.target.value || null })} />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Fin prévue</label>
+            <Input type="date" value={toDateInput(projet.date_fin_prevue)} onChange={e => onUpdate({ date_fin_prevue: e.target.value || null })} />
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Fin réelle</label>
+            <Input type="date" value={toDateInput(projet.date_fin_reelle)} onChange={e => onUpdate({ date_fin_reelle: e.target.value || null })} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TEAM TAB — multi-member assignment with roles + per-member progress
+═══════════════════════════════════════════════════════════════════ */
+function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assignees: ProjetAssignee[]; members: TeamMember[]; tasks: TeamMemberTask[] }) {
+  const addAssignee    = useAddProjetAssignee()
+  const removeAssignee = useRemoveProjetAssignee()
+  const updateAssignee = useUpdateProjetAssignee()
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [search,     setSearch]     = useState('')
+
+  const available = members.filter(m => !assignees.some(a => a.team_member_id === m.id))
+  const filtered  = search ? available.filter(m => `${m.prenom} ${m.nom} ${m.email ?? ''}`.toLowerCase().includes(search.toLowerCase())) : available
+
+  /* Per-member progress : count tasks done vs total for each assignee */
+  const memberStats = (memberId: string) => {
+    const my = tasks.filter(t => t.team_member_id === memberId)
+    const done = my.filter(t => t.status === 'done').length
+    const pct = my.length > 0 ? Math.round((done / my.length) * 100) : 0
+    const elapsed = my.reduce((s, t) => s + (t.elapsed_seconds ?? 0), 0)
+    return { total: my.length, done, pct, elapsed }
+  }
+
+  return (
+    <div className="card-premium p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Équipe assignée</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Affecte les membres au projet et désigne un lead. La progression s'affiche dès qu'ils ont des tâches.</p>
+        </div>
+        <Button size="sm" onClick={() => setPickerOpen(true)} disabled={available.length === 0}>
+          <Plus className="w-3.5 h-3.5" /> Assigner
+        </Button>
+      </div>
+
+      {assignees.length === 0 ? (
+        <div className="empty-state py-12">
+          <Users className="empty-state-icon" />
+          <p className="empty-state-title">Aucun membre assigné</p>
+          <p className="empty-state-desc">Cliquez sur « Assigner » pour ajouter des membres au projet</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {assignees.map(a => {
+            const m = members.find(x => x.id === a.team_member_id)
+            const st = memberStats(a.team_member_id)
+            return (
+              <div key={a.id} className="p-3 rounded-xl border border-border bg-muted/20 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="avatar-initials w-9 h-9 flex-shrink-0">
+                    <span className="font-bold text-xs">{m ? getInitials(`${m.prenom} ${m.nom}`) : '?'}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-semibold text-foreground truncate">{memberName(m)}</p>
+                      {a.role === 'lead' && <Crown className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">{m?.poste || m?.email || '—'}</p>
+                  </div>
+                  <Select value={a.role} onValueChange={v => updateAssignee.mutate({ id: a.id, role: v as ProjetAssigneeRole })}>
+                    <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lead">👑 Lead</SelectItem>
+                      <SelectItem value="member">👤 Membre</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="ghost" size="icon" className="w-8 h-8 text-muted-foreground hover:text-red-500" onClick={() => removeAssignee.mutate(a.id)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* Toggle share_infos — accès aux Infos & Accès du projet */}
+                <div className="flex items-center justify-between pl-12 pr-1 py-1.5 rounded-lg bg-background border border-border/60">
+                  <div className="flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-[11px] font-medium text-foreground">Voir les Infos & Accès</span>
+                    <span className="text-[10px] text-muted-foreground">(contact, identifiants, liens)</span>
+                  </div>
+                  <button
+                    onClick={() => updateAssignee.mutate({ id: a.id, share_infos: !a.share_infos } as any)}
+                    className={cn(
+                      'relative w-8 h-4 rounded-full transition-colors',
+                      a.share_infos !== false ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700',
+                    )}
+                    title={a.share_infos !== false ? 'Partagé — clic pour bloquer' : 'Privé — clic pour partager'}
+                  >
+                    <span className={cn(
+                      'absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform',
+                      a.share_infos !== false ? 'translate-x-4' : 'translate-x-0.5',
+                    )} />
+                  </button>
+                </div>
+
+                {/* Per-member progress bar */}
+                {st.total > 0 && (
+                  <div className="flex items-center gap-3 pl-12">
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${st.pct}%`,
+                          background: st.pct === 100 ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #6366f1, #818cf8)',
+                        }}
+                      />
+                    </div>
+                    <span className="text-[11px] font-mono font-bold text-foreground w-10 text-right">{st.pct}%</span>
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">{st.done}/{st.total}</span>
+                    {st.elapsed > 0 && <span className="text-[11px] text-muted-foreground whitespace-nowrap">⏱ {formatHMS(st.elapsed)}</span>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Member picker dialog */}
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-500" /> Assigner un membre</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Rechercher…" value={search} onChange={e => setSearch(e.target.value)} />
+            <div className="max-h-72 overflow-y-auto space-y-1">
+              {filtered.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-4">
+                  {available.length === 0 ? 'Tous les membres sont déjà assignés' : 'Aucun membre trouvé'}
+                </p>
+              ) : filtered.map(m => (
+                <button key={m.id}
+                  onClick={() => {
+                    addAssignee.mutate({ projet_id: projet.id, team_member_id: m.id, role: assignees.length === 0 ? 'lead' : 'member' })
+                    setPickerOpen(false); setSearch('')
+                  }}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors text-left">
+                  <div className="avatar-initials w-8 h-8 flex-shrink-0">
+                    <span className="font-bold text-[10px]">{getInitials(`${m.prenom} ${m.nom}`)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{memberName(m)}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{m.poste || m.email || '—'}</p>
+                  </div>
+                  {assignees.length === 0 && <span title="Sera Lead"><Crown className="w-3.5 h-3.5 text-amber-500" /></span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TASKS TAB — categories + validation flow + change requests + timer
+═══════════════════════════════════════════════════════════════════ */
+function TasksTab({
+  projet, tasks, assignees, members,
+}: { projet: Projet; tasks: TeamMemberTask[]; assignees: ProjetAssignee[]; members: TeamMember[] }) {
+  const create = useCreateTeamMemberTask()
+  const update = useUpdateTeamMemberTask()
+  const remove = useDeleteTeamMemberTask()
+  const qc     = useQueryClient()
+  const auth   = useAuth()
+  const { data: customs = [] } = useCustomTemplates()
+  const [showTaskForm,    setShowTaskForm]    = useState(false)
+  const [showRequestForm, setShowRequestForm] = useState(false)
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false)
+  const [seeding, setSeeding] = useState(false)
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  const [taskForm, setTaskForm] = useState({ title: '', team_member_id: 'none', priority: 'normal' as TaskPriority, due_date: '', category: '' })
+  const [reqForm,  setReqForm]  = useState({ title: '', team_member_id: 'none', priority: 'high' as TaskPriority, due_date: '', price: '' })
+
+  const openTask = openTaskId ? tasks.find(t => t.id === openTaskId) : null
+
+  /** Bulk-create tasks from chosen templates (applied to this existing project). */
+  const applyTemplates = async (templateKeys: string[]) => {
+    if (templateKeys.length === 0) return
+    setSeeding(true)
+    let count = 0
+    try {
+      /* Resolve key → template, looking in custom (DB) first then built-ins. */
+      const customsAsTemplates = customs.map(rowToTemplate)
+      const templates = templateKeys
+        .map(k => customsAsTemplates.find(t => t.key === k) ?? PROJET_TEMPLATES.find(t => t.key === k))
+        .filter(Boolean) as ProjetTemplate[]
+      for (const tpl of templates) {
+        for (const group of tpl.groups) {
+          for (const task of group.tasks) {
+            try {
+              await teamMemberTasksApi.create({
+                project_id:     projet.id,
+                team_member_id: null,
+                title:          task.title,
+                category:       group.category,
+                priority:       task.priority ?? 'normal',
+                status:         'todo',
+              } as any)
+              count++
+            } catch (e: any) { console.error('[applyTemplate]', e?.message ?? e) }
+          }
+        }
+      }
+      /* Force refetch so the UI updates immediately without manual reload. */
+      await qc.refetchQueries({ queryKey: ['team_member_tasks'] })
+      toast.success(`${count} tâche${count > 1 ? 's' : ''} ajoutée${count > 1 ? 's' : ''}`)
+    } finally {
+      setSeeding(false)
+      setShowTemplateDialog(false)
+    }
+  }
+
+  /* Members that can be assigned (only those on the project, fallback to all). */
+  const pickable = assignees.length > 0
+    ? members.filter(m => assignees.some(a => a.team_member_id === m.id))
+    : members
+
+  /* Split regular tasks vs change requests */
+  const regular = tasks.filter(t => !t.is_request)
+  const requests = tasks.filter(t => t.is_request)
+
+  /* Group regular tasks by category (templates seed this field).
+     Tri intra-groupe : mes tâches admin d'abord, puis open avant done,
+     puis par due_date. Permet à l'admin de voir son propre travail en tête. */
+  const byCategory = useMemo(() => {
+    const m = new Map<string, TeamMemberTask[]>()
+    for (const t of regular) {
+      const k = t.category || '— Sans catégorie —'
+      const arr = m.get(k) ?? []; arr.push(t); m.set(k, arr)
+    }
+    const STATUS_ORDER: Record<string, number> = { in_progress: 0, validation: 1, todo: 2, done: 3, cancelled: 4 }
+    for (const [, arr] of m) {
+      arr.sort((a, b) => {
+        const aMine = a.assigned_user_id === auth.userId ? 0 : 1
+        const bMine = b.assigned_user_id === auth.userId ? 0 : 1
+        if (aMine !== bMine) return aMine - bMine
+        const aStatus = STATUS_ORDER[a.status] ?? 9
+        const bStatus = STATUS_ORDER[b.status] ?? 9
+        if (aStatus !== bStatus) return aStatus - bStatus
+        const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity
+        const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity
+        return ad - bd
+      })
+    }
+    return Array.from(m.entries())
+  }, [regular, auth.userId])
+
+  /** Convert a dropdown value ('none' | 'admin' | <member_uuid>) into the
+      pair of FK fields. Sentinel 'admin' assigns the task to the current
+      admin user (assigned_user_id) and clears team_member_id. */
+  const assigneeFields = (v: string): { team_member_id: string | null; assigned_user_id: string | null } => {
+    if (v === 'admin') return { team_member_id: null, assigned_user_id: auth.userId ?? null }
+    if (v === 'none')  return { team_member_id: null, assigned_user_id: null }
+    return { team_member_id: v, assigned_user_id: null }
+  }
+
+  const submitTask = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!taskForm.title.trim()) return
+    create.mutate({
+      project_id:     projet.id,
+      ...assigneeFields(taskForm.team_member_id),
+      title:          taskForm.title.trim(),
+      priority:       taskForm.priority,
+      due_date:       taskForm.due_date || null,
+      category:       taskForm.category.trim() || null,
+    } as any, {
+      onSuccess: () => { setTaskForm({ title: '', team_member_id: 'none', priority: 'normal', due_date: '', category: '' }); setShowTaskForm(false) },
+    })
+  }
+
+  const submitRequest = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!reqForm.title.trim()) return
+    create.mutate({
+      project_id:     projet.id,
+      ...assigneeFields(reqForm.team_member_id),
+      title:          reqForm.title.trim(),
+      priority:       reqForm.priority,
+      due_date:       reqForm.due_date || null,
+      is_request:     true,
+      request_price:  reqForm.price ? Number(reqForm.price) : null,
+    } as any, {
+      onSuccess: () => { setReqForm({ title: '', team_member_id: 'none', priority: 'high', due_date: '', price: '' }); setShowRequestForm(false) },
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* ── Tâches du projet ───────────────────────────────────── */}
+      <div className="card-premium p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Tâches du projet</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {assignees.length === 0
+                ? '⚠️ Assigne d\'abord des membres pour pouvoir leur attribuer les tâches'
+                : 'Le membre clique « Terminer » → la tâche passe en Validation → tu valides ou renvoies'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setShowTemplateDialog(true)}>
+              <Sparkles className="w-3.5 h-3.5" /> Appliquer un template
+            </Button>
+            <Button size="sm" onClick={() => setShowTaskForm(s => !s)}>
+              <Plus className="w-3.5 h-3.5" /> Nouvelle tâche
+            </Button>
+          </div>
+        </div>
+
+        {showTaskForm && (
+          <form onSubmit={submitTask} className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+            <Input autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche…" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <Input value={taskForm.category} onChange={e => setTaskForm(p => ({ ...p, category: e.target.value }))} placeholder="Catégorie (ex: Design)" className="h-9" />
+              <Select value={taskForm.team_member_id} onValueChange={v => setTaskForm(p => ({ ...p, team_member_id: v }))}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Assigner…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Non assigné</SelectItem>
+                  <SelectItem value="admin">🛡️ Moi (Admin)</SelectItem>
+                  {pickable.map(m => <SelectItem key={m.id} value={m.id}>{memberName(m)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={taskForm.priority} onValueChange={v => setTaskForm(p => ({ ...p, priority: v as TaskPriority }))}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(TASK_PRIORITY_CFG) as [TaskPriority, { label: string; cls: string }][]).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input type="date" value={taskForm.due_date} onChange={e => setTaskForm(p => ({ ...p, due_date: e.target.value }))} className="h-9" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowTaskForm(false)}>Annuler</Button>
+              <Button type="submit" size="sm" disabled={create.isPending}>
+                {create.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Créer
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {regular.length === 0 ? (
+          <div className="empty-state py-10">
+            <CheckSquare className="empty-state-icon" />
+            <p className="empty-state-title">Aucune tâche</p>
+            <p className="empty-state-desc">Clique <strong>« Appliquer un template »</strong> pour générer toutes les tâches d'un coup, ou crée-les manuellement</p>
+            <Button size="sm" className="mt-3" onClick={() => setShowTemplateDialog(true)}>
+              <Sparkles className="w-3.5 h-3.5" /> Choisir un template
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {byCategory.map(([cat, items]) => {
+              const done = items.filter(t => t.status === 'done').length
+              const pct  = Math.round((done / items.length) * 100)
+              return (
+                <div key={cat} className="space-y-1.5">
+                  <div className="flex items-center gap-3 pb-1.5 border-b border-border">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">{cat}</span>
+                    <span className="text-[11px] text-muted-foreground">{done}/{items.length}</span>
+                    <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden max-w-[120px]">
+                      <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-[11px] font-mono text-muted-foreground">{pct}%</span>
+                  </div>
+                  <div className="space-y-1">
+                    {items.map(t => (
+                      <TaskRow key={t.id} task={t} members={members} pickable={pickable}
+                        onChange={patch => update.mutate({ id: t.id, ...patch })}
+                        onRemove={() => remove.mutate(t.id)}
+                        onOpen={() => setOpenTaskId(t.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Demandes client (changements / ajouts) ─────────────── */}
+      <div className="card-premium p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-xs font-bold text-violet-600 dark:text-violet-400 uppercase tracking-widest flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" /> Demandes client
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Changements ou ajouts demandés en cours de projet. Chaque demande peut être facturée à part.
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setShowRequestForm(s => !s)}>
+            <Plus className="w-3.5 h-3.5" /> Nouvelle demande
+          </Button>
+        </div>
+
+        {showRequestForm && (
+          <form onSubmit={submitRequest} className="rounded-xl border-2 border-violet-200 dark:border-violet-800/50 bg-violet-50/30 dark:bg-violet-950/10 p-3 space-y-2">
+            <Input autoFocus value={reqForm.title} onChange={e => setReqForm(p => ({ ...p, title: e.target.value }))} placeholder="Demande client (ex: Changer la couleur du bouton)" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <Select value={reqForm.team_member_id} onValueChange={v => setReqForm(p => ({ ...p, team_member_id: v }))}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Assigner…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Non assigné</SelectItem>
+                  <SelectItem value="admin">🛡️ Moi (Admin)</SelectItem>
+                  {pickable.map(m => <SelectItem key={m.id} value={m.id}>{memberName(m)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={reqForm.priority} onValueChange={v => setReqForm(p => ({ ...p, priority: v as TaskPriority }))}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(TASK_PRIORITY_CFG) as [TaskPriority, { label: string; cls: string }][]).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input type="number" value={reqForm.price} onChange={e => setReqForm(p => ({ ...p, price: e.target.value }))} placeholder="Prix MAD" className="h-9" />
+              <Input type="date" value={reqForm.due_date} onChange={e => setReqForm(p => ({ ...p, due_date: e.target.value }))} className="h-9" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowRequestForm(false)}>Annuler</Button>
+              <Button type="submit" size="sm" disabled={create.isPending}>
+                {create.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Créer la demande
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {requests.length === 0 ? (
+          <p className="text-xs text-muted-foreground/70 text-center py-4">Aucune demande en cours</p>
+        ) : (
+          <div className="space-y-1.5">
+            {requests.map(t => (
+              <TaskRow key={t.id} task={t} members={members} pickable={pickable} isRequest
+                onChange={patch => update.mutate({ id: t.id, ...patch })}
+                onRemove={() => remove.mutate(t.id)}
+                onOpen={() => setOpenTaskId(t.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Template picker dialog */}
+      <TemplatePickerDialog
+        open={showTemplateDialog}
+        onClose={() => setShowTemplateDialog(false)}
+        onApply={applyTemplates}
+        loading={seeding}
+      />
+
+      {/* Task detail dialog */}
+      {openTask && (
+        <TaskDetailDialog
+          open={!!openTask}
+          onClose={() => setOpenTaskId(null)}
+          task={{
+            ...openTask,
+            project_name:     projet.nom,
+            team_member_name: (() => { const m = members.find(x => x.id === openTask.team_member_id); return m ? `${m.prenom} ${m.nom}`.trim() : null })(),
+          }}
+          currentUserName={auth.name ?? auth.email ?? 'Admin'}
+          isAdmin={true}
+          onSave={async (patch) => {
+            await update.mutateAsync({ id: openTask.id, ...patch } as any)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function TemplatePickerDialog({
+  open, onClose, onApply, loading,
+}: {
+  open:     boolean
+  onClose:  () => void
+  onApply:  (keys: string[]) => void
+  loading:  boolean
+}) {
+  const [selected, setSelected] = useState<string[]>([])
+  const [editorOpen, setEditorOpen] = useState(false)
+  const { data: customs = [] } = useCustomTemplates()
+  useEffect(() => { if (!open) setSelected([]) }, [open])
+
+  /* Merge built-in + custom templates (custom first so they're easy to find). */
+  const allTemplates = useMemo(
+    () => [...customs.map(rowToTemplate), ...PROJET_TEMPLATES],
+    [customs]
+  )
+  const totalTasks = selected.reduce((s, k) => {
+    const t = allTemplates.find(x => x.key === k)
+    return s + (t ? t.groups.reduce((n, g) => n + g.tasks.length, 0) : 0)
+  }, 0)
+  return (
+    <>
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-blue-500" /> Appliquer un ou plusieurs templates
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center justify-between -mt-2">
+          <p className="text-xs text-muted-foreground">
+            Coche les templates à appliquer. Toutes leurs tâches seront créées (non assignées) dans ce projet.
+          </p>
+          <Button size="sm" variant="outline" onClick={() => setEditorOpen(true)} className="flex-shrink-0">
+            <Settings className="w-3.5 h-3.5" /> Gérer
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+          {allTemplates.map(tpl => {
+            const isSel = selected.includes(tpl.key)
+            const taskCount = tpl.groups.reduce((n, g) => n + g.tasks.length, 0)
+            const isCustom = tpl.key.startsWith('custom:')
+            return (
+              <label key={tpl.key}
+                className={`flex items-start gap-2 p-3 rounded-lg border cursor-pointer transition-all ${
+                  isSel ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20 shadow-sm' : 'border-border bg-background hover:border-blue-300'
+                }`}>
+                <input type="checkbox" checked={isSel}
+                  onChange={() => setSelected(p => isSel ? p.filter(k => k !== tpl.key) : [...p, tpl.key])}
+                  className="mt-0.5 w-4 h-4 accent-blue-600" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                    <span>{tpl.emoji}</span> {tpl.label}
+                    <span className="text-[10px] font-mono text-muted-foreground">({taskCount} tâches)</span>
+                    {isCustom && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">PERSO</span>}
+                  </p>
+                  {tpl.description && <p className="text-[11px] text-muted-foreground mt-0.5">{tpl.description}</p>}
+                </div>
+              </label>
+            )
+          })}
+        </div>
+        <div className="flex items-center justify-between pt-3 border-t border-border">
+          {totalTasks > 0
+            ? <span className="text-xs font-bold px-2 py-1 rounded bg-blue-600 text-white">{totalTasks} tâches seront créées</span>
+            : <span className="text-xs text-muted-foreground">Aucun template sélectionné</span>}
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={onClose}>Annuler</Button>
+            <Button size="sm" disabled={selected.length === 0 || loading} onClick={() => onApply(selected)}>
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Appliquer
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <TemplateEditorDialog open={editorOpen} onClose={() => setEditorOpen(false)} />
+    </>
+  )
+}
+
+function TaskRow({
+  task, members, pickable, isRequest, onChange, onRemove, onOpen,
+}: {
+  task:      TeamMemberTask
+  members:   TeamMember[]
+  pickable:  TeamMember[]
+  isRequest?:boolean
+  onChange:  (patch: Partial<TeamMemberTask>) => void
+  onRemove:  () => void
+  onOpen?:   () => void
+}) {
+  const auth = useAuth()
+  const m = task.team_member_id ? members.find(x => x.id === task.team_member_id) : null
+  const isAdminAssigned = !!task.assigned_user_id
+  const cfg = TASK_STATUS_CFG[task.status]
+
+  /* Timer state — live elapsed seconds from localStorage + DB cumul */
+  const [tick, setTick] = useState(0)
+  const active = getActiveTimer()
+  const isRunning = active?.taskId === task.id
+  useEffect(() => {
+    if (!isRunning) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [isRunning])
+  const liveExtra = isRunning && active ? Math.floor((Date.now() - active.startedAt) / 1000) : 0
+  const totalSeconds = (task.elapsed_seconds ?? 0) + liveExtra
+
+  const start = () => {
+    setActiveTimer({ taskId: task.id, startedAt: Date.now() })
+    if (task.status === 'todo') onChange({ status: 'in_progress' })
+    setTick(t => t + 1)
+  }
+  const pause = () => {
+    const a = getActiveTimer(); if (!a || a.taskId !== task.id) return
+    const extra = Math.floor((Date.now() - a.startedAt) / 1000)
+    setActiveTimer(null)
+    onChange({ elapsed_seconds: (task.elapsed_seconds ?? 0) + extra })
+    setTick(t => t + 1)
+  }
+  const finish = () => {
+    const a = getActiveTimer()
+    const extra = a?.taskId === task.id ? Math.floor((Date.now() - a.startedAt) / 1000) : 0
+    if (a?.taskId === task.id) setActiveTimer(null)
+    onChange({ elapsed_seconds: (task.elapsed_seconds ?? 0) + extra, status: 'validation' })
+    toast.success(`✓ Tâche envoyée en validation`)
+    setTick(t => t + 1)
+  }
+  const validate = () => { onChange({ status: 'done' }); toast.success('✓ Validé') }
+  const sendBack = () => { onChange({ status: 'in_progress' }); toast.info('↩ Renvoyé pour correction') }
+
+  return (
+    <div className={cn(
+      'flex items-center gap-3 p-2.5 rounded-lg border bg-background hover:border-blue-500/30 transition-colors group',
+      isRequest ? 'border-violet-200 dark:border-violet-800/40 bg-violet-50/20 dark:bg-violet-950/10' : 'border-border',
+    )}>
+      <button onClick={() => onChange({ status: task.status === 'done' ? 'todo' : 'done' })} className="text-base flex-shrink-0" title="Toggle terminé">
+        {task.status === 'done' ? <Check className="w-4 h-4 text-emerald-500" /> : <CircleDot className="w-4 h-4 text-muted-foreground" />}
+      </button>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={onOpen}
+            className={cn(
+              'text-sm font-medium text-left hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors',
+              task.status === 'done' && 'line-through text-muted-foreground',
+            )}
+            title="Cliquer pour voir les détails / commentaires"
+          >
+            {task.title}
+          </button>
+          {isRequest && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
+              📌 Demande
+            </span>
+          )}
+          {task.is_request && task.request_price != null && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+              {formatCurrency(task.request_price)}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground flex-wrap">
+          {/* Avatar + select on single line */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            {task.team_member_id && m ? (
+              <div className="avatar-initials w-4 h-4 text-[8px] flex-shrink-0">
+                <span className="font-bold">{getInitials(`${m.prenom} ${m.nom}`)}</span>
+              </div>
+            ) : isAdminAssigned ? (
+              <div className="w-4 h-4 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center flex-shrink-0">
+                <span className="text-[8px]">🛡️</span>
+              </div>
+            ) : (
+              <div className="w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0">
+                <span className="text-[8px]">👤</span>
+              </div>
+            )}
+            <Select
+              value={isAdminAssigned ? 'admin' : (task.team_member_id ?? 'none')}
+              onValueChange={v => {
+                if (v === 'none') return
+                if (v === 'admin') onChange({ team_member_id: null, assigned_user_id: auth.userId ?? null } as any)
+                else onChange({ team_member_id: v, assigned_user_id: null } as any)
+              }}
+            >
+              <SelectTrigger className={cn(
+                'h-6 px-1.5 text-[11px] border-transparent shadow-none w-auto min-w-0 gap-1 hover:bg-muted/50 focus:bg-muted/50',
+                !task.team_member_id && !isAdminAssigned && 'text-amber-600 dark:text-amber-400 font-medium',
+                isAdminAssigned && 'text-blue-600 dark:text-blue-400 font-medium',
+              )}>
+                <span className="truncate max-w-[120px]">
+                  {isAdminAssigned ? 'Moi (Admin)' : task.team_member_id ? memberName(m ?? undefined) : 'Non assigné'}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">🛡️ Moi (Admin)</SelectItem>
+                {pickable.map(x => <SelectItem key={x.id} value={x.id}>{memberName(x)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {task.due_date && (
+            <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {formatDate(task.due_date)}</span>
+          )}
+          <span className={cn('flex items-center gap-1', TASK_PRIORITY_CFG[task.priority].cls)}>
+            ● <span>{TASK_PRIORITY_CFG[task.priority].label}</span>
+          </span>
+          {totalSeconds > 0 && (
+            <span className={cn('flex items-center gap-1 font-mono', isRunning && 'text-amber-500 font-bold')}>
+              ⏱ {formatHMS(totalSeconds)}{isRunning && ' …'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Timer controls — visible when task is active or in progress */}
+      {(task.status === 'todo' || task.status === 'in_progress') && (
+        <div className="flex items-center gap-0.5">
+          {!isRunning ? (
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20" onClick={start} title={totalSeconds > 0 ? 'Continuer' : 'Commencer'}>
+              <Play className="w-3.5 h-3.5" />
+            </Button>
+          ) : (
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20" onClick={pause} title="Pause">
+              <Pause className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" className="w-7 h-7 text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20" onClick={finish} title="Terminer (passe en validation)">
+            <Square className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Validation actions — manager validates or sends back */}
+      {task.status === 'validation' && (
+        <div className="flex items-center gap-1">
+          <Button size="sm" className="h-7 text-xs bg-emerald-500 hover:bg-emerald-600 text-white border-0" onClick={validate}>
+            <Check className="w-3 h-3" /> Valider
+          </Button>
+          <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={sendBack}>
+            <RotateCcw className="w-3 h-3" /> Renvoyer
+          </Button>
+        </div>
+      )}
+
+      <Badge className={cn('text-[10px] font-bold', cfg.cls)}>{cfg.emoji} {cfg.label}</Badge>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="w-7 h-7 opacity-0 group-hover:opacity-100">
+            <MoreHorizontal className="w-3.5 h-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {(Object.entries(TASK_STATUS_CFG) as [TaskStatus, { label: string; cls: string; emoji: string }][]).filter(([k]) => k !== task.status).map(([k, v]) => (
+            <DropdownMenuItem key={k} onClick={() => onChange({ status: k })}>{v.emoji} Forcer → {v.label}</DropdownMenuItem>
+          ))}
+          <DropdownMenuItem onClick={onRemove} className="text-red-500"><Trash2 className="w-3.5 h-3.5 mr-2" /> Supprimer</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DOCS TAB — Notion-style block editor (auto-save)
+═══════════════════════════════════════════════════════════════════ */
+function DocsTab({ projet }: { projet: Projet }) {
+  const initial = useMemo(() => parseProjetNotes(projet.notes), [projet.notes])
+  const [blocks, setBlocks] = useState<SopBlock[]>(initial.blocks)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [mode, setMode] = useState<'preview' | 'edit'>(initial.blocks.length === 0 ? 'edit' : 'preview')
+  const lastSerialized = useRef<string>(projet.notes ?? '')
+  const qc = useQueryClient()
+
+  useEffect(() => {
+    setBlocks(initial.blocks)
+    lastSerialized.current = projet.notes ?? ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projet.id])
+
+  useEffect(() => {
+    const next = serializeProjetNotes(initial.text, blocks)
+    if (next === lastSerialized.current) return
+    setSaveState('saving')
+    const t = setTimeout(async () => {
+      try {
+        await projetsApi.update(projet.id, { notes: next })
+        lastSerialized.current = next
+        qc.invalidateQueries({ queryKey: ['projets'] })
+        setSaveState('saved')
+        setTimeout(() => setSaveState('idle'), 1500)
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erreur de sauvegarde')
+        setSaveState('idle')
+      }
+    }, 600)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks])
+
+  return (
+    <div className="card-premium p-5 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Documentation projet</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {mode === 'edit'
+              ? 'Brief, spécifications, livrables — tapez « / » pour insérer un bloc.'
+              : 'Aperçu formaté de ta documentation projet.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={cn(
+            'text-[11px] font-medium',
+            saveState === 'saving' && 'text-amber-500',
+            saveState === 'saved'  && 'text-emerald-600 dark:text-emerald-400',
+            saveState === 'idle'   && 'text-muted-foreground',
+          )}>
+            {saveState === 'saving' && '💾 Enregistrement…'}
+            {saveState === 'saved'  && '✓ Enregistré'}
+          </span>
+          {/* Toggle Aperçu / Édition */}
+          <div className="flex items-center gap-1 p-0.5 rounded-lg border border-border bg-muted/30">
+            <button onClick={() => setMode('preview')}
+              className={cn('px-3 py-1 rounded-md text-xs font-semibold transition-colors',
+                mode === 'preview' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+              disabled={blocks.length === 0}
+            >
+              👁 Aperçu
+            </button>
+            <button onClick={() => setMode('edit')}
+              className={cn('px-3 py-1 rounded-md text-xs font-semibold transition-colors',
+                mode === 'edit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+            >
+              ✏ Édition
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {mode === 'preview' && blocks.length > 0 ? (
+        <div className="rounded-xl border border-border bg-background p-6 space-y-4">
+          <SopBlocksRenderer blocks={blocks} />
+        </div>
+      ) : (
+        <BlockEditor value={blocks} onChange={setBlocks} placeholder="Cliquer pour commencer à documenter ce projet…" />
+      )}
+    </div>
+  )
+}

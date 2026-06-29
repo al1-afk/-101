@@ -30,6 +30,10 @@ const ALLOWED_TABLES = new Set([
   'stagiaires',
   /* Projets (gestion de projets clients & internes) */
   'projets',
+  'projet_assignees',
+  'projet_messages',
+  'projet_templates',
+  'team_member_tasks',
   /* Bons de livraison (handover projet + mots de passe + liens) */
   'bons_livraison',
   /* Carnet d'adresses : freelances, candidats, artisans, etc. */

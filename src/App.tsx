@@ -43,6 +43,7 @@ const ActivityLogs   = lazy(() => import('@/pages/ActivityLogs'))
 const ConseillerIA   = lazy(() => import('@/pages/ConseillerIA'))
 const Taches         = lazy(() => import('@/pages/Taches'))
 const Projets        = lazy(() => import('@/pages/Projets'))
+const ProjetDetail   = lazy(() => import('@/pages/ProjetDetail'))
 const Calendrier     = lazy(() => import('@/pages/Calendrier'))
 const Planificateur  = lazy(() => import('@/pages/Planificateur'))
 const Parametres       = lazy(() => import('@/pages/Parametres'))
@@ -64,6 +65,10 @@ const MySpaceLayout       = lazy(() => import('@/pages/MySpace/MySpaceLayout'))
 const MyDashboard         = lazy(() => import('@/pages/MySpace/MyDashboard'))
 const MySops              = lazy(() => import('@/pages/MySpace/MySops'))
 const MyTasks             = lazy(() => import('@/pages/MySpace/MyTasks'))
+const MyProjets           = lazy(() => import('@/pages/MySpace/MyProjets'))
+const MyProjetDetail      = lazy(() => import('@/pages/MySpace/MyProjetDetail'))
+const MyNotifications     = lazy(() => import('@/pages/MySpace/MyNotifications'))
+const MyMessages          = lazy(() => import('@/pages/MySpace/MyMessages'))
 const MyProfile           = lazy(() => import('@/pages/MySpace/MyProfile'))
 
 import { queryClient } from '@/lib/queryClient'
@@ -98,6 +103,10 @@ export default function App() {
               <Route index               element={<MyDashboard />} />
               <Route path="sops"         element={<MySops />} />
               <Route path="tasks"        element={<MyTasks />} />
+              <Route path="projets"      element={<MyProjets />} />
+              <Route path="projets/:id"  element={<MyProjetDetail />} />
+              <Route path="notifications" element={<MyNotifications />} />
+              <Route path="messages"     element={<MyMessages />} />
               <Route path="profile"      element={<MyProfile />} />
             </Route>
 
@@ -113,6 +122,7 @@ export default function App() {
               <Route path="clients/:id"                element={<ClientDetail />} />
               <Route path="taches"                     element={<Taches />} />
               <Route path="projets"                    element={<Projets />} />
+              <Route path="projets/:id"                element={<ProjetDetail />} />
               <Route path="calendrier"                 element={<Calendrier />} />
               <Route path="planificateur"              element={<Planificateur />} />
               <Route path="devis"                      element={<Devis />} />

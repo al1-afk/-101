@@ -6,12 +6,12 @@ import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Header  from './Header'
 import GlobalSearch from '@/components/GlobalSearch'
-import Onboarding, { isOnboardingDone } from '@/components/Onboarding'
 import { useRealtime } from '@/hooks/useRealtime'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useOfflineSync } from '@/hooks/useOfflineSync'
 import { useEventReminders } from '@/hooks/useEventReminders'
+import { useValidationNotifier } from '@/hooks/useValidationNotifier'
 import PwaInstallBanner from '@/components/PwaInstallBanner'
 import ShortcutsModal from '@/components/ShortcutsModal'
 import OfflineBanner from '@/components/OfflineBanner'
@@ -25,13 +25,14 @@ export default function AppLayout() {
   const location  = useLocation()
   const [collapsed,      setCollapsed]      = useState(getSavedCollapsed)
   const [mobileOpen,     setMobileOpen]     = useState(false)
-  const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingDone())
 
   useRealtime()
   useKeyboardShortcuts()
   useNetworkStatus()
   useOfflineSync()
   useEventReminders()
+  /* Toast manager when a team member completes a task → status validation */
+  useValidationNotifier()
 
   const handleToggle = () => {
     setCollapsed(prev => {
@@ -84,11 +85,6 @@ export default function AppLayout() {
 
       {/* Global search palette — mounted once, listens to Cmd+K globally */}
       <GlobalSearch />
-
-      {/* First-time onboarding wizard */}
-      <AnimatePresence>
-        {showOnboarding && <Onboarding onClose={() => setShowOnboarding(false)} />}
-      </AnimatePresence>
 
       {/* PWA install prompt */}
       <PwaInstallBanner />

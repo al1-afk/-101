@@ -5,8 +5,9 @@ import {
   X, Plus, Trash2, GripVertical, Save, FileText,
   Type, ListOrdered, List as ListIcon, CheckSquare, MessageSquare, Code as CodeIcon,
   AlertCircle, Minus, Image as ImageIcon, Quote, Table as TableIcon,
-  Upload, Layers, ChevronDown, ChevronUp,
+  Upload, Layers, ChevronDown, ChevronUp, Video as VideoIcon, Link as LinkIcon,
 } from 'lucide-react'
+import { detectVideo } from '@/components/sop/videoEmbed'
 import type { Sop, SopBlock, SopBlockType } from '@/hooks/useSops'
 import { makeSopSlug, useCreateSop, useUpdateSop } from '@/hooks/useSops'
 import { Button } from '@/components/ui/button'
@@ -57,6 +58,7 @@ const BLOCK_TYPES: BlockTypeDef[] = [
   { type: 'checklist', label: 'Checklist',     icon: CheckSquare,    shortcut: 'checklist', group: 'list'     },
   { type: 'steps',     label: 'Étapes',        icon: Layers,         shortcut: 'etapes',    group: 'list'     },
   { type: 'image',     label: 'Image',         icon: ImageIcon,      shortcut: 'image',     group: 'media'    },
+  { type: 'video',     label: 'Vidéo (lien)',  icon: VideoIcon,      shortcut: 'video',     group: 'media'    },
   { type: 'table',     label: 'Tableau',       icon: TableIcon,      shortcut: 'tableau',   group: 'media'    },
   { type: 'callout',   label: 'Encadré',       icon: AlertCircle,    shortcut: 'callout',   group: 'advanced' },
   { type: 'template',  label: 'Template msg.', icon: MessageSquare,  shortcut: 'message',   group: 'advanced' },
@@ -174,6 +176,7 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
       .filter(blk => {
         if (blk.type === 'divider') return true
         if (blk.type === 'image') return !!blk.image?.url
+        if (blk.type === 'video') return !!blk.video?.url?.trim()
         if (blk.type === 'table') return !!blk.table && blk.table.rows.length > 0
         if (blk.items) return blk.items.length > 0
         return (blk.text ?? '').trim() !== ''
@@ -475,6 +478,8 @@ function BlockEditor({
           <p className="text-center text-xs text-muted-foreground italic">— Séparateur visuel —</p>
         ) : block.type === 'image' ? (
           <ImageBlockEditor block={block} onUpdate={onUpdate} />
+        ) : block.type === 'video' ? (
+          <VideoBlockEditor block={block} onUpdate={onUpdate} />
         ) : block.type === 'table' ? (
           <TableBlockEditor block={block} onUpdate={onUpdate} />
         ) : block.type === 'callout' ? (
@@ -601,6 +606,83 @@ function ImageBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
             </button>
           </div>
           <Input value={meta.caption ?? ''} onChange={e => onUpdate({ image: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" />
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ─── Video block editor (lien YouTube/Vimeo/Loom/MP4) ──────── */
+function VideoBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Partial<SopBlock>) => void }) {
+  const meta = block.video ?? { url: '' }
+  const info = detectVideo(meta.url)
+  const kindLabel = {
+    youtube: 'YouTube', vimeo: 'Vimeo', loom: 'Loom', file: 'Fichier vidéo', unknown: 'Lien non reconnu',
+  }[info.kind]
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <Input
+          value={meta.url}
+          onChange={e => onUpdate({ video: { ...meta, url: e.target.value } })}
+          placeholder="https://youtube.com/watch?v=… ou https://vimeo.com/… ou .mp4"
+          className="pl-9"
+        />
+      </div>
+
+      {meta.url.trim() ? (
+        info.embedUrl ? (
+          <div className={cn(
+            meta.size === 'small' ? 'max-w-xs' : meta.size === 'medium' ? 'max-w-sm' : meta.size === 'large' ? 'max-w-md' : 'w-full',
+            meta.align === 'left' ? 'mr-auto ml-0' : meta.align === 'right' ? 'ml-auto mr-0' : 'mx-auto',
+          )}>
+            <div className="aspect-video w-full rounded-lg overflow-hidden border border-border bg-black">
+              {info.kind === 'file' ? (
+                <video src={info.embedUrl} controls className="w-full h-full" />
+              ) : (
+                <iframe
+                  src={info.embedUrl}
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title={meta.caption || 'Vidéo'}
+                />
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">Aperçu · {kindLabel}</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+            Lien non reconnu. Collez une URL YouTube, Vimeo, Loom ou un fichier .mp4/.webm.
+          </div>
+        )
+      ) : (
+        <div className="rounded-lg border-2 border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+          <VideoIcon className="w-6 h-6 mx-auto mb-1 opacity-50" />
+          Collez un lien vidéo (YouTube, Vimeo, Loom ou .mp4)
+        </div>
+      )}
+
+      {meta.url.trim() && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <select value={meta.size ?? 'medium'} onChange={e => onUpdate({ video: { ...meta, size: e.target.value as any } })}
+              className="h-9 rounded-lg border border-border bg-[var(--surface-input)] px-2 text-sm">
+              <option value="small">Petit</option>
+              <option value="medium">Moyen</option>
+              <option value="large">Grand</option>
+              <option value="full">Pleine largeur</option>
+            </select>
+            <select value={meta.align ?? 'center'} onChange={e => onUpdate({ video: { ...meta, align: e.target.value as any } })}
+              className="h-9 rounded-lg border border-border bg-[var(--surface-input)] px-2 text-sm">
+              <option value="left">Gauche</option>
+              <option value="center">Centré</option>
+              <option value="right">Droite</option>
+            </select>
+          </div>
+          <Input value={meta.caption ?? ''} onChange={e => onUpdate({ video: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" />
         </>
       )}
     </div>
@@ -745,6 +827,8 @@ function makeBlock(type: SopBlockType): SopBlock {
       return { type }
     case 'image':
       return { type, image: { url: '', size: 'medium', align: 'center' } }
+    case 'video':
+      return { type, video: { url: '', size: 'medium', align: 'center' } }
     case 'table':
       return { type, table: { headers: ['Colonne 1', 'Colonne 2'], rows: [['', ''], ['', '']] } }
     default:

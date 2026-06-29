@@ -16,6 +16,17 @@ import {
   type Projet, type ProjetStatut, type ProjetPriorite,
 } from '@/hooks/useProjets'
 import { useClients } from '@/hooks/useClients'
+import { PROJET_TEMPLATES, type ProjetTemplate } from '@/lib/projetTemplates'
+import { teamMemberTasksApi } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { useTeamMemberTasks } from '@/hooks/useTeamMemberTasks'
+import { useProjetAssignees } from '@/hooks/useProjetAssignees'
+import { useTeam } from '@/hooks/useTeam'
+import { useCustomTemplates, rowToTemplate } from '@/hooks/useProjetTemplates'
+import TemplateEditorDialog from '@/components/projet/TemplateEditorDialog'
+import AdminTasksPanel from '@/components/projet/AdminTasksPanel'
+import { Settings } from 'lucide-react'
 
 const STATUT_CONFIG: Record<ProjetStatut, { label: string; variant: 'default'|'success'|'warning'|'secondary'|'destructive'; icon: React.ElementType }> = {
   planifie: { label: 'Planifié',  variant: 'default',     icon: Calendar      },
@@ -113,12 +124,13 @@ function ClientPicker({ value, onChange }: { value: string | null; onChange: (id
 }
 
 /* ── Project card (expandable row) ────────────────────────────── */
-function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient }: {
+function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient, onOpen }: {
   projet: Projet
   clientNom: string | undefined
   onDelete: (id: string) => void
   onEdit: (p: Projet) => void
   onOpenClient: (id: string) => void
+  onOpen: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const statut = STATUT_CONFIG[projet.statut] ?? STATUT_CONFIG.planifie
@@ -142,7 +154,13 @@ function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient }: {
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-foreground text-sm truncate">{projet.nom}</span>
+            <button
+              onClick={e => { e.stopPropagation(); onOpen(projet.id) }}
+              className="font-bold text-foreground text-sm truncate hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors text-left"
+              title="Ouvrir le projet"
+            >
+              {projet.nom}
+            </button>
             {clientNom && (
               <button
                 onClick={e => { e.stopPropagation(); if (projet.client_id) onOpenClient(projet.client_id) }}
@@ -233,6 +251,9 @@ function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient }: {
               )}
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                <Button size="sm" onClick={() => onOpen(projet.id)}>
+                  Ouvrir le projet →
+                </Button>
                 <Button variant="secondary" size="sm" onClick={() => onEdit(projet)}>
                   <Edit2 className="w-3.5 h-3.5" /> Modifier
                 </Button>
@@ -272,6 +293,14 @@ export default function Projets() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState<Projet | null>(null)
   const [form, setForm]         = useState<Partial<Projet>>(EMPTY)
+  const [selectedTemplates, setSelectedTemplates] = useState<string[]>([])
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false)
+  const { data: customs = [] } = useCustomTemplates()
+  const allTemplates = useMemo(
+    () => [...customs.map(rowToTemplate), ...PROJET_TEMPLATES],
+    [customs]
+  )
+  const qc = useQueryClient()
 
   useEffect(() => {
     if (editing) {
@@ -311,8 +340,39 @@ export default function Projets() {
     couts:    projets.reduce((s, p) => s + (p.cout_reel ?? 0), 0),
   }), [projets])
 
-  const openNew  = () => { setEditing(null); setForm(EMPTY); setShowForm(true) }
-  const openEdit = (p: Projet) => { setEditing(p); setShowForm(true) }
+  const openNew  = () => { setEditing(null); setForm(EMPTY); setSelectedTemplates([]); setShowForm(true) }
+  const openEdit = (p: Projet) => { setEditing(p); setSelectedTemplates([]); setShowForm(true) }
+
+  /** Bulk-create tasks from selected templates after project is created. */
+  const seedTasksFromTemplates = async (projetId: string, templateKeys: string[]) => {
+    const templates = templateKeys
+      .map(k => allTemplates.find(t => t.key === k))
+      .filter(Boolean) as ProjetTemplate[]
+    if (templates.length === 0) return
+    let count = 0
+    for (const tpl of templates) {
+      for (const group of tpl.groups) {
+        for (const task of group.tasks) {
+          try {
+            await teamMemberTasksApi.create({
+              project_id:     projetId,
+              team_member_id: null,                 // unassigned at creation
+              title:          task.title,
+              category:       group.category,
+              priority:       task.priority ?? 'normal',
+              status:         'todo',
+            } as any)
+            count++
+          } catch (e: any) {
+            console.error('[seedTasks]', e?.message ?? e)
+          }
+        }
+      }
+    }
+    await qc.refetchQueries({ queryKey: ['team_member_tasks'] })
+    if (count > 0) toast.success(`${count} tâche${count > 1 ? 's' : ''} créée${count > 1 ? 's' : ''} depuis les templates`)
+  }
+
   const submit   = () => {
     const payload = {
       ...form,
@@ -326,7 +386,14 @@ export default function Projets() {
     if (editing) {
       update.mutate({ id: editing.id, ...payload } as any, { onSuccess: () => { setShowForm(false); setEditing(null) } })
     } else {
-      create.mutate(payload, { onSuccess: () => { setShowForm(false); setForm(EMPTY) } })
+      create.mutate(payload, {
+        onSuccess: async (created: Projet) => {
+          if (selectedTemplates.length > 0 && created?.id) {
+            await seedTasksFromTemplates(created.id, selectedTemplates)
+          }
+          setShowForm(false); setForm(EMPTY); setSelectedTemplates([])
+        },
+      })
     }
   }
 
@@ -383,6 +450,9 @@ export default function Projets() {
         </div>
       </div>
 
+      {/* Mes tâches admin (cross-projets) */}
+      <AdminTasksPanel basePath={base} />
+
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 max-w-md">
@@ -404,6 +474,15 @@ export default function Projets() {
           </SelectContent>
         </Select>
       </div>
+
+      {/* ── Vue d'ensemble agence (table cross-projets) ─────────── */}
+      {filtered.length > 0 && (
+        <AgencyOverviewTable
+          projets={filtered}
+          clients={clients}
+          onOpen={id => navigate(`${base}/projets/${id}`)}
+        />
+      )}
 
       {isLoading ? (
         <div className="card-premium p-8 text-center text-muted-foreground text-sm">Chargement...</div>
@@ -427,6 +506,7 @@ export default function Projets() {
               onDelete={id => remove.mutate(id)}
               onEdit={openEdit}
               onOpenClient={openClient}
+              onOpen={id => navigate(`${base}/projets/${id}`)}
             />
           ))}
         </div>
@@ -555,6 +635,58 @@ export default function Projets() {
                   placeholder="Suivi, blocages, décisions..."
                 />
               </div>
+
+              {/* Templates de tâches (création uniquement) */}
+              {!editing && (
+                <div className="space-y-2 sm:col-span-2 p-3 rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-700/50 bg-blue-50/30 dark:bg-blue-950/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-blue-700 dark:text-blue-300">⚡ Templates de tâches</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">Coche les templates pour créer automatiquement toutes les tâches du projet.</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Button type="button" size="sm" variant="outline" onClick={() => setTemplateEditorOpen(true)} className="h-7 text-[11px]">
+                        <Settings className="w-3 h-3" /> Gérer
+                      </Button>
+                      {selectedTemplates.length > 0 && (
+                        <span className="text-[11px] font-bold px-2 py-1 rounded bg-blue-600 text-white">
+                          {selectedTemplates.reduce((s, k) => {
+                            const t = allTemplates.find(x => x.key === k)
+                            return s + (t ? t.groups.reduce((n, g) => n + g.tasks.length, 0) : 0)
+                          }, 0)} tâches
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {allTemplates.map(tpl => {
+                      const selected = selectedTemplates.includes(tpl.key)
+                      const taskCount = tpl.groups.reduce((n, g) => n + g.tasks.length, 0)
+                      const isCustom = tpl.key.startsWith('custom:')
+                      return (
+                        <label key={tpl.key}
+                          className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
+                            selected
+                              ? 'border-blue-500 bg-white dark:bg-slate-800 shadow-sm'
+                              : 'border-border bg-background hover:border-blue-300'
+                          }`}>
+                          <input type="checkbox" checked={selected}
+                            onChange={() => setSelectedTemplates(p => selected ? p.filter(k => k !== tpl.key) : [...p, tpl.key])}
+                            className="mt-0.5 w-4 h-4 accent-blue-600" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                              <span>{tpl.emoji}</span> {tpl.label}
+                              <span className="text-[10px] font-mono text-muted-foreground">({taskCount})</span>
+                              {isCustom && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">PERSO</span>}
+                            </p>
+                            {tpl.description && <p className="text-[11px] text-muted-foreground truncate">{tpl.description}</p>}
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 pt-2 border-t border-border">
@@ -569,6 +701,106 @@ export default function Projets() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Éditeur de templates persos (accessible depuis le picker) */}
+      <TemplateEditorDialog open={templateEditorOpen} onClose={() => setTemplateEditorOpen(false)} />
+    </div>
+  )
+}
+
+/* ─── Agency overview table (cross-project dashboard) ─────────────── */
+function AgencyOverviewTable({
+  projets, clients, onOpen,
+}: {
+  projets: Projet[]
+  clients: { id: string; nom: string; entreprise?: string | null }[]
+  onOpen:  (id: string) => void
+}) {
+  const { data: tasks = [] }     = useTeamMemberTasks()
+  const { data: assignees = [] } = useProjetAssignees()
+  const { data: members = [] }   = useTeam()
+
+  const clientMap = useMemo(() => {
+    const m = new Map<string, string>()
+    clients.forEach(c => m.set(c.id, c.entreprise || c.nom))
+    return m
+  }, [clients])
+
+  const rows = useMemo(() => projets.map(p => {
+    const t = tasks.filter(x => x.project_id === p.id)
+    const done = t.filter(x => x.status === 'done').length
+    const pct = t.length > 0 ? Math.round((done / t.length) * 100) : p.progression
+    const lead = assignees.find(a => a.projet_id === p.id && a.role === 'lead')
+              ?? assignees.find(a => a.projet_id === p.id)
+    const leadMember = lead ? members.find(m => m.id === lead.team_member_id) : undefined
+    const overdue = p.date_fin_prevue ? new Date(p.date_fin_prevue) < new Date() && p.statut !== 'termine' : false
+    return { projet: p, taskCount: t.length, done, pct, leadName: leadMember ? `${leadMember.prenom} ${leadMember.nom}`.trim() : (p.responsable ?? '—'), overdue }
+  }), [projets, tasks, assignees, members])
+
+  return (
+    <div className="card-premium overflow-hidden">
+      <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+        <Briefcase className="w-4 h-4 text-blue-500" />
+        <p className="text-sm font-bold text-foreground">Vue d'ensemble agence</p>
+        <span className="text-[11px] text-muted-foreground">— {rows.length} projet{rows.length > 1 ? 's' : ''}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2 text-left font-bold">Client</th>
+              <th className="px-4 py-2 text-left font-bold">Projet</th>
+              <th className="px-4 py-2 text-left font-bold w-48">Progression</th>
+              <th className="px-4 py-2 text-left font-bold">Responsable</th>
+              <th className="px-4 py-2 text-left font-bold">Échéance</th>
+              <th className="px-4 py-2 text-left font-bold">Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ projet, taskCount, done, pct, leadName, overdue }) => {
+              const statutCfg = STATUT_CONFIG[projet.statut] ?? STATUT_CONFIG.planifie
+              const SIcon = statutCfg.icon
+              return (
+                <tr key={projet.id} className="border-b border-border/40 last:border-b-0 hover:bg-muted/30 transition-colors cursor-pointer"
+                  onClick={() => onOpen(projet.id)}>
+                  <td className="px-4 py-2.5 text-foreground/85">
+                    {projet.client_id ? clientMap.get(projet.client_id) : '—'}
+                  </td>
+                  <td className="px-4 py-2.5 font-semibold text-foreground">{projet.nom}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{
+                          width: `${pct}%`,
+                          background: pct === 100 ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #6366f1, #818cf8)',
+                        }} />
+                      </div>
+                      <span className="text-xs font-mono font-bold tabular-nums w-10 text-right">{pct}%</span>
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">{done}/{taskCount}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-foreground/80">{leadName}</td>
+                  <td className="px-4 py-2.5">
+                    {projet.date_fin_prevue
+                      ? (
+                          <span className={overdue ? 'text-red-500 font-semibold' : 'text-foreground/80'}>
+                            {formatDate(projet.date_fin_prevue)}{overdue && ' ⚠'}
+                          </span>
+                        )
+                      : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Badge variant={statutCfg.variant}>
+                      <SIcon className="w-3 h-3" />
+                      {projet.statut === 'termine' ? '✔️ Terminé' : statutCfg.label}
+                    </Badge>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

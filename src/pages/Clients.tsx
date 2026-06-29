@@ -1,9 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import {
   Plus, Search, User, Building2, Phone, Mail, MapPin,
-  Edit2, Trash2, Loader2, Eye
+  Edit2, Trash2, Loader2, Eye, Globe, Server, AlertTriangle, Clock,
 } from 'lucide-react'
 import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
 import { Button } from '@/components/ui/button'
@@ -15,10 +14,44 @@ import { clientsSchema } from '@/lib/importExportSchemas'
 import {
   DateRangeFilter, DEFAULT_RANGE, makeDatePredicate, type DateRange,
 } from '@/components/ui/DateRangeFilter'
+import { parseClientNotes, serializeClientNotes, daysUntil } from '@/lib/clientNotes'
+
+/* ─── Domain / hosting cell with countdown badge ─────────────────── */
+function DomainCell({
+  name, expiry, icon: Icon,
+}: { name?: string; expiry?: string; icon: React.ElementType }) {
+  if (!name && !expiry) return <span className="text-muted-foreground/50">—</span>
+  const days = daysUntil(expiry)
+  let badgeCls = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+  let BadgeIcon: React.ElementType | null = null
+  let badgeTxt = ''
+  if (days !== null) {
+    if (days < 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `Expiré -${Math.abs(days)}j` }
+    else if (days === 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `Aujourd'hui` }
+    else if (days <= 7) { badgeCls = 'bg-red-500/10 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `${days}j` }
+    else if (days <= 30) { badgeCls = 'bg-amber-500/15 text-amber-600 dark:text-amber-400'; BadgeIcon = Clock; badgeTxt = `${days}j` }
+    else { BadgeIcon = Clock; badgeTxt = `${days}j` }
+  }
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+      <div className="min-w-0">
+        {name && <p className="text-xs font-semibold text-foreground truncate" title={name}>{name}</p>}
+        {badgeTxt && (
+          <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded ${badgeCls}`}>
+            {BadgeIcon && <BadgeIcon className="w-2.5 h-2.5" />}
+            {badgeTxt}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function ClientForm({ client, onClose }: { client?: Client; onClose: () => void }) {
   const create = useCreateClient()
   const update = useUpdateClient()
+  const parsed = parseClientNotes(client?.notes)
   const [form, setForm] = useState({
     nom: client?.nom || '',
     email: client?.email || '',
@@ -27,13 +60,14 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
     adresse: client?.adresse || '',
     ville: client?.ville || '',
     pays: client?.pays || 'Maroc',
-    notes: client?.notes || '',
+    notes: parsed.text,
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (client) await update.mutateAsync({ id: client.id, ...form })
-    else await create.mutateAsync(form as any)
+    const merged = { ...form, notes: serializeClientNotes(parsed.meta, form.notes, parsed.blocks) }
+    if (client) await update.mutateAsync({ id: client.id, ...merged })
+    else await create.mutateAsync(merged as any)
     onClose()
   }
 
@@ -134,89 +168,113 @@ export default function Clients() {
         <Input placeholder="Rechercher un client..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
-      {/* Grid */}
+      {/* Table */}
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-400" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pb-6">
-          {filtered.map((c, i) => (
-            <motion.div
-              key={c.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.04 }}
-              className="card-premium p-5 hover:border-blue-500/30 transition-all duration-300 group"
-            >
-              <div className="flex items-start gap-3">
-                <div className="avatar-initials w-12 h-12 flex-shrink-0">
-                  <span className="font-bold text-sm">{getInitials(c.nom)}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-foreground truncate">{c.nom}</h3>
-                  {c.entreprise && (
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <Building2 className="w-3 h-3 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground truncate">{c.entreprise}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => { setEditingClient(c); setShowForm(true) }}>
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="w-7 h-7 text-red-400" onClick={() => { if (confirm('Supprimer ce client ?')) deleteClient.mutate(c.id) }}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-1.5">
-                {c.email && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Mail className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="truncate">{c.email}</span>
-                  </div>
+        <div className="card-premium overflow-hidden">
+          <div className="table-scroll">
+            <table className="w-full">
+              <thead className="table-header">
+                <tr className="table-header">
+                  <th>Client</th>
+                  <th>Contact</th>
+                  <th>Localisation</th>
+                  <th>Domaine</th>
+                  <th>Hébergement</th>
+                  <th>Depuis</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(c => {
+                  const meta = parseClientNotes(c.notes).meta
+                  return (
+                    <tr key={c.id} className="table-row group">
+                      <td>
+                        <button
+                          onClick={() => navigate(c.id)}
+                          className="flex items-center gap-3 text-left"
+                        >
+                          <div className="avatar-initials w-9 h-9 flex-shrink-0">
+                            <span className="font-bold text-xs">{getInitials(c.nom)}</span>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-foreground truncate hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{c.nom}</p>
+                            {c.entreprise && (
+                              <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                                <Building2 className="w-3 h-3" /> {c.entreprise}
+                              </p>
+                            )}
+                          </div>
+                        </button>
+                      </td>
+                      <td>
+                        <div className="space-y-0.5 text-xs">
+                          {c.email && (
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <Mail className="w-3 h-3" />
+                              <span className="truncate max-w-[180px]" title={c.email}>{c.email}</span>
+                            </div>
+                          )}
+                          {c.telephone && (
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <Phone className="w-3 h-3" /> {c.telephone}
+                            </div>
+                          )}
+                          {!c.email && !c.telephone && <span className="text-muted-foreground/50">—</span>}
+                        </div>
+                      </td>
+                      <td>
+                        {(c.ville || c.pays) ? (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <MapPin className="w-3 h-3" />
+                            {[c.ville, c.pays].filter(Boolean).join(', ')}
+                          </div>
+                        ) : <span className="text-muted-foreground/50">—</span>}
+                      </td>
+                      <td>
+                        <DomainCell name={meta.domainName} expiry={meta.domainExpiry} icon={Globe} />
+                      </td>
+                      <td>
+                        <DomainCell name={meta.hostingName} expiry={meta.hostingExpiry} icon={Server} />
+                      </td>
+                      <td className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(c.created_at)}</td>
+                      <td>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon" className="w-7 h-7 text-blue-600 dark:text-blue-400" onClick={() => navigate(c.id)} title="Voir détails">
+                            <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => { setEditingClient(c); setShowForm(true) }} title="Modifier">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="w-7 h-7 text-red-400 hover:bg-red-500/10"
+                            onClick={() => { if (confirm(`Supprimer ${c.nom} ?`)) deleteClient.mutate(c.id) }}
+                            title="Supprimer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7}>
+                      <div className="empty-state">
+                        <User className="empty-state-icon" />
+                        <p className="empty-state-title">Aucun client trouvé</p>
+                        <p className="empty-state-desc">Ajoutez votre premier client ou modifiez votre recherche</p>
+                      </div>
+                    </td>
+                  </tr>
                 )}
-                {c.telephone && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Phone className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span>{c.telephone}</span>
-                  </div>
-                )}
-                {(c.ville || c.pays) && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span>{[c.ville, c.pays].filter(Boolean).join(', ')}</span>
-                  </div>
-                )}
-              </div>
-
-              {c.notes && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs text-muted-foreground line-clamp-2">{c.notes}</p>
-                </div>
-              )}
-
-              <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Depuis {formatDate(c.created_at)}</span>
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-                  onClick={() => navigate(c.id)}>
-                  <Eye className="w-3 h-3 mr-1" />
-                  Détails
-                </Button>
-              </div>
-            </motion.div>
-          ))}
-
-          {filtered.length === 0 && (
-            <div className="col-span-full empty-state">
-              <User className="empty-state-icon" />
-              <p className="empty-state-title">Aucun client trouvé</p>
-              <p className="empty-state-desc">Ajoutez votre premier client ou modifiez votre recherche</p>
-            </div>
-          )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import ThemeToggle from '@/components/ui/ThemeToggle'
+import NotificationBell from '@/components/NotificationBell'
 import { cn } from '@/lib/utils'
 import { useAlerts, type Alert, type AlertPriority } from '@/hooks/useAlerts'
 import { openGlobalSearch } from '@/components/GlobalSearch'
@@ -193,6 +194,9 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
         </button>
 
         <ThemeToggle />
+
+        {/* ── Task / validation notifications bell ── */}
+        <NotificationBell scope="admin" />
 
         {/* ── Alerts Bell ── */}
         <div className="relative">
