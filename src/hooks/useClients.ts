@@ -14,6 +14,14 @@ export interface Client {
   ville:      string | null
   pays:       string | null
   notes:      string | null
+  /* Champs métier — affichés dans la table /clients (migration 057).
+     Optionnels pour ne pas casser les callers existants (Devis/Factures
+     qui créent un client à la volée). */
+  type_service?:        string | null  // 'Site web' | 'Social Media' | ...
+  sous_categorie?:      string | null  // 'SEO' | 'Ads' | 'Les messages' | ...
+  date_debut_contrat?:  string | null  // YYYY-MM-DD
+  montant_ttc_annuel?:  number | null
+  prix_renouvellement?: number | null
 }
 
 const KEY = 'clients'
@@ -37,12 +45,15 @@ export function useCreateClient() {
   })
 }
 
-export function useUpdateClient() {
+export function useUpdateClient(opts: { silent?: boolean } = {}) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...data }: Partial<Client> & { id: string }) =>
       clientsApi.update(id, data) as Promise<Client>,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: [KEY] }); toast.success('Client mis à jour') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [KEY] })
+      if (!opts.silent) toast.success('Client mis à jour')
+    },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
 }

@@ -8,7 +8,8 @@ import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Cli
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { formatDate, getInitials } from '@/lib/utils'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { formatCurrency, formatDate, getInitials } from '@/lib/utils'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { clientsSchema } from '@/lib/importExportSchemas'
 import {
@@ -16,18 +17,22 @@ import {
 } from '@/components/ui/DateRangeFilter'
 import { parseClientNotes, serializeClientNotes, daysUntil } from '@/lib/clientNotes'
 
-/* ─── Domain / hosting cell with countdown badge ─────────────────── */
+/* ─── Domain / hosting cell with countdown badge (inline editable) ─────────────────── */
 function DomainCell({
-  name, expiry, icon: Icon,
-}: { name?: string; expiry?: string; icon: React.ElementType }) {
-  if (!name && !expiry) return <span className="text-muted-foreground/50">—</span>
+  name, expiry, icon: Icon, onSave,
+}: {
+  name?:   string
+  expiry?: string
+  icon:    React.ElementType
+  onSave:  (patch: { name?: string; expiry?: string }) => void
+}) {
   const days = daysUntil(expiry)
   let badgeCls = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-  let BadgeIcon: React.ElementType | null = null
+  let BadgeIcon: React.ElementType | null = Clock
   let badgeTxt = ''
   if (days !== null) {
-    if (days < 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `Expiré -${Math.abs(days)}j` }
-    else if (days === 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `Aujourd'hui` }
+    if (days < 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `-${Math.abs(days)}j` }
+    else if (days === 0) { badgeCls = 'bg-red-500/15 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `0j` }
     else if (days <= 7) { badgeCls = 'bg-red-500/10 text-red-600 dark:text-red-400'; BadgeIcon = AlertTriangle; badgeTxt = `${days}j` }
     else if (days <= 30) { badgeCls = 'bg-amber-500/15 text-amber-600 dark:text-amber-400'; BadgeIcon = Clock; badgeTxt = `${days}j` }
     else { BadgeIcon = Clock; badgeTxt = `${days}j` }
@@ -35,18 +40,42 @@ function DomainCell({
   return (
     <div className="flex items-center gap-1.5 min-w-0">
       <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-      <div className="min-w-0">
-        {name && <p className="text-xs font-semibold text-foreground truncate" title={name}>{name}</p>}
-        {badgeTxt && (
-          <span className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded ${badgeCls}`}>
-            {BadgeIcon && <BadgeIcon className="w-2.5 h-2.5" />}
-            {badgeTxt}
-          </span>
-        )}
+      <div className="min-w-0 space-y-0.5">
+        <input
+          type="text"
+          defaultValue={name ?? ''}
+          key={`n-${name ?? ''}`}
+          onBlur={e => {
+            const v = e.target.value.trim()
+            if (v !== (name ?? '')) onSave({ name: v || undefined })
+          }}
+          placeholder="—"
+          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0.5 text-xs font-semibold text-foreground w-24 outline-none"
+          title="Cliquer pour modifier"
+        />
+        <div className="flex items-center gap-1">
+          <input
+            type="date"
+            defaultValue={expiry ?? ''}
+            key={`e-${expiry ?? ''}`}
+            onChange={e => onSave({ expiry: e.target.value || undefined })}
+            className={`bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0.5 text-[10px] cursor-pointer outline-none ${badgeTxt && days !== null && days <= 30 ? 'text-red-600 dark:text-red-400 font-bold' : 'text-muted-foreground'}`}
+            title="Date d'expiration"
+          />
+          {badgeTxt && (
+            <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1 py-0.5 rounded ${badgeCls}`}>
+              {BadgeIcon && <BadgeIcon className="w-2 h-2" />}
+              {badgeTxt}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )
 }
+
+const TYPE_SERVICES = ['Site web', 'Social Media', 'SEO', 'Ads', 'Identité visuelle', 'Maintenance', 'Autre'] as const
+const SOUS_CATEGORIES = ['SEO', 'Ads', 'Les messages', 'Création contenu', 'Refonte', 'Autre'] as const
 
 function ClientForm({ client, onClose }: { client?: Client; onClose: () => void }) {
   const create = useCreateClient()
@@ -61,11 +90,24 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
     ville: client?.ville || '',
     pays: client?.pays || 'Maroc',
     notes: parsed.text,
+    type_service:        client?.type_service        || '',
+    sous_categorie:      client?.sous_categorie      || '',
+    date_debut_contrat:  client?.date_debut_contrat  || '',
+    montant_ttc_annuel:  client?.montant_ttc_annuel  ?? '',
+    prix_renouvellement: client?.prix_renouvellement ?? '',
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const merged = { ...form, notes: serializeClientNotes(parsed.meta, form.notes, parsed.blocks) }
+    const merged: any = {
+      ...form,
+      notes: serializeClientNotes(parsed.meta, form.notes, parsed.blocks),
+      type_service:        form.type_service        || null,
+      sous_categorie:      form.sous_categorie      || null,
+      date_debut_contrat:  form.date_debut_contrat  || null,
+      montant_ttc_annuel:  form.montant_ttc_annuel  === '' ? null : Number(form.montant_ttc_annuel),
+      prix_renouvellement: form.prix_renouvellement === '' ? null : Number(form.prix_renouvellement),
+    }
     if (client) await update.mutateAsync({ id: client.id, ...merged })
     else await create.mutateAsync(merged as any)
     onClose()
@@ -103,6 +145,46 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
           <Input value={form.pays} onChange={e => setForm(p => ({ ...p, pays: e.target.value }))} />
         </div>
       </div>
+
+      {/* ── Bloc Contrat / Prestation ───────────────────────────── */}
+      <div className="rounded-xl border border-dashed border-blue-300 dark:border-blue-700/50 bg-blue-50/30 dark:bg-blue-950/10 p-3 space-y-3">
+        <p className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-widest">💼 Contrat / Prestation</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="form-label">Type de service</label>
+            <Select value={form.type_service || 'none'} onValueChange={v => setForm(p => ({ ...p, type_service: v === 'none' ? '' : v }))}>
+              <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">—</SelectItem>
+                {TYPE_SERVICES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="form-label">Sous-catégorie</label>
+            <Select value={form.sous_categorie || 'none'} onValueChange={v => setForm(p => ({ ...p, sous_categorie: v === 'none' ? '' : v }))}>
+              <SelectTrigger><SelectValue placeholder="Choisir…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">—</SelectItem>
+                {SOUS_CATEGORIES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="form-label">Date de début</label>
+            <Input type="date" value={form.date_debut_contrat} onChange={e => setForm(p => ({ ...p, date_debut_contrat: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="form-label">Montant TTC annuel</label>
+            <Input type="number" step="0.01" value={form.montant_ttc_annuel} onChange={e => setForm(p => ({ ...p, montant_ttc_annuel: e.target.value }))} placeholder="0,00" />
+          </div>
+          <div className="space-y-1.5 col-span-2 sm:col-span-1">
+            <label className="form-label">Prix renouvellement (annuel)</label>
+            <Input type="number" step="0.01" value={form.prix_renouvellement} onChange={e => setForm(p => ({ ...p, prix_renouvellement: e.target.value }))} placeholder="0,00" />
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-1.5">
         <label className="form-label">Notes</label>
         <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
@@ -123,6 +205,9 @@ export default function Clients() {
   const navigate = useNavigate()
   const { data: clients = [], isLoading } = useClients()
   const createClient = useCreateClient()
+  /* Silent update — used for inline cell edits (date + montants) to
+     éviter de spammer un toast à chaque keystroke. */
+  const updateClient = useUpdateClient({ silent: true })
   const deleteClient = useDeleteClient()
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -181,10 +266,13 @@ export default function Clients() {
                 <tr className="table-header">
                   <th>Client</th>
                   <th>Contact</th>
-                  <th>Localisation</th>
+                  <th>Type</th>
+                  <th>Catégorie</th>
+                  <th>Début contrat</th>
+                  <th className="text-right">Montant TTC</th>
                   <th>Domaine</th>
                   <th>Hébergement</th>
-                  <th>Depuis</th>
+                  <th className="text-right">Renouv.</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
@@ -228,20 +316,93 @@ export default function Clients() {
                         </div>
                       </td>
                       <td>
-                        {(c.ville || c.pays) ? (
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <MapPin className="w-3 h-3" />
-                            {[c.ville, c.pays].filter(Boolean).join(', ')}
-                          </div>
+                        {c.type_service ? (
+                          <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                            {c.type_service}
+                          </span>
                         ) : <span className="text-muted-foreground/50">—</span>}
                       </td>
                       <td>
-                        <DomainCell name={meta.domainName} expiry={meta.domainExpiry} icon={Globe} />
+                        {c.sous_categorie ? (
+                          <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                            {c.sous_categorie}
+                          </span>
+                        ) : <span className="text-muted-foreground/50">—</span>}
+                      </td>
+                      <td className="text-xs whitespace-nowrap">
+                        <input
+                          type="date"
+                          defaultValue={c.date_debut_contrat ?? ''}
+                          key={`d-${c.id}-${c.date_debut_contrat ?? ''}`}
+                          onChange={e => updateClient.mutate({ id: c.id, date_debut_contrat: e.target.value || null })}
+                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1.5 py-1 text-xs cursor-pointer w-32 outline-none"
+                          title="Cliquer pour modifier"
+                        />
+                      </td>
+                      <td className="text-xs text-right whitespace-nowrap">
+                        <input
+                          type="number"
+                          step="0.01"
+                          defaultValue={c.montant_ttc_annuel ?? ''}
+                          key={`m-${c.id}-${c.montant_ttc_annuel ?? ''}`}
+                          onBlur={e => {
+                            const v = e.target.value === '' ? null : Number(e.target.value)
+                            if (v !== (c.montant_ttc_annuel ?? null))
+                              updateClient.mutate({ id: c.id, montant_ttc_annuel: v })
+                          }}
+                          placeholder="—"
+                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1.5 py-1 text-xs cursor-pointer w-24 text-right font-semibold outline-none"
+                          title="Cliquer pour modifier (Tab/Entrée pour sauvegarder)"
+                        />
                       </td>
                       <td>
-                        <DomainCell name={meta.hostingName} expiry={meta.hostingExpiry} icon={Server} />
+                        <DomainCell
+                          name={meta.domainName}
+                          expiry={meta.domainExpiry}
+                          icon={Globe}
+                          onSave={patch => {
+                            const parsed = parseClientNotes(c.notes)
+                            const newMeta = {
+                              ...parsed.meta,
+                              ...(patch.name   !== undefined ? { domainName:   patch.name }   : {}),
+                              ...(patch.expiry !== undefined ? { domainExpiry: patch.expiry } : {}),
+                            }
+                            updateClient.mutate({ id: c.id, notes: serializeClientNotes(newMeta, parsed.text, parsed.blocks) })
+                          }}
+                        />
                       </td>
-                      <td className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(c.created_at)}</td>
+                      <td>
+                        <DomainCell
+                          name={meta.hostingName}
+                          expiry={meta.hostingExpiry}
+                          icon={Server}
+                          onSave={patch => {
+                            const parsed = parseClientNotes(c.notes)
+                            const newMeta = {
+                              ...parsed.meta,
+                              ...(patch.name   !== undefined ? { hostingName:   patch.name }   : {}),
+                              ...(patch.expiry !== undefined ? { hostingExpiry: patch.expiry } : {}),
+                            }
+                            updateClient.mutate({ id: c.id, notes: serializeClientNotes(newMeta, parsed.text, parsed.blocks) })
+                          }}
+                        />
+                      </td>
+                      <td className="text-xs text-right whitespace-nowrap">
+                        <input
+                          type="number"
+                          step="0.01"
+                          defaultValue={c.prix_renouvellement ?? ''}
+                          key={`r-${c.id}-${c.prix_renouvellement ?? ''}`}
+                          onBlur={e => {
+                            const v = e.target.value === '' ? null : Number(e.target.value)
+                            if (v !== (c.prix_renouvellement ?? null))
+                              updateClient.mutate({ id: c.id, prix_renouvellement: v })
+                          }}
+                          placeholder="—"
+                          className="bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-emerald-400 rounded px-1.5 py-1 text-xs cursor-pointer w-24 text-right font-semibold text-emerald-600 dark:text-emerald-400 outline-none"
+                          title="Cliquer pour modifier (Tab/Entrée pour sauvegarder)"
+                        />
+                      </td>
                       <td>
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon" className="w-7 h-7 text-blue-600 dark:text-blue-400" onClick={() => navigate(c.id)} title="Voir détails">
@@ -263,7 +424,7 @@ export default function Clients() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={10}>
                       <div className="empty-state">
                         <User className="empty-state-icon" />
                         <p className="empty-state-title">Aucun client trouvé</p>
