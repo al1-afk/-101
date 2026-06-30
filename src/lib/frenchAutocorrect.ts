@@ -93,7 +93,8 @@ export const DICTIONARY: Record<string, string> = {
   'fetes':      'fêtes',
   'cout':       'coût',
   'couts':      'coûts',
-  'sur':        'sûr',  /* attention : "sur" comme préposition existe aussi */
+  /* Note : "sur" non corrigé car bien plus fréquent comme préposition (sur la table)
+     que comme adjectif "sûr" (certain). */
   'bientot':    'bientôt',
   'plutot':     'plutôt',
   'depot':      'dépôt',
@@ -148,6 +149,11 @@ export const DICTIONARY: Record<string, string> = {
   'developpement':'développement',
   'developpe':  'développé',
   'developpee': 'développée',
+  'deploiement':'déploiement',
+  'deploiements':'déploiements',
+  'deploye':    'déployé',
+  'deployee':   'déployée',
+  'deployer':   'déployer',
   'creer':      'créer',
   'cree':       'créé',
   'creee':      'créée',

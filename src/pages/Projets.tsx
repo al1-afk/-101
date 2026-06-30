@@ -127,9 +127,12 @@ function ClientPicker({ value, onChange }: { value: string | null; onChange: (id
 }
 
 /* ── Project card (expandable row) ────────────────────────────── */
-function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient, onOpen }: {
+function ProjetCard({ projet, clientNom, projectTasks, onDelete, onEdit, onOpenClient, onOpen }: {
   projet: Projet
   clientNom: string | undefined
+  /** Tâches de ce projet (passées depuis le parent qui a déjà les data) —
+      utilisées pour calculer dynamiquement la progression : done / total. */
+  projectTasks: { status: string }[]
   onDelete: (id: string) => void
   onEdit: (p: Projet) => void
   onOpenClient: (id: string) => void
@@ -142,6 +145,14 @@ function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient, onOpen 
 
   const marge = (projet.budget ?? 0) - (projet.cout_reel ?? 0)
   const margeColor = marge >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'
+
+  /* Progression auto = ratio tâches done / total. Fallback sur le champ
+     manuel projet.progression si aucune tâche existe. */
+  const totalTasks = projectTasks.length
+  const doneTasks  = projectTasks.filter(t => t.status === 'done').length
+  const progression = totalTasks > 0
+    ? Math.round((doneTasks / totalTasks) * 100)
+    : (projet.progression ?? 0)
 
   return (
     <div className="card-premium overflow-hidden">
@@ -183,15 +194,18 @@ function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient, onOpen 
           </div>
         </div>
 
-        {/* Progression bar */}
+        {/* Progression bar — auto-calculée depuis les tâches */}
         <div className="hidden sm:flex flex-col items-end gap-1 w-32">
-          <span className="text-xs font-semibold text-muted-foreground">{projet.progression}%</span>
+          <span className="text-xs font-semibold text-muted-foreground">
+            {progression}%
+            {totalTasks > 0 && <span className="text-[10px] text-muted-foreground/70 ml-1">({doneTasks}/{totalTasks})</span>}
+          </span>
           <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
               style={{
-                width: `${projet.progression}%`,
-                background: projet.progression === 100
+                width: `${progression}%`,
+                background: progression === 100
                   ? 'linear-gradient(90deg, #10b981, #34d399)'
                   : 'linear-gradient(90deg, #6366f1, #818cf8)',
               }}
@@ -242,7 +256,10 @@ function ProjetCard({ projet, clientNom, onDelete, onEdit, onOpenClient, onOpen 
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Progression</p>
-                  <p className="text-base font-bold text-indigo-600 dark:text-indigo-400">{projet.progression}%</p>
+                  <p className="text-base font-bold text-indigo-600 dark:text-indigo-400">
+                    {progression}%
+                    {totalTasks > 0 && <span className="text-xs text-muted-foreground font-normal ml-1">({doneTasks}/{totalTasks} tâches)</span>}
+                  </p>
                 </div>
               </div>
 
@@ -280,6 +297,7 @@ export default function Projets() {
 
   const { data: projets = [], isLoading } = useProjets()
   const { data: clients = [] }            = useClients()
+  const { data: allTasks = [] }           = useTeamMemberTasks()
   const create = useCreateProjet()
   const update = useUpdateProjet()
   const remove = useDeleteProjet()
@@ -506,6 +524,7 @@ export default function Projets() {
               key={p.id}
               projet={p}
               clientNom={p.client_id ? clientMap.get(p.client_id) : undefined}
+              projectTasks={allTasks.filter(t => t.project_id === p.id)}
               onDelete={id => remove.mutate(id)}
               onEdit={openEdit}
               onOpenClient={openClient}
