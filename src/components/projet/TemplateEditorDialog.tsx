@@ -7,6 +7,7 @@ import { useState, useMemo } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Plus, X, Trash2, Pencil, Save, ArrowLeft, FolderPlus, Sparkles, Copy,
@@ -234,7 +235,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                 onChange={e => setForm(p => ({ ...p, emoji: e.target.value }))}
                 placeholder="📋"
               />
-              <Input
+              <AutocorrectInput
                 className="col-span-10"
                 value={form.label}
                 onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
@@ -242,7 +243,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                 autoFocus
               />
             </div>
-            <Input
+            <AutocorrectInput
               value={form.description}
               onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               placeholder="Description courte (optionnel)"
@@ -260,7 +261,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
               {form.groups.map((g, gIdx) => (
                 <div key={gIdx} className="rounded-lg border border-border bg-card p-3 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Input
+                    <AutocorrectInput
                       className="flex-1 h-8 text-sm font-semibold"
                       value={g.category}
                       onChange={e => updateGroupCategory(gIdx, e.target.value)}
@@ -278,7 +279,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                   <div className="space-y-1.5 pl-2 border-l-2 border-blue-200 dark:border-blue-900/40">
                     {g.tasks.map((t, tIdx) => (
                       <div key={tIdx} className="flex items-center gap-1.5">
-                        <Input
+                        <AutocorrectInput
                           className="flex-1 h-8 text-xs"
                           value={t.title}
                           onChange={e => updateTask(gIdx, tIdx, { title: e.target.value })}

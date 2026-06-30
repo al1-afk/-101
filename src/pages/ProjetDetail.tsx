@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Badge }  from '@/components/ui/badge'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -737,9 +738,9 @@ function TasksTab({
 
         {showTaskForm && (
           <form onSubmit={submitTask} className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
-            <Input autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche…" />
+            <AutocorrectInput autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche…" />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <Input value={taskForm.category} onChange={e => setTaskForm(p => ({ ...p, category: e.target.value }))} placeholder="Catégorie (ex: Design)" className="h-9" />
+              <AutocorrectInput value={taskForm.category} onChange={e => setTaskForm(p => ({ ...p, category: e.target.value }))} placeholder="Catégorie (ex: Design)" className="h-9" />
               <Select value={taskForm.team_member_id} onValueChange={v => setTaskForm(p => ({ ...p, team_member_id: v }))}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Assigner…" /></SelectTrigger>
                 <SelectContent>
@@ -826,7 +827,7 @@ function TasksTab({
 
         {showRequestForm && (
           <form onSubmit={submitRequest} className="rounded-xl border-2 border-violet-200 dark:border-violet-800/50 bg-violet-50/30 dark:bg-violet-950/10 p-3 space-y-2">
-            <Input autoFocus value={reqForm.title} onChange={e => setReqForm(p => ({ ...p, title: e.target.value }))} placeholder="Demande client (ex: Changer la couleur du bouton)" />
+            <AutocorrectInput autoFocus value={reqForm.title} onChange={e => setReqForm(p => ({ ...p, title: e.target.value }))} placeholder="Demande client (ex: Changer la couleur du bouton)" />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <Select value={reqForm.team_member_id} onValueChange={v => setReqForm(p => ({ ...p, team_member_id: v }))}>
                 <SelectTrigger className="h-9"><SelectValue placeholder="Assigner…" /></SelectTrigger>

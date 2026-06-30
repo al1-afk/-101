@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Target, Save, Lock, Sparkles, Crown, Briefcase, TrendingUp, Clock, Repeat, Star } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenantVision, useUpdateTenantVision, type TenantVision } from '@/hooks/useGuides'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { cn } from '@/lib/utils'
 
 /* Classes input compatibles avec le design system du projet
@@ -104,7 +105,7 @@ export default function Vision() {
             subtitle="Le pourquoi profond, avant le business"
           >
             <Field label="Style de vie visé">
-              <textarea
+              <AutocorrectTextarea
                 className={`${TEXTAREA_CLS} min-h-[80px]`}
                 placeholder="Ex. Avoir 30 000 MAD/mois de récurrent, travailler 4 jours par semaine, voyager 6 semaines/an…"
                 value={form.lifestyle_target ?? ''}
@@ -112,7 +113,7 @@ export default function Vision() {
               />
             </Field>
             <Field label="Why statement — pourquoi je fais ça">
-              <textarea
+              <AutocorrectTextarea
                 className={`${TEXTAREA_CLS} min-h-[100px]`}
                 placeholder="Ex. Bâtir un système qui tourne sans moi pour libérer du temps avec ma famille et apprendre…"
                 value={form.why_statement ?? ''}
@@ -176,7 +177,7 @@ export default function Vision() {
             subtitle="Revu chaque 1er Jan, Avr, Juil, Oct"
           >
             <Field label="Objectif principal (1 phrase)">
-              <textarea
+              <AutocorrectTextarea
                 className={`${TEXTAREA_CLS} min-h-[80px]`}
                 placeholder="Ex. Atteindre 5 abonnements SaaS actifs et 30 000 MAD/mois de récurrent d'ici fin Q3."
                 value={form.strategic_objective ?? ''}

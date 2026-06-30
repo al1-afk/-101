@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -134,7 +135,7 @@ export default function InfosAccesTab({ projet, client }: Props) {
           <FileText className="w-4 h-4 text-violet-500" />
           <p className="text-xs font-bold text-foreground uppercase tracking-widest">Notes client / projet</p>
         </div>
-        <textarea
+        <AutocorrectTextarea
           value={infos}
           onChange={e => setInfos(e.target.value)}
           placeholder="Préférences, attentes, contraintes spécifiques, contexte… (sera visible par tous les membres assignés)"
@@ -215,7 +216,7 @@ export default function InfosAccesTab({ projet, client }: Props) {
           <div className="space-y-2">
             {links.map(l => (
               <div key={l.id} className="flex items-center gap-2">
-                <Input
+                <AutocorrectInput
                   value={l.label}
                   onChange={e => updateLink(l.id, { label: e.target.value })}
                   placeholder="Label (ex. Drive client)"
@@ -289,7 +290,7 @@ function CredentialCard({ cred, onUpdate, onRemove }: {
     <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-2">
       <div className="flex items-center gap-2">
         <span className="text-base flex-shrink-0">{preset.emoji}</span>
-        <Input
+        <AutocorrectInput
           value={cred.label}
           onChange={e => onUpdate({ label: e.target.value })}
           placeholder="Label (ex. WordPress Admin)"
@@ -317,7 +318,7 @@ function CredentialCard({ cred, onUpdate, onRemove }: {
         </div>
         <div className="md:col-span-2">
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Notes</label>
-          <Input value={cred.notes ?? ''} onChange={e => onUpdate({ notes: e.target.value })}
+          <AutocorrectInput value={cred.notes ?? ''} onChange={e => onUpdate({ notes: e.target.value })}
             placeholder="Procédure de reset, secret 2FA, etc." className="h-8 text-xs" />
         </div>
       </div>

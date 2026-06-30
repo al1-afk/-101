@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Plus, Package, Search, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -95,8 +96,8 @@ export default function Produits() {
         <DialogContent>
           <DialogHeader><DialogTitle>Nouveau produit / service</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5"><label className="form-label">Nom *</label><Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>
-            <div className="space-y-1.5"><label className="form-label">Description</label><textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="input-field resize-none h-16" /></div>
+            <div className="space-y-1.5"><label className="form-label">Nom *</label><AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>
+            <div className="space-y-1.5"><label className="form-label">Description</label><AutocorrectTextarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="input-field resize-none h-16" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">Prix HT (MAD)</label><Input type="number" step="0.01" value={form.prix_ht} onChange={e => setForm(p => ({ ...p, prix_ht: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">TVA (%)</label>
@@ -111,7 +112,7 @@ export default function Produits() {
                   <SelectContent><SelectItem value="service">Service</SelectItem><SelectItem value="produit">Produit</SelectItem></SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5"><label className="form-label">Unité</label><Input value={form.unite} onChange={e => setForm(p => ({ ...p, unite: e.target.value }))} placeholder="projet, mois, heure..." /></div>
+              <div className="space-y-1.5"><label className="form-label">Unité</label><AutocorrectInput value={form.unite} onChange={e => setForm(p => ({ ...p, unite: e.target.value }))} placeholder="projet, mois, heure..." /></div>
             </div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>

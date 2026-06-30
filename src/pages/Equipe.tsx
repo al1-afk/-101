@@ -18,6 +18,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTeam, useCreateTeamMember, useUpdateTeamMember, useDeleteTeamMember, type TeamMember } from '@/hooks/useTeam'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge }  from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -146,11 +148,11 @@ function TeamMemberForm({ member, onClose }: { member?: TeamMember; onClose: () 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <label className="form-label">Prénom *</label>
-          <Input value={form.prenom} onChange={e => setForm(p => ({ ...p, prenom: e.target.value }))} required />
+          <AutocorrectInput value={form.prenom} onChange={e => setForm(p => ({ ...p, prenom: e.target.value }))} required />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Nom *</label>
-          <Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} required />
+          <AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} required />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Email</label>
@@ -162,11 +164,11 @@ function TeamMemberForm({ member, onClose }: { member?: TeamMember; onClose: () 
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Poste</label>
-          <Input value={form.poste} onChange={e => setForm(p => ({ ...p, poste: e.target.value }))} />
+          <AutocorrectInput value={form.poste} onChange={e => setForm(p => ({ ...p, poste: e.target.value }))} />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Département</label>
-          <Input value={form.departement} onChange={e => setForm(p => ({ ...p, departement: e.target.value }))} placeholder="Tech, Ventes, Admin…" />
+          <AutocorrectInput value={form.departement} onChange={e => setForm(p => ({ ...p, departement: e.target.value }))} placeholder="Tech, Ventes, Admin…" />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Rôle d'accès</label>
@@ -419,7 +421,7 @@ function CongesTab({ members }: { members: TeamMember[] }) {
             )}
             <div className="space-y-1.5">
               <label className="form-label">Notes / Justification</label>
-              <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+              <AutocorrectTextarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                 className="input-field resize-none h-16" placeholder="Motif, documents joints…" />
             </div>
             <div className="flex justify-end gap-3 pt-1">
@@ -779,11 +781,11 @@ function InviteForm({ onClose }: { onClose: () => void }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label className="form-label">Prénom *</label>
-          <Input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Ahmed" required />
+          <AutocorrectInput value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Ahmed" required />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Nom *</label>
-          <Input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Tazi" required />
+          <AutocorrectInput value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Tazi" required />
         </div>
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Email *</label>
@@ -795,7 +797,7 @@ function InviteForm({ onClose }: { onClose: () => void }) {
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Poste</label>
-          <Input value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="Développeur Web" />
+          <AutocorrectInput value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="Développeur Web" />
         </div>
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Type</label>

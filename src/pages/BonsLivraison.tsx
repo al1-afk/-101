@@ -8,6 +8,8 @@ import {
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -328,7 +330,7 @@ export default function BonsLivraison() {
 
             <div className="space-y-1.5">
               <label className="form-label">Titre *</label>
-              <Input
+              <AutocorrectInput
                 value={form.titre}
                 onChange={e => setForm(p => ({ ...p, titre: e.target.value }))}
                 placeholder="ex: Livraison site e-commerce — Atlas Boutique"
@@ -371,7 +373,7 @@ export default function BonsLivraison() {
             {/* Description */}
             <div className="space-y-1.5">
               <label className="form-label">Description du projet livré</label>
-              <textarea
+              <AutocorrectTextarea
                 className="w-full min-h-[120px] rounded-md border border-border bg-background px-3 py-2 text-sm"
                 value={form.description}
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
@@ -396,7 +398,7 @@ export default function BonsLivraison() {
                 <div className="space-y-2">
                   {form.liens.map((l, i) => (
                     <div key={i} className="grid grid-cols-12 gap-2">
-                      <Input
+                      <AutocorrectInput
                         className="col-span-4"
                         placeholder="Libellé (ex: Site live)"
                         value={l.label}
@@ -472,7 +474,7 @@ export default function BonsLivraison() {
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Notes internes</label>
-                <Input
+                <AutocorrectInput
                   value={form.notes}
                   onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                   placeholder="Non affichées au client"
@@ -522,7 +524,7 @@ function IdentRow({
           ))}
         </SelectContent>
       </Select>
-      <Input
+      <AutocorrectInput
         className="col-span-3"
         placeholder="Libellé (ex: Admin WP)"
         value={ident.label}

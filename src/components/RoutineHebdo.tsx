@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
@@ -432,7 +433,7 @@ export function RoutineHebdo({ existingEvents }: { existingEvents: CalEvent[] })
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
               <label className="form-label">Titre *</label>
-              <Input
+              <AutocorrectInput
                 value={form.titre}
                 onChange={e => setForm(p => ({ ...p, titre: e.target.value }))}
                 placeholder="Ex: Sport, Lecture, Méditation…"
@@ -504,7 +505,7 @@ export function RoutineHebdo({ existingEvents }: { existingEvents: CalEvent[] })
 
             <div className="space-y-1.5">
               <label className="form-label">Notes (optionnel)</label>
-              <textarea
+              <AutocorrectTextarea
                 className="input-field resize-none h-16"
                 value={form.notes ?? ''}
                 onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -1124,7 +1125,7 @@ export default function Planificateur() {
 
               <div className="space-y-1.5">
                 <label className="form-label">Titre *</label>
-                <Input
+                <AutocorrectInput
                   value={editingBlock.title}
                   onChange={e => updateBlock(editing.dayIdx, editing.blockIdx, { title: e.target.value })}
                   autoFocus
@@ -1133,7 +1134,7 @@ export default function Planificateur() {
 
               <div className="space-y-1.5">
                 <label className="form-label">Sous-titre / détail</label>
-                <Input
+                <AutocorrectInput
                   value={editingBlock.subtitle ?? ''}
                   onChange={e => updateBlock(editing.dayIdx, editing.blockIdx, { subtitle: e.target.value })}
                   placeholder="Ex: cardio, lecture, etc."
@@ -1204,7 +1205,7 @@ export default function Planificateur() {
           </DialogHeader>
           <div className="space-y-3 pt-1">
             <div className="flex gap-2">
-              <Input
+              <AutocorrectInput
                 value={newTmplName}
                 onChange={e => setNewTmplName(e.target.value)}
                 placeholder="Nom du modèle (ex: Semaine campagne, Voyage, Repos)"

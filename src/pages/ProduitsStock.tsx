@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -259,7 +260,7 @@ function ProductFormDialog({
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Nom *">
-              <Input value={form.nom ?? ''} onChange={(e) => set('nom', e.target.value)} required />
+              <AutocorrectInput value={form.nom ?? ''} onChange={(e) => set('nom', e.target.value)} required />
             </Field>
             <Field label="SKU" hint="laissez vide pour générer">
               <Input value={form.sku ?? ''} onChange={(e) => set('sku', e.target.value)} />
@@ -312,7 +313,7 @@ function ProductFormDialog({
             </Field>
           </div>
           <Field label="Description">
-            <textarea
+            <AutocorrectTextarea
               className="flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={form.description ?? ''}
               onChange={(e) => set('description', e.target.value)}
@@ -392,13 +393,13 @@ function CategoriesTab() {
             <DialogHeader><DialogTitle>{form.id ? 'Modifier' : 'Nouvelle catégorie'}</DialogTitle></DialogHeader>
             <form onSubmit={submit} className="space-y-4">
               <Field label="Nom *">
-                <Input value={form.nom ?? ''} onChange={(e) => setForm({ ...form, nom: e.target.value })} required />
+                <AutocorrectInput value={form.nom ?? ''} onChange={(e) => setForm({ ...form, nom: e.target.value })} required />
               </Field>
               <Field label="Couleur">
                 <Input type="color" value={form.color ?? '#3B82F6'} onChange={(e) => setForm({ ...form, color: e.target.value })} className="h-10 w-24 p-1" />
               </Field>
               <Field label="Description">
-                <Input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                <AutocorrectInput value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </Field>
               <DialogFooter>
                 <Button type="button" variant="secondary" onClick={() => setForm(null)}>Annuler</Button>
@@ -532,7 +533,7 @@ function QuickMovementDialog({ product, onClose }: { product: StockProduct | nul
               <Input value={reference} onChange={(e) => setRef(e.target.value)} placeholder="BL-001, commande #…" />
             </Field>
             <Field label="Note">
-              <Input value={note} onChange={(e) => setNote(e.target.value)} />
+              <AutocorrectInput value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>
             <DialogFooter>
               <Button type="button" variant="secondary" onClick={onClose}>Annuler</Button>
@@ -678,7 +679,7 @@ function SuppliersTab() {
             <DialogHeader><DialogTitle>{form.id ? 'Modifier' : 'Nouveau fournisseur'}</DialogTitle></DialogHeader>
             <form onSubmit={submit} className="space-y-4">
               <Field label="Nom *">
-                <Input value={form.nom ?? ''} onChange={(e) => setForm({ ...form, nom: e.target.value })} required />
+                <AutocorrectInput value={form.nom ?? ''} onChange={(e) => setForm({ ...form, nom: e.target.value })} required />
               </Field>
               <Field label="Email">
                 <Input type="email" value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} />
@@ -687,10 +688,10 @@ function SuppliersTab() {
                 <Input value={form.telephone ?? ''} onChange={(e) => setForm({ ...form, telephone: e.target.value })} />
               </Field>
               <Field label="Adresse">
-                <Input value={form.adresse ?? ''} onChange={(e) => setForm({ ...form, adresse: e.target.value })} />
+                <AutocorrectInput value={form.adresse ?? ''} onChange={(e) => setForm({ ...form, adresse: e.target.value })} />
               </Field>
               <Field label="Notes">
-                <Input value={form.notes ?? ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                <AutocorrectInput value={form.notes ?? ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               </Field>
               <DialogFooter>
                 <Button type="button" variant="secondary" onClick={() => setForm(null)}>Annuler</Button>
@@ -1063,14 +1064,14 @@ function NewTicketForm() {
                   <SelectItem value="autre">Autre</SelectItem>
                 </SelectContent>
               </Select>
-              <Input
+              <AutocorrectInput
                 placeholder="Client (optionnel)"
                 value={clientNom}
                 onChange={(e) => setClientNom(e.target.value)}
                 className="h-9"
               />
             </div>
-            <Input
+            <AutocorrectInput
               placeholder="Notes (optionnel)"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}

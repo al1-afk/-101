@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import type { SopBlock, SopBlockType } from '@/hooks/useSops'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { detectVideo } from '@/components/sop/videoEmbed'
@@ -272,9 +273,9 @@ function InlineBlock({
                 <option value="danger">🚨 Danger</option>
                 <option value="success">✅ Succès</option>
               </select>
-              <Input value={block.title ?? ''} onChange={e => onUpdate({ title: e.target.value })} placeholder="Titre" className="h-8 text-sm" />
+              <AutocorrectInput value={block.title ?? ''} onChange={e => onUpdate({ title: e.target.value })} placeholder="Titre" className="h-8 text-sm" />
             </div>
-            <textarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="Contenu de l'encadré…" rows={2}
+            <AutocorrectTextarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="Contenu de l'encadré…" rows={2}
               className="w-full rounded-md border border-border bg-[var(--surface-input)] px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-blue-400 resize-y" />
           </div>
         ) : isSimpleList ? (
@@ -284,7 +285,7 @@ function InlineBlock({
                 <span className="text-xs text-muted-foreground w-6 text-right select-none">
                   {block.type === 'steps' || block.type === 'numbered' ? `${j + 1}.` : block.type === 'checklist' ? '☐' : '•'}
                 </span>
-                <Input value={item} onChange={e => onUpdateItem(j, e.target.value)} onKeyDown={onKey} placeholder={`Élément ${j + 1}`} className="h-8 text-sm flex-1 border-transparent hover:border-border focus:border-blue-400 shadow-none" />
+                <AutocorrectInput value={item} onChange={e => onUpdateItem(j, e.target.value)} onKeyDown={onKey} placeholder={`Élément ${j + 1}`} className="h-8 text-sm flex-1 border-transparent hover:border-border focus:border-blue-400 shadow-none" />
                 <button onClick={() => onRemoveItem(j)} className="p-1 rounded text-muted-foreground hover:text-rose-600 opacity-0 group-hover/blk:opacity-100 transition-opacity">
                   <X className="w-3 h-3" />
                 </button>
@@ -295,25 +296,26 @@ function InlineBlock({
             </button>
           </div>
         ) : block.type === 'heading' || block.type === 'heading2' || block.type === 'heading3' ? (
-          <Input value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey}
+          <AutocorrectInput value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey}
             placeholder={block.type === 'heading' ? 'Titre' : block.type === 'heading2' ? 'Sous-titre' : 'Titre 3'}
             className={cn('font-bold border-transparent hover:border-border focus:border-blue-400 shadow-none',
               block.type === 'heading' ? 'text-2xl h-12' : block.type === 'heading2' ? 'text-xl h-10' : 'text-base h-9')} />
         ) : block.type === 'quote' ? (
-          <textarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="« Citation »" rows={2}
+          <AutocorrectTextarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="« Citation »" rows={2}
             className="w-full rounded-md border-l-4 border-blue-500 bg-muted/40 px-3 py-1.5 text-sm italic placeholder:text-muted-foreground focus:outline-none focus:border-blue-400 resize-y" />
-        ) : (
+        ) : block.type === 'template' || block.type === 'code' ? (
           <textarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey}
             placeholder={
               block.type === 'template' ? 'Template avec variables — ex: Bonjour {{prenom}}…' :
-              block.type === 'code' ? 'Code (affiché en monospace)' :
-              'Texte… utilisez **gras**, *italique*, [lien](url)'
+              'Code (affiché en monospace)'
             }
-            rows={block.type === 'template' || block.type === 'code' ? 4 : 2}
-            className={cn(
-              'w-full rounded-md border border-transparent hover:border-border bg-transparent hover:bg-[var(--surface-input)] focus:bg-[var(--surface-input)] focus:border-blue-400 px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none resize-y',
-              (block.type === 'template' || block.type === 'code') && 'font-mono text-[13px]',
-            )} />
+            rows={4}
+            className="w-full rounded-md border border-transparent hover:border-border bg-transparent hover:bg-[var(--surface-input)] focus:bg-[var(--surface-input)] focus:border-blue-400 px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none resize-y font-mono text-[13px]" />
+        ) : (
+          <AutocorrectTextarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey}
+            placeholder="Texte… utilisez **gras**, *italique*, [lien](url)"
+            rows={2}
+            className="w-full rounded-md border border-transparent hover:border-border bg-transparent hover:bg-[var(--surface-input)] focus:bg-[var(--surface-input)] focus:border-blue-400 px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none resize-y" />
         )}
       </div>
     </div>
@@ -349,7 +351,7 @@ function ImageBlock({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Pa
       )}
       <input type="file" ref={fileRef} hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" onChange={e => onFile(e.target.files?.[0])} />
       {meta.url && (
-        <Input value={meta.caption ?? ''} onChange={e => onUpdate({ image: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" className="h-7 text-xs" />
+        <AutocorrectInput value={meta.caption ?? ''} onChange={e => onUpdate({ image: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" className="h-7 text-xs" />
       )}
     </div>
   )
@@ -376,7 +378,7 @@ function VideoBlock({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Pa
         </div>
       )}
       {meta.url && (
-        <Input value={meta.caption ?? ''} onChange={e => onUpdate({ video: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" className="h-7 text-xs" />
+        <AutocorrectInput value={meta.caption ?? ''} onChange={e => onUpdate({ video: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" className="h-7 text-xs" />
       )}
     </div>
   )
@@ -402,7 +404,7 @@ function TableBlock({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Pa
             {t.headers.map((h, i) => (
               <th key={i} className="border border-border p-0.5 bg-muted/30">
                 <div className="flex items-center gap-1">
-                  <Input value={h} onChange={e => setHeader(i, e.target.value)} className="h-6 text-xs font-semibold border-transparent shadow-none" />
+                  <AutocorrectInput value={h} onChange={e => setHeader(i, e.target.value)} className="h-6 text-xs font-semibold border-transparent shadow-none" />
                   <button onClick={() => removeCol(i)} className="p-0.5 text-muted-foreground hover:text-rose-500"><X className="w-3 h-3" /></button>
                 </div>
               </th>
@@ -417,7 +419,7 @@ function TableBlock({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Pa
             <tr key={r}>
               {row.map((cell, c) => (
                 <td key={c} className="border border-border p-0.5">
-                  <Input value={cell} onChange={e => setCell(r, c, e.target.value)} className="h-6 text-xs border-transparent shadow-none" />
+                  <AutocorrectInput value={cell} onChange={e => setCell(r, c, e.target.value)} className="h-6 text-xs border-transparent shadow-none" />
                 </td>
               ))}
               <td className="border border-border p-0.5 w-8">

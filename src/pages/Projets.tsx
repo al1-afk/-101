@@ -7,6 +7,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -78,7 +79,9 @@ function ClientPicker({ value, onChange }: { value: string | null; onChange: (id
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = [...clients].sort((a, b) => (a.nom || '').localeCompare(b.nom || ''))
+    /* Préserve l'ordre exact de la table /clients (created_at DESC),
+       pour que la recherche corresponde à ce que l'utilisateur voit ailleurs. */
+    const list = clients
     if (!q) return list
     return list.filter(c =>
       (c.nom ?? '').toLowerCase().includes(q) ||
@@ -537,7 +540,7 @@ export default function Projets() {
 
               <div className="space-y-1.5 sm:col-span-2">
                 <label className="form-label">Description</label>
-                <textarea
+                <AutocorrectTextarea
                   value={form.description ?? ''}
                   onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                   className="input-field resize-none h-20"
@@ -628,7 +631,7 @@ export default function Projets() {
 
               <div className="space-y-1.5 sm:col-span-2">
                 <label className="form-label">Notes internes</label>
-                <textarea
+                <AutocorrectTextarea
                   value={form.notes ?? ''}
                   onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                   className="input-field resize-none h-20"

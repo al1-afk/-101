@@ -11,6 +11,7 @@ import { motion } from 'framer-motion'
 import { Plus, Sparkles, Search, Trash2, Edit2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency } from '@/lib/utils'
@@ -221,7 +222,7 @@ export default function Services() {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <label className="form-label">Nom du service *</label>
-              <Input
+              <AutocorrectInput
                 value={form.nom}
                 onChange={e => setForm(p => ({ ...p, nom: e.target.value }))}
                 placeholder="ex: Création site vitrine"
@@ -231,7 +232,7 @@ export default function Services() {
 
             <div className="space-y-1.5">
               <label className="form-label">Description</label>
-              <textarea
+              <AutocorrectTextarea
                 value={form.description}
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                 className="input-field resize-none h-32"
@@ -265,7 +266,7 @@ export default function Services() {
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Unité</label>
-                <Input
+                <AutocorrectInput
                   value={form.unite}
                   onChange={e => setForm(p => ({ ...p, unite: e.target.value }))}
                   placeholder="projet, mois, heure..."

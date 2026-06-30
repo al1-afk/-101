@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Trash2, Loader2 } from 'lucide-react'
 import { useDepenses, useCreateDepense, useDeleteDepense } from '@/hooks/useDepenses'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatDate } from '@/lib/utils'
 import {
@@ -259,7 +260,7 @@ export default function Depenses() {
             {/* Note */}
             <div className="space-y-1.5">
               <label className="form-label">📝 Note (optionnel)</label>
-              <textarea
+              <AutocorrectTextarea
                 value={form.description}
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                 placeholder="Détails de la dépense..."

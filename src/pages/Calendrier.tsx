@@ -9,6 +9,7 @@ import {
 import { RoutineHebdo } from '@/components/RoutineHebdo'
 import { Button }   from '@/components/ui/button'
 import { Input }    from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge }    from '@/components/ui/badge'
@@ -175,7 +176,7 @@ function EventForm({ initial, defaultDate, onSave, onClose }: {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-1.5">
         <label className="form-label">Titre *</label>
-        <Input value={form.titre} onChange={e => setForm(p => ({ ...p, titre: e.target.value }))} placeholder="RDV, Démo, Appel…" autoFocus required />
+        <AutocorrectInput value={form.titre} onChange={e => setForm(p => ({ ...p, titre: e.target.value }))} placeholder="RDV, Démo, Appel…" autoFocus required />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
@@ -202,11 +203,11 @@ function EventForm({ initial, defaultDate, onSave, onClose }: {
       </div>
       <div className="space-y-1.5">
         <label className="form-label">Client / Participants</label>
-        <Input value={form.client} onChange={e => setForm(p => ({ ...p, client: e.target.value }))} placeholder="Nom du client ou participants" />
+        <AutocorrectInput value={form.client} onChange={e => setForm(p => ({ ...p, client: e.target.value }))} placeholder="Nom du client ou participants" />
       </div>
       <div className="space-y-1.5">
         <label className="form-label">Notes</label>
-        <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+        <AutocorrectTextarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
           className="input-field resize-none h-16" placeholder="Ordre du jour, contexte…" />
       </div>
       <div className="flex justify-end gap-3 pt-1">

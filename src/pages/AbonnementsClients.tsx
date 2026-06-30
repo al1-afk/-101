@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Badge }   from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -377,11 +378,11 @@ export default function AbonnementsClients() {
           <div className="space-y-3 pt-2">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Client</label>
-              <Input placeholder="Nom du client" value={form.client_nom} onChange={e => setForm(p => ({ ...p, client_nom: e.target.value }))} />
+              <AutocorrectInput placeholder="Nom du client" value={form.client_nom} onChange={e => setForm(p => ({ ...p, client_nom: e.target.value }))} />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Nom de l'abonnement</label>
-              <Input placeholder="Ex: Pack Site + Maintenance" value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} />
+              <AutocorrectInput placeholder="Ex: Pack Site + Maintenance" value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

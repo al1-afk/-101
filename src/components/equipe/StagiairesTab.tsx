@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -337,7 +338,7 @@ function StagiaireForm({
       {/* Identité */}
       <Section title="Identité">
         <Field label="Nom complet *">
-          <Input value={form.nom_complet} onChange={e => update('nom_complet', e.target.value)} required placeholder="Ex: YOUNES MOUQLA" />
+          <AutocorrectInput value={form.nom_complet} onChange={e => update('nom_complet', e.target.value)} required placeholder="Ex: YOUNES MOUQLA" />
         </Field>
         <Field label="Genre *">
           <Select value={form.genre} onValueChange={v => update('genre', v as StagiaireGenre)}>
@@ -355,7 +356,7 @@ function StagiaireForm({
           <Input type="date" value={form.date_naissance ?? ''} onChange={e => update('date_naissance', e.target.value || null)} />
         </Field>
         <Field label="Lieu de naissance" full>
-          <Input value={form.lieu_naissance ?? ''} onChange={e => update('lieu_naissance', e.target.value)} placeholder="Ex: OUJDA" />
+          <AutocorrectInput value={form.lieu_naissance ?? ''} onChange={e => update('lieu_naissance', e.target.value)} placeholder="Ex: OUJDA" />
         </Field>
       </Section>
 
@@ -368,20 +369,20 @@ function StagiaireForm({
           <Input type="email" value={form.email} onChange={e => update('email', e.target.value)} required />
         </Field>
         <Field label="Adresse complète *" full>
-          <Input value={form.adresse} onChange={e => update('adresse', e.target.value)} required placeholder="Ex: HAY TAKADOUM BLOC D NR 02 OUJDA" />
+          <AutocorrectInput value={form.adresse} onChange={e => update('adresse', e.target.value)} required placeholder="Ex: HAY TAKADOUM BLOC D NR 02 OUJDA" />
         </Field>
       </Section>
 
       {/* Formation & stage */}
       <Section title="Formation & Stage">
         <Field label="Établissement *" full>
-          <Input value={form.etablissement} onChange={e => update('etablissement', e.target.value)} required placeholder="Nom de l'école ou de l'université" />
+          <AutocorrectInput value={form.etablissement} onChange={e => update('etablissement', e.target.value)} required placeholder="Nom de l'école ou de l'université" />
         </Field>
         <Field label="Nature de la formation" full>
-          <Input value={form.formation} onChange={e => update('formation', e.target.value)} />
+          <AutocorrectInput value={form.formation} onChange={e => update('formation', e.target.value)} />
         </Field>
         <Field label="Département d'accueil" full>
-          <Input value={form.departement} onChange={e => update('departement', e.target.value)} />
+          <AutocorrectInput value={form.departement} onChange={e => update('departement', e.target.value)} />
         </Field>
         <Field label="Date de début *">
           <Input type="date" value={form.date_debut} onChange={e => update('date_debut', e.target.value)} required />
@@ -400,7 +401,7 @@ function StagiaireForm({
           </Select>
         </Field>
         <Field label="Notes (interne)" full>
-          <textarea
+          <AutocorrectTextarea
             value={form.notes ?? ''}
             onChange={e => update('notes', e.target.value)}
             rows={2}

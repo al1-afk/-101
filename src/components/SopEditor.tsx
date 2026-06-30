@@ -12,6 +12,7 @@ import type { Sop, SopBlock, SopBlockType } from '@/hooks/useSops'
 import { makeSopSlug, useCreateSop, useUpdateSop } from '@/hooks/useSops'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -276,10 +277,10 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
                 Informations
               </h3>
               <Field label="Titre" required>
-                <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex. Message d'accueil WhatsApp" />
+                <AutocorrectInput value={title} onChange={e => setTitle(e.target.value)} placeholder="Ex. Message d'accueil WhatsApp" />
               </Field>
               <Field label="Description">
-                <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Une phrase qui résume quand utiliser ce SOP" />
+                <AutocorrectInput value={description} onChange={e => setDescription(e.target.value)} placeholder="Une phrase qui résume quand utiliser ce SOP" />
               </Field>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <Field label="Catégorie">
@@ -299,7 +300,7 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
                 </Field>
               </div>
               <Field label="Tags (séparés par des virgules)">
-                <Input value={tagsInput} onChange={e => setTagsInput(e.target.value)} placeholder="Ex. WhatsApp, Accueil, Prospect" />
+                <AutocorrectInput value={tagsInput} onChange={e => setTagsInput(e.target.value)} placeholder="Ex. WhatsApp, Accueil, Prospect" />
                 {tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     {tags.map(t => (
@@ -493,9 +494,9 @@ function BlockEditor({
                 <option value="danger">🚨 Danger</option>
                 <option value="success">✅ Succès</option>
               </select>
-              <Input value={block.title ?? ''} onChange={e => onUpdate({ title: e.target.value })} placeholder="Titre de l'encadré" />
+              <AutocorrectInput value={block.title ?? ''} onChange={e => onUpdate({ title: e.target.value })} placeholder="Titre de l'encadré" />
             </div>
-            <textarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="Contenu de l'encadré…" rows={3}
+            <AutocorrectTextarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="Contenu de l'encadré…" rows={3}
               className="w-full rounded-lg border border-border bg-[var(--surface-input)] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#378ADD] resize-y" />
           </>
         ) : isSimpleList ? (
@@ -505,7 +506,7 @@ function BlockEditor({
                 <span className="text-xs text-muted-foreground w-7 text-right">
                   {block.type === 'steps' || block.type === 'numbered' ? `${j + 1}.` : block.type === 'checklist' ? '☐' : '•'}
                 </span>
-                <Input value={item} onChange={e => onUpdateItem(j, e.target.value)} onKeyDown={onKey} placeholder={`Élément ${j + 1}`} className="flex-1" />
+                <AutocorrectInput value={item} onChange={e => onUpdateItem(j, e.target.value)} onKeyDown={onKey} placeholder={`Élément ${j + 1}`} className="flex-1" />
                 <button onClick={() => onRemoveItem(j)} className="p-1.5 rounded text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -516,25 +517,25 @@ function BlockEditor({
             </button>
           </>
         ) : block.type === 'heading' || block.type === 'heading2' || block.type === 'heading3' ? (
-          <Input value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey} placeholder="Titre de la section"
+          <AutocorrectInput value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey} placeholder="Titre de la section"
             className={cn('font-bold', block.type === 'heading' ? 'text-xl' : block.type === 'heading2' ? 'text-lg' : 'text-base')} />
         ) : block.type === 'quote' ? (
-          <textarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="« Citation »" rows={2}
+          <AutocorrectTextarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} placeholder="« Citation »" rows={2}
             className="w-full rounded-lg border-l-4 border-blue-500 bg-muted/40 px-3 py-2 text-sm italic text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#378ADD] resize-y" />
-        ) : (
+        ) : block.type === 'template' || block.type === 'code' ? (
           <textarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey}
             placeholder={
               block.type === 'template'
                 ? 'Template avec variables — ex: Bonjour {{prenom}}…'
-                : block.type === 'code'
-                ? 'Code (affiché en monospace)'
-                : 'Texte… utilisez **gras**, *italique*, [lien](url)'
+                : 'Code (affiché en monospace)'
             }
-            rows={block.type === 'template' || block.type === 'code' ? 5 : 3}
-            className={cn(
-              'w-full rounded-lg border border-border bg-[var(--surface-input)] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#378ADD] resize-y',
-              (block.type === 'template' || block.type === 'code') && 'font-mono text-[13px]',
-            )} />
+            rows={5}
+            className="w-full rounded-lg border border-border bg-[var(--surface-input)] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#378ADD] resize-y font-mono text-[13px]" />
+        ) : (
+          <AutocorrectTextarea value={block.text ?? ''} onChange={e => onUpdate({ text: e.target.value })} onKeyDown={onKey}
+            placeholder="Texte… utilisez **gras**, *italique*, [lien](url)"
+            rows={3}
+            className="w-full rounded-lg border border-border bg-[var(--surface-input)] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#378ADD] resize-y" />
         )}
       </div>
     </div>
@@ -605,7 +606,7 @@ function ImageBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
               <Upload className="w-3.5 h-3.5" /> Remplacer
             </button>
           </div>
-          <Input value={meta.caption ?? ''} onChange={e => onUpdate({ image: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" />
+          <AutocorrectInput value={meta.caption ?? ''} onChange={e => onUpdate({ image: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" />
         </>
       )}
     </div>
@@ -682,7 +683,7 @@ function VideoBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
               <option value="right">Droite</option>
             </select>
           </div>
-          <Input value={meta.caption ?? ''} onChange={e => onUpdate({ video: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" />
+          <AutocorrectInput value={meta.caption ?? ''} onChange={e => onUpdate({ video: { ...meta, caption: e.target.value } })} placeholder="Légende (optionnel)" />
         </>
       )}
     </div>
@@ -715,7 +716,7 @@ function TableBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
             {t.headers.map((h, i) => (
               <th key={i} className="border border-border p-1 bg-muted/30">
                 <div className="flex items-center gap-1">
-                  <Input value={h} onChange={e => setHeader(i, e.target.value)} className="h-7 text-xs font-semibold" />
+                  <AutocorrectInput value={h} onChange={e => setHeader(i, e.target.value)} className="h-7 text-xs font-semibold" />
                   <button onClick={() => removeCol(i)} className="p-1 text-muted-foreground hover:text-rose-500" title="Supprimer colonne">
                     <X className="w-3 h-3" />
                   </button>
@@ -734,7 +735,7 @@ function TableBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
             <tr key={r}>
               {row.map((cell, c) => (
                 <td key={c} className="border border-border p-1">
-                  <Input value={cell} onChange={e => setCell(r, c, e.target.value)} className="h-7 text-xs" />
+                  <AutocorrectInput value={cell} onChange={e => setCell(r, c, e.target.value)} className="h-7 text-xs" />
                 </td>
               ))}
               <td className="border border-border p-1 w-10">

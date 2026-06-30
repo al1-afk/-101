@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Plus, Search, Building2, Mail, Phone, Edit2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { getInitials } from '@/lib/utils'
 import { fournisseursApi } from '@/lib/api'
@@ -131,14 +132,14 @@ export default function Fournisseurs() {
           <DialogHeader><DialogTitle>{editing ? 'Modifier le fournisseur' : 'Nouveau fournisseur'}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5 col-span-2"><label className="form-label">Nom *</label><Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>
+              <div className="space-y-1.5 col-span-2"><label className="form-label">Nom *</label><AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Email</label><Input value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Téléphone</label><Input value={form.telephone} onChange={e => setForm(p => ({ ...p, telephone: e.target.value }))} /></div>
-              <div className="space-y-1.5"><label className="form-label">Catégorie</label><Input value={form.categorie} onChange={e => setForm(p => ({ ...p, categorie: e.target.value }))} /></div>
-              <div className="space-y-1.5"><label className="form-label">Adresse</label><Input value={form.adresse} onChange={e => setForm(p => ({ ...p, adresse: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Catégorie</label><AutocorrectInput value={form.categorie} onChange={e => setForm(p => ({ ...p, categorie: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Adresse</label><AutocorrectInput value={form.adresse} onChange={e => setForm(p => ({ ...p, adresse: e.target.value }))} /></div>
             </div>
             <div className="space-y-1.5"><label className="form-label">Notes</label>
-              <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} className="input-field resize-none h-16" /></div>
+              <AutocorrectTextarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} className="input-field resize-none h-16" /></div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>
               <Button disabled={(create.isPending || update.isPending) || !form.nom} onClick={save}>

@@ -16,6 +16,7 @@ import { teamMgmtApi, type TeamMemberRow, type TeamMemberAccess } from '@/lib/ap
 import { SOP_CATEGORIES } from '@/lib/sopCategories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -451,7 +452,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
             <Section title="4. Tâches initiales (optionnel)">
               {tasks.map((t, i) => (
                 <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                  <Input
+                  <AutocorrectInput
                     className="col-span-6"
                     placeholder="Titre de la tâche"
                     value={t.title}

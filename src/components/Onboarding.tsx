@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 
@@ -122,7 +123,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
                 <>
                   <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 font-medium">Nom de l'entreprise *</label>
-                    <Input
+                    <AutocorrectInput
                       value={data.company} onChange={e => set('company', e.target.value)}
                       placeholder="Mon Agence Digital"
                       className="bg-slate-800 border-slate-700 text-white placeholder-slate-500"
@@ -171,7 +172,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
                 <>
                   <div className="space-y-1.5">
                     <label className="text-xs text-slate-400 font-medium">Votre nom complet *</label>
-                    <Input
+                    <AutocorrectInput
                       value={data.fullname} onChange={e => set('fullname', e.target.value)}
                       placeholder="Said Benali"
                       className="bg-slate-800 border-slate-700 text-white placeholder-slate-500"

@@ -7,6 +7,7 @@ import {
 import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getInitials } from '@/lib/utils'
@@ -182,7 +183,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
 
       <div className="space-y-1.5">
         <label className="form-label">Notes</label>
-        <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+        <AutocorrectTextarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
           className="input-field resize-none h-20" placeholder="Notes internes..." />
       </div>
       <div className="flex items-center justify-end gap-3 pt-2">

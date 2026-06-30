@@ -7,6 +7,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -146,8 +147,8 @@ export default function ChequesRecus() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">Référence</label><Input value={form.reference} onChange={e => setForm(p => ({ ...p, reference: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Montant (MAD)</label><Input type="number" value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} /></div>
-              <div className="space-y-1.5"><label className="form-label">Émetteur</label><Input value={form.emetteur} onChange={e => setForm(p => ({ ...p, emetteur: e.target.value }))} /></div>
-              <div className="space-y-1.5"><label className="form-label">Banque</label><Input value={form.banque} onChange={e => setForm(p => ({ ...p, banque: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Émetteur</label><AutocorrectInput value={form.emetteur} onChange={e => setForm(p => ({ ...p, emetteur: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Banque</label><AutocorrectInput value={form.banque} onChange={e => setForm(p => ({ ...p, banque: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Date réception</label><Input type="date" value={form.date_reception} onChange={e => setForm(p => ({ ...p, date_reception: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Statut</label>
                 <Select value={form.statut} onValueChange={v => setForm(p => ({ ...p, statut: v as Cheque['statut'] }))}>

@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -245,7 +246,7 @@ export default function TaskDetailDialog({
                 <button onClick={() => toggleSubtask(s.id)} className="flex-shrink-0">
                   {s.done ? <CheckSquare className="w-4 h-4 text-emerald-500" /> : <Square className="w-4 h-4 text-muted-foreground" />}
                 </button>
-                <Input
+                <AutocorrectInput
                   value={s.title}
                   onChange={e => setSubtasks(p => p.map(x => x.id === s.id ? { ...x, title: e.target.value } : x))}
                   className={cn('h-7 text-sm border-transparent hover:border-border focus:border-blue-400 shadow-none', s.done && 'line-through text-muted-foreground')}
@@ -257,7 +258,7 @@ export default function TaskDetailDialog({
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Input
+            <AutocorrectInput
               value={newSubtask}
               onChange={e => setNewSubtask(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addSubtask())}
@@ -286,7 +287,7 @@ export default function TaskDetailDialog({
             <div className="space-y-1.5">
               {attachments.map(a => (
                 <div key={a.id} className="flex items-center gap-2 group">
-                  <Input
+                  <AutocorrectInput
                     value={a.label}
                     onChange={e => updateAttachment(a.id, { label: e.target.value })}
                     placeholder="Label"
@@ -346,7 +347,7 @@ export default function TaskDetailDialog({
             )}
           </div>
           <div className="flex items-start gap-2 pt-2 border-t border-border">
-            <textarea
+            <AutocorrectTextarea
               value={newComment}
               onChange={e => setNewComment(e.target.value)}
               onKeyDown={e => {

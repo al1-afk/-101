@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { bonsCommandeApi } from '@/lib/api'
@@ -106,8 +107,8 @@ export default function BonsCommande() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">N° BC</label><Input value={form.numero} onChange={e => setForm(p => ({ ...p, numero: e.target.value }))} placeholder={`BC-${new Date().getFullYear()}-001`} /></div>
-              <div className="space-y-1.5"><label className="form-label">Fournisseur *</label><Input value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
-              <div className="space-y-1.5 col-span-2"><label className="form-label">Objet</label><Input value={form.objet} onChange={e => setForm(p => ({ ...p, objet: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Fournisseur *</label><AutocorrectInput value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
+              <div className="space-y-1.5 col-span-2"><label className="form-label">Objet</label><AutocorrectInput value={form.objet} onChange={e => setForm(p => ({ ...p, objet: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Montant (MAD)</label><Input type="number" value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Date</label><Input type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} /></div>
               <div className="space-y-1.5 col-span-2"><label className="form-label">Statut</label>

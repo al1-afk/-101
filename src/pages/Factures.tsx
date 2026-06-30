@@ -17,6 +17,7 @@ import {
 import { useClients, useCreateClient }     from '@/hooks/useClients'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Badge }          from '@/components/ui/badge'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -873,7 +874,7 @@ function FactureWizard({
                   ))}
                 </div>
                 <div className="flex gap-1.5">
-                  <Input value={newCondition} onChange={e => setNewCondition(e.target.value)}
+                  <AutocorrectInput value={newCondition} onChange={e => setNewCondition(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter' && newCondition.trim()) { setConditions(p => [...p, newCondition.trim()]); setNewCondition('') }}}
                     placeholder="Nouvelle condition..." className="h-7 text-xs" />
                   <Button size="sm" className="h-7 px-2.5 flex-shrink-0"
@@ -1002,13 +1003,13 @@ function FactureWizard({
                 <div className="rounded-xl border border-blue-600/30 bg-blue-600/5 p-4 space-y-3">
                   <p className="text-xs font-bold text-blue-600 dark:text-blue-400">Nouveau client</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <Input placeholder="Nom *" value={newClientForm.nom}
+                    <AutocorrectInput placeholder="Nom *" value={newClientForm.nom}
                       onChange={e => setNewClientForm(p => ({ ...p, nom: e.target.value }))} className="text-sm" />
                     <Input placeholder="Téléphone" value={newClientForm.telephone}
                       onChange={e => setNewClientForm(p => ({ ...p, telephone: e.target.value }))} className="text-sm" />
                     <Input placeholder="Email" value={newClientForm.email}
                       onChange={e => setNewClientForm(p => ({ ...p, email: e.target.value }))} className="text-sm" />
-                    <Input placeholder="Entreprise" value={newClientForm.entreprise}
+                    <AutocorrectInput placeholder="Entreprise" value={newClientForm.entreprise}
                       onChange={e => setNewClientForm(p => ({ ...p, entreprise: e.target.value }))} className="text-sm" />
                   </div>
                   <div className="flex justify-end gap-2">

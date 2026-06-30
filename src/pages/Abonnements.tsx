@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency, formatDate, getDaysUntil } from '@/lib/utils'
 import { abonnementsApi } from '@/lib/api'
@@ -215,7 +216,7 @@ export default function Abonnements() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Nom *</label>
-                <Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} placeholder="Netflix, Adobe, OVH..." />
+                <AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} placeholder="Netflix, Adobe, OVH..." />
                 {duplicate && (
                   <div className="flex items-start gap-2 mt-1.5 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs">
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
@@ -227,7 +228,7 @@ export default function Abonnements() {
                   </div>
                 )}
               </div>
-              <div className="space-y-1.5"><label className="form-label">Fournisseur</label><Input value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Fournisseur</label><AutocorrectInput value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Montant (MAD)</label><Input type="number" value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Cycle</label>
                 <Select value={form.cycle} onValueChange={v => setForm(p => ({ ...p, cycle: v as Abonnement['cycle'] }))}>

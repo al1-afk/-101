@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Plus, Server, AlertTriangle, Trash2, DollarSign } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatCurrency, formatDate, getDaysUntil } from '@/lib/utils'
 import { hebergementsApi } from '@/lib/api'
@@ -134,12 +135,12 @@ export default function Hebergements() {
           <DialogHeader><DialogTitle>Ajouter un hébergement</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5 col-span-2"><label className="form-label">Nom *</label><Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>
-              <div className="space-y-1.5"><label className="form-label">Fournisseur</label><Input value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
-              <div className="space-y-1.5"><label className="form-label">Type</label><Input value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))} /></div>
+              <div className="space-y-1.5 col-span-2"><label className="form-label">Nom *</label><AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Fournisseur</label><AutocorrectInput value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
+              <div className="space-y-1.5"><label className="form-label">Type</label><AutocorrectInput value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Date expiration</label><Input type="date" value={form.date_expiration} onChange={e => setForm(p => ({ ...p, date_expiration: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Prix mensuel (MAD)</label><Input type="number" value={form.prix_mensuel} onChange={e => setForm(p => ({ ...p, prix_mensuel: +e.target.value }))} /></div>
-              <div className="space-y-1.5 col-span-2"><label className="form-label">Client</label><Input value={form.client} onChange={e => setForm(p => ({ ...p, client: e.target.value }))} /></div>
+              <div className="space-y-1.5 col-span-2"><label className="form-label">Client</label><AutocorrectInput value={form.client} onChange={e => setForm(p => ({ ...p, client: e.target.value }))} /></div>
             </div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>

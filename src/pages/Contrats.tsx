@@ -7,6 +7,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -267,7 +268,7 @@ function ContratCard({ contrat, onDelete, onEdit }: {
               </div>
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Note (optionnel)</label>
-                <Input value={vers.note ?? ''} onChange={e => setVers(p => ({ ...p, note: e.target.value }))} />
+                <AutocorrectInput value={vers.note ?? ''} onChange={e => setVers(p => ({ ...p, note: e.target.value }))} />
               </div>
             </div>
             <div className="flex justify-end gap-3">
@@ -414,7 +415,7 @@ export default function Contrats() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">N° Contrat</label><Input value={form.numero} onChange={e => setForm(p => ({ ...p, numero: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Client</label><ClientCombobox value={form.client} onChange={v => setForm(p => ({ ...p, client: v }))} /></div>
-              <div className="space-y-1.5 col-span-2"><label className="form-label">Objet</label><Input value={form.objet} onChange={e => setForm(p => ({ ...p, objet: e.target.value }))} /></div>
+              <div className="space-y-1.5 col-span-2"><label className="form-label">Objet</label><AutocorrectInput value={form.objet} onChange={e => setForm(p => ({ ...p, objet: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Montant (MAD)</label><Input type="number" value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Statut</label>
                 <Select value={form.statut} onValueChange={v => setForm(p => ({ ...p, statut: v as Contrat['statut'] }))}>

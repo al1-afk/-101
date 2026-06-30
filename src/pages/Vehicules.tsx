@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -295,10 +296,10 @@ function VehicleFormDialog({
               </Select>
             </Field>
             <Field label="Marque *">
-              <Input value={form.marque ?? ''} onChange={(e) => set('marque', e.target.value)} placeholder="Renault" required />
+              <AutocorrectInput value={form.marque ?? ''} onChange={(e) => set('marque', e.target.value)} placeholder="Renault" required />
             </Field>
             <Field label="Modèle *">
-              <Input value={form.modele ?? ''} onChange={(e) => set('modele', e.target.value)} placeholder="Kangoo" required />
+              <AutocorrectInput value={form.modele ?? ''} onChange={(e) => set('modele', e.target.value)} placeholder="Kangoo" required />
             </Field>
             <Field label="Année">
               <Input type="number" value={form.annee ?? ''} onChange={(e) => set('annee', e.target.value ? Number(e.target.value) : null)} />
@@ -339,14 +340,14 @@ function VehicleFormDialog({
               <Input type="number" value={form.kilometrage ?? 0} onChange={(e) => set('kilometrage', Number(e.target.value) || 0)} />
             </Field>
             <Field label="Conducteur principal">
-              <Input value={form.conducteur_principal ?? ''} onChange={(e) => set('conducteur_principal', e.target.value)} />
+              <AutocorrectInput value={form.conducteur_principal ?? ''} onChange={(e) => set('conducteur_principal', e.target.value)} />
             </Field>
             <Field label="Image URL" hint="aperçu sur la fiche">
               <Input value={form.image_url ?? ''} onChange={(e) => set('image_url', e.target.value)} placeholder="https://…" />
             </Field>
           </div>
           <Field label="Notes">
-            <textarea
+            <AutocorrectTextarea
               className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={form.notes ?? ''}
               onChange={(e) => set('notes', e.target.value)}
@@ -472,7 +473,7 @@ function QuickFuelForm({ vehicleId, kmCurrent }: { vehicleId: string; kmCurrent:
           <Input type="number" step="0.01" value={prix} onChange={(e) => setPrix(Number(e.target.value) || 0)} className="h-8" required />
         </Field>
         <Field label="Station" small>
-          <Input value={station} onChange={(e) => setStation(e.target.value)} className="h-8" placeholder="Afriquia…" />
+          <AutocorrectInput value={station} onChange={(e) => setStation(e.target.value)} className="h-8" placeholder="Afriquia…" />
         </Field>
         <Button type="submit" size="sm" disabled={create.isPending} className="h-8">
           <Plus className="w-3.5 h-3.5" /> Plein
@@ -558,11 +559,11 @@ function QuickMaintForm({ vehicleId, kmCurrent }: { vehicleId: string; kmCurrent
             <Input type="number" step="0.01" value={montant} onChange={(e) => setMontant(Number(e.target.value) || 0)} className="h-8" />
           </Field>
           <Field label="Garage" small>
-            <Input value={garage} onChange={(e) => setGarage(e.target.value)} className="h-8" />
+            <AutocorrectInput value={garage} onChange={(e) => setGarage(e.target.value)} className="h-8" />
           </Field>
         </div>
         <Field label="Description" small>
-          <Input value={desc} onChange={(e) => setDesc(e.target.value)} className="h-8" placeholder="Vidange + filtres" required />
+          <AutocorrectInput value={desc} onChange={(e) => setDesc(e.target.value)} className="h-8" placeholder="Vidange + filtres" required />
         </Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Prochain km" small>
@@ -652,7 +653,7 @@ function QuickDocForm({ vehicleId }: { vehicleId: string }) {
             </Select>
           </Field>
           <Field label="Émetteur" small>
-            <Input value={emetteur} onChange={(e) => setEmetteur(e.target.value)} className="h-8" placeholder="Atlanta…" />
+            <AutocorrectInput value={emetteur} onChange={(e) => setEmetteur(e.target.value)} className="h-8" placeholder="Atlanta…" />
           </Field>
           <Field label="N°" small>
             <Input value={numero} onChange={(e) => setNumero(e.target.value)} className="h-8" />

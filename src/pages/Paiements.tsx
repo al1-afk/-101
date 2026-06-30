@@ -30,6 +30,7 @@ function PaiementsChartTooltip({ active, payload, label, year }: any) {
 }
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -213,7 +214,7 @@ function PrevisionsRevenus() {
       </div>
 
       <div className="flex gap-2 mb-3">
-        <Input
+        <AutocorrectInput
           value={titre}
           onChange={e => setTitre(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') add() }}
@@ -1444,7 +1445,7 @@ export default function Paiements() {
 
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Notes</label>
-                <Input value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Optionnel" />
+                <AutocorrectInput value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Optionnel" />
               </div>
             </div>
 

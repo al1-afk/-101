@@ -13,6 +13,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import { Button }   from '@/components/ui/button'
 import { Input }    from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatDate, formatCurrency } from '@/lib/utils'
@@ -435,7 +436,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                     <div className="space-y-2.5">
                       <div className="relative">
                         <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                        <Input
+                        <AutocorrectInput
                           value={form.nom}
                           onChange={set('nom')}
                           placeholder="Nom complet *"
@@ -445,7 +446,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                       </div>
                       <div className="relative">
                         <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                        <Input
+                        <AutocorrectInput
                           value={form.entreprise}
                           onChange={set('entreprise')}
                           placeholder="Entreprise"
@@ -528,7 +529,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                         <p className="form-label mb-1.5">Responsable</p>
                         <div className="relative">
                           <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                          <Input
+                          <AutocorrectInput
                             value={form.responsable}
                             onChange={set('responsable')}
                             placeholder="Said"
@@ -579,7 +580,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                   <div className="space-y-3">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Notes</p>
                     <div className="relative">
-                      <textarea
+                      <AutocorrectTextarea
                         value={form.notes}
                         onChange={set('notes')}
                         className="input-field resize-none h-28"
@@ -630,7 +631,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                       })}
                     </div>
 
-                    <textarea
+                    <AutocorrectTextarea
                       value={noteText}
                       onChange={e => setNoteText(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAddNote() }}

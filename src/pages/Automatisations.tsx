@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -460,7 +461,7 @@ function RuleFormFields({
     <div className="space-y-3">
       <div className="space-y-1.5">
         <label className="text-sm font-medium">Nom de la règle</label>
-        <Input
+        <AutocorrectInput
           placeholder="Ex: Relance 7 jours"
           value={form.label ?? ''}
           onChange={e => set('label', e.target.value)}
@@ -468,7 +469,7 @@ function RuleFormFields({
       </div>
       <div className="space-y-1.5">
         <label className="text-sm font-medium">Description</label>
-        <Input
+        <AutocorrectInput
           placeholder="Description courte..."
           value={form.description ?? ''}
           onChange={e => set('description', e.target.value)}

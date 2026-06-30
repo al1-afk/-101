@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { Plus, Search, Phone, Mail, Edit2, Trash2, MapPin, BadgeCheck, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getInitials } from '@/lib/utils'
@@ -255,7 +256,7 @@ export default function Contacts() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Nom complet *</label>
-                <Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} />
+                <AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Téléphone</label>
@@ -267,11 +268,11 @@ export default function Contacts() {
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Métier / Spécialité</label>
-                <Input value={form.profession ?? ''} onChange={e => setForm(p => ({ ...p, profession: e.target.value }))} placeholder="ex: Plombier, Designer..." />
+                <AutocorrectInput value={form.profession ?? ''} onChange={e => setForm(p => ({ ...p, profession: e.target.value }))} placeholder="ex: Plombier, Designer..." />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Ville</label>
-                <Input value={form.ville ?? ''} onChange={e => setForm(p => ({ ...p, ville: e.target.value }))} />
+                <AutocorrectInput value={form.ville ?? ''} onChange={e => setForm(p => ({ ...p, ville: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Type</label>
@@ -298,7 +299,7 @@ export default function Contacts() {
               </div>
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Notes</label>
-                <Input value={form.notes ?? ''} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Tarif, disponibilité, recommandé par..." />
+                <AutocorrectInput value={form.notes ?? ''} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Tarif, disponibilité, recommandé par..." />
               </div>
             </div>
             <div className="flex justify-end gap-3">

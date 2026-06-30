@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Settings, User, Bell, Shield, Globe, Save, RefreshCcw, Check, Eye, EyeOff, Download, Smartphone, CheckCircle2, MonitorSmartphone, Apple, Code2, Copy, KeyRound, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
@@ -192,7 +193,7 @@ export default function Parametres() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Nom complet</label>
-                <Input value={profile.fullname} onChange={e => setProfile(p => ({ ...p, fullname: e.target.value }))} />
+                <AutocorrectInput value={profile.fullname} onChange={e => setProfile(p => ({ ...p, fullname: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Email</label>
@@ -226,7 +227,7 @@ export default function Parametres() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Raison sociale</label>
-                <Input value={entreprise.company} onChange={e => setEntreprise(p => ({ ...p, company: e.target.value }))} />
+                <AutocorrectInput value={entreprise.company} onChange={e => setEntreprise(p => ({ ...p, company: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Secteur d'activité</label>
@@ -257,7 +258,7 @@ export default function Parametres() {
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Adresse</label>
-                <Input value={entreprise.adresse} onChange={e => setEntreprise(p => ({ ...p, adresse: e.target.value }))} placeholder="Casablanca, Maroc" />
+                <AutocorrectInput value={entreprise.adresse} onChange={e => setEntreprise(p => ({ ...p, adresse: e.target.value }))} placeholder="Casablanca, Maroc" />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">TVA par défaut (%)</label>
@@ -506,7 +507,7 @@ function WidgetIntegration() {
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Étiquette source <span className="text-muted-foreground">(facultatif)</span></label>
-                <Input value={source} onChange={e => setSource(e.target.value)} placeholder="Landing nextgital.ma" />
+                <AutocorrectInput value={source} onChange={e => setSource(e.target.value)} placeholder="Landing nextgital.ma" />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Couleur d'accent</label>

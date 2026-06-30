@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageSquare, Send, Loader2, Inbox } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -156,7 +157,7 @@ export default function ProjetChat({
       {/* Composer */}
       <div className="border-t border-border p-3">
         <div className="flex items-end gap-2">
-          <textarea
+          <AutocorrectTextarea
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={e => {

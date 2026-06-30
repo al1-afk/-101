@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatDate, formatCurrency, getDaysUntil } from '@/lib/utils'
@@ -338,7 +339,7 @@ function ActionDrawer({
             <span className="text-white text-xs font-bold">NG</span>
           </div>
           <div className="flex-1 relative">
-            <textarea
+            <AutocorrectTextarea
               ref={textareaRef}
               value={noteText}
               onChange={e => setNoteText(e.target.value)}
@@ -906,7 +907,7 @@ export default function Taches() {
 
             <div className="space-y-1.5">
               <label className="form-label">Titre de l'action *</label>
-              <Input
+              <AutocorrectInput
                 autoFocus
                 value={newAction.titre ?? ''}
                 onChange={e => setNewAction(p => ({ ...p, titre: e.target.value }))}
@@ -917,7 +918,7 @@ export default function Taches() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Client <span className="text-muted-foreground font-normal">(optionnel)</span></label>
-                <Input
+                <AutocorrectInput
                   value={newAction.client ?? ''}
                   onChange={e => setNewAction(p => ({ ...p, client: e.target.value }))}
                   placeholder="Nom du client (facultatif)"
@@ -992,7 +993,7 @@ export default function Taches() {
 
             <div className="space-y-1.5">
               <label className="form-label">Notes</label>
-              <textarea
+              <AutocorrectTextarea
                 value={newAction.description ?? ''}
                 onChange={e => setNewAction(p => ({ ...p, description: e.target.value }))}
                 className="input-field resize-none h-16"

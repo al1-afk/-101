@@ -14,6 +14,7 @@ import BlockEditor from '@/components/BlockEditor'
 import type { SopBlock } from '@/hooks/useSops'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useClients, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
 import { useQueryClient } from '@tanstack/react-query'
@@ -151,7 +152,7 @@ function ClientEditForm({ client, onClose }: { client: Client; onClose: () => vo
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Nom complet *</label>
-          <Input value={form.nom} onChange={s('nom')} required />
+          <AutocorrectInput value={form.nom} onChange={s('nom')} required />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Email</label>
@@ -163,20 +164,20 @@ function ClientEditForm({ client, onClose }: { client: Client; onClose: () => vo
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Entreprise</label>
-          <Input value={form.entreprise} onChange={s('entreprise')} />
+          <AutocorrectInput value={form.entreprise} onChange={s('entreprise')} />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Ville</label>
-          <Input value={form.ville} onChange={s('ville')} />
+          <AutocorrectInput value={form.ville} onChange={s('ville')} />
         </div>
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Adresse</label>
-          <Input value={form.adresse} onChange={s('adresse')} />
+          <AutocorrectInput value={form.adresse} onChange={s('adresse')} />
         </div>
       </div>
       <div className="space-y-1.5">
         <label className="form-label">Notes internes</label>
-        <textarea value={form.notes} onChange={s('notes')} className="input-field resize-none h-20" />
+        <AutocorrectTextarea value={form.notes} onChange={s('notes')} className="input-field resize-none h-20" />
       </div>
       <div className="flex justify-end gap-3 pt-1">
         <Button type="button" variant="secondary" size="sm" onClick={onClose}>Annuler</Button>
@@ -418,7 +419,7 @@ export default function ClientDetail() {
             action={{ label: 'Ajouter', onClick: () => {} }}
           >
             <div className="flex gap-2 mb-4">
-              <Input
+              <AutocorrectInput
                 value={newTask}
                 onChange={e => setNewTask(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addTask()}
@@ -464,7 +465,7 @@ export default function ClientDetail() {
                   <option key={t}>{t}</option>
                 ))}
               </select>
-              <Input
+              <AutocorrectInput
                 value={newNote}
                 onChange={e => setNewNote(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addNote()}

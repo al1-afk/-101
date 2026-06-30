@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Plus, Globe, AlertTriangle, CheckCircle2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatCurrency, formatDate, getDaysUntil } from '@/lib/utils'
 import { domainesApi } from '@/lib/api'
@@ -147,13 +148,13 @@ export default function Domaines() {
               <div className="space-y-1.5 col-span-2"><label className="form-label">Nom de domaine *</label>
                 <Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} placeholder="exemple.ma" /></div>
               <div className="space-y-1.5"><label className="form-label">Registrar</label>
-                <Input value={form.registrar} onChange={e => setForm(p => ({ ...p, registrar: e.target.value }))} /></div>
+                <AutocorrectInput value={form.registrar} onChange={e => setForm(p => ({ ...p, registrar: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Date expiration</label>
                 <Input type="date" value={form.date_expiration} onChange={e => setForm(p => ({ ...p, date_expiration: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Prix renouvellement (MAD)</label>
                 <Input type="number" value={form.prix_renouvellement} onChange={e => setForm(p => ({ ...p, prix_renouvellement: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Client associé</label>
-                <Input value={form.client} onChange={e => setForm(p => ({ ...p, client: e.target.value }))} /></div>
+                <AutocorrectInput value={form.client} onChange={e => setForm(p => ({ ...p, client: e.target.value }))} /></div>
             </div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>
