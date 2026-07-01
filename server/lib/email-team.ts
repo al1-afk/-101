@@ -77,7 +77,7 @@ export function teamInvitationEmail(opts: InviteOpts) {
     <tr><td align="center">
       <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:16px;box-shadow:0 4px 16px rgba(15,23,42,0.06);overflow:hidden;">
         <tr><td style="padding:32px 32px 12px;text-align:center;">
-          <div style="display:inline-block;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:800;font-size:22px;line-height:52px;text-align:center;">G</div>
+          <div style="display:inline-block;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:800;font-size:22px;line-height:52px;text-align:center;">N</div>
           <h1 style="margin:18px 0 6px;font-size:20px;color:#0f172a;">Bienvenue dans l'équipe ${tenantName}</h1>
           <p style="margin:0;font-size:14px;color:#64748b;">${inviterName} vous a invité(e) à rejoindre NEXT GITAL.</p>
         </td></tr>
