@@ -230,13 +230,29 @@ function MemberActions({ member, onOpen, onInvalidate }: {
   onInvalidate: () => void
 }) {
   const qc = useQueryClient()
+  const [shareUrl, setShareUrl] = useState<{ kind: 'invite' | 'reset'; url: string } | null>(null)
 
   const run = async (fn: () => Promise<any>, okMsg: string) => {
     try { await fn(); toast.success(okMsg); onInvalidate() }
     catch (e: any) { toast.error(e?.message ?? 'Erreur') }
   }
 
+  const runAndShare = async (
+    fn: () => Promise<any>,
+    kind: 'invite' | 'reset',
+    okMsg: string,
+  ) => {
+    try {
+      const res = await fn()
+      const url = res?.invitation_url ?? res?.reset_url ?? ''
+      if (url) setShareUrl({ kind, url })
+      toast.success(okMsg)
+      onInvalidate()
+    } catch (e: any) { toast.error(e?.message ?? 'Erreur') }
+  }
+
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="h-8 w-8 p-0"><MoreVertical className="w-4 h-4" /></Button>
@@ -247,13 +263,13 @@ function MemberActions({ member, onOpen, onInvalidate }: {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {member.account_status === 'invited' && (
-          <DropdownMenuItem onClick={() => run(() => teamMgmtApi.resend(member.id), 'Invitation renvoyée')}>
+          <DropdownMenuItem onClick={() => runAndShare(() => teamMgmtApi.resend(member.id), 'invite', 'Invitation renvoyée')}>
             <Send className="w-4 h-4 mr-2" /> Renvoyer l'invitation
           </DropdownMenuItem>
         )}
         {member.account_status === 'active' && (
           <>
-            <DropdownMenuItem onClick={() => run(() => teamMgmtApi.resetPwd(member.id), 'Email de réinitialisation envoyé')}>
+            <DropdownMenuItem onClick={() => runAndShare(() => teamMgmtApi.resetPwd(member.id), 'reset', 'Email de réinitialisation envoyé')}>
               <KeyRound className="w-4 h-4 mr-2" /> Réinitialiser le mot de passe
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => run(() => teamMgmtApi.suspend(member.id), 'Compte suspendu')}>
@@ -279,6 +295,77 @@ function MemberActions({ member, onOpen, onInvalidate }: {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+
+    {shareUrl && (
+      <ShareLinkDialog
+        kind={shareUrl.kind}
+        url={shareUrl.url}
+        memberName={`${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()}
+        memberEmail={member.email ?? ''}
+        onClose={() => setShareUrl(null)}
+      />
+    )}
+    </>
+  )
+}
+
+function ShareLinkDialog({
+  kind, url, memberName, memberEmail, onClose,
+}: {
+  kind:        'invite' | 'reset'
+  url:         string
+  memberName:  string
+  memberEmail: string
+  onClose:     () => void
+}) {
+  const isReset = kind === 'reset'
+  const copy = () => {
+    navigator.clipboard.writeText(url)
+    toast.success('Lien copié')
+  }
+  const message = isReset
+    ? `Bonjour ${memberName}, voici ton lien pour définir un nouveau mot de passe : ${url}\n\nCe lien est valable 24h.`
+    : `Bonjour ${memberName}, voici ton lien d'invitation pour rejoindre l'équipe Next Gital : ${url}\n\nCe lien est valable 7 jours.`
+  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Check className="w-5 h-5 text-emerald-500" />
+            {isReset ? 'Lien de réinitialisation créé' : 'Invitation renvoyée'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
+            <p className="text-sm text-emerald-800 dark:text-emerald-200">
+              Un email a été envoyé à <strong>{memberEmail}</strong>. Lien valable <strong>{isReset ? '24 heures' : '7 jours'}</strong>.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              🔗 Lien direct (à envoyer par WhatsApp si l'email n'arrive pas)
+            </label>
+            <div className="flex gap-2 mt-1.5">
+              <Input value={url} readOnly className="font-mono text-xs" />
+              <Button size="sm" onClick={copy}><Copy className="w-3.5 h-3.5" /> Copier</Button>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-border">
+            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+              <Button variant="secondary" className="w-full">
+                💬 Envoyer via WhatsApp
+              </Button>
+            </a>
+            <Button onClick={onClose} className="flex-1">Fermer</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            💡 Ce lien remplace tous les liens précédents pour ce membre.
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
