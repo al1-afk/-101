@@ -317,11 +317,12 @@ router.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
     return res.status(403).json({ error: 'Réservé aux membres' })
   }
   try {
-    const member = await queryOne<{
+    const member = await tenantQueryOne<{
       id: string; tenant_id: string; tenant_slug: string; tenant_name: string;
       first_name: string; last_name: string; email: string; job_title: string | null;
       member_type: string; avatar_url: string | null; account_status: string;
     }>(
+      req.user.tenantId,
       `SELECT m.id, m.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               m.prenom AS first_name, m.nom AS last_name, m.email, m.job_title,
               m.member_type, m.avatar_url, m.account_status
@@ -349,7 +350,8 @@ router.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
 router.post('/auth/logout', requireAuth, async (req: Request, res: Response) => {
   res.clearCookie('gestiq_team_refresh', { path: '/api/team/auth' })
   if (req.user?.role === 'team_member') {
-    const member = await queryOne<{ id: string }>(
+    const member = await tenantQueryOne<{ id: string }>(
+      req.user.tenantId,
       `SELECT id FROM public.team_members WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
       [req.user.userId, req.user.tenantId],
     )
