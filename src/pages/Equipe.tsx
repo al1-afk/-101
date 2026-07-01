@@ -1239,6 +1239,16 @@ function TeamMembersAccessManager() {
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
+  const [resendUrl, setResendUrl] = useState<{ member: any; url: string } | null>(null)
+  const resendMut = useMutation({
+    mutationFn: (id: string) => teamMgmtApi.resend(id),
+    onSuccess: (res, id) => {
+      const member = members.find((m: any) => m.id === id)
+      setResendUrl({ member, url: res.invitation_url })
+      toast.success('Invitation renvoyée')
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
+  })
   const permanentDeleteMut = useMutation({
     mutationFn: (id: string) => teamMgmtApi.permanentDelete(id),
     onSuccess:  () => {
@@ -1334,9 +1344,22 @@ function TeamMembersAccessManager() {
                           : <span className="text-xs text-amber-500">Aucun accès</span>}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
-                          <KeyRound className="w-3.5 h-3.5" /> Gérer accès
-                        </Button>
+                        <div className="flex justify-end gap-1.5">
+                          {(m.account_status === 'invited' || m.account_status === 'suspended') && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => resendMut.mutate(m.id)}
+                              disabled={resendMut.isPending}
+                              title="Renvoyer l'invitation (nouveau lien 7 jours)"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" /> Renvoyer
+                            </Button>
+                          )}
+                          <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>
+                            <KeyRound className="w-3.5 h-3.5" /> Gérer accès
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1344,6 +1367,15 @@ function TeamMembersAccessManager() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {resendUrl && (
+          <ResendInviteDialog
+            memberName={`${resendUrl.member?.first_name ?? ''} ${resendUrl.member?.last_name ?? ''}`.trim()}
+            memberEmail={resendUrl.member?.email ?? ''}
+            url={resendUrl.url}
+            onClose={() => setResendUrl(null)}
+          />
         )}
 
         {showArchive && (
@@ -1422,6 +1454,59 @@ function TeamMembersAccessManager() {
         <TeamMemberAccessDialog member={editing} onClose={() => setEditing(null)} />
       )}
     </>
+  )
+}
+
+function ResendInviteDialog({
+  memberName, memberEmail, url, onClose,
+}: {
+  memberName: string
+  memberEmail: string
+  url:        string
+  onClose:    () => void
+}) {
+  const copy = () => {
+    navigator.clipboard.writeText(url)
+    toast.success('Lien copié')
+  }
+  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`Bonjour ${memberName}, voici ton nouveau lien d'invitation pour rejoindre l'équipe Next Gital : ${url}\n\nCe lien est valable 7 jours.`)}`
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500" /> Invitation renvoyée
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
+            <p className="text-sm text-emerald-800 dark:text-emerald-200">
+              Un email vient d'être envoyé à <strong>{memberEmail}</strong> avec un lien valable <strong>7 jours</strong>.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              🔗 Lien direct (à envoyer par WhatsApp si l'email n'arrive pas)
+            </label>
+            <div className="flex gap-2 mt-1.5">
+              <Input value={url} readOnly className="font-mono text-xs" />
+              <Button size="sm" onClick={copy}>Copier</Button>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2 border-t border-border">
+            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+              <Button variant="secondary" className="w-full">
+                💬 Envoyer via WhatsApp
+              </Button>
+            </a>
+            <Button onClick={onClose} className="flex-1">Fermer</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            💡 Ce lien remplace tous les liens précédents. Les anciens emails d'invitation ne fonctionnent plus.
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
