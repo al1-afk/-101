@@ -8,6 +8,7 @@ import {
 } from '../middleware/auth'
 import { authLimiter, passwordLimiter } from '../middleware/security'
 import { sendEmail, loginCodeEmail, passwordResetEmail } from '../lib/email'
+import { teamInvitationEmail } from '../lib/email-team'
 
 const router = Router()
 
@@ -335,8 +336,52 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
       `SELECT id FROM users WHERE email = $1 AND is_active = true`, [email]
     )
 
-    /* Always respond success to avoid email enumeration */
+    /* Pas de compte users. Peut-être un team_member invité qui n'a jamais
+       accepté son invitation ? Dans ce cas, on lui renvoie une nouvelle
+       invitation pour qu'il crée son mot de passe. */
     if (!user) {
+      const member = await queryOne<{
+        id: string; tenant_id: string; prenom: string | null;
+        job_title: string | null; email: string;
+      }>(
+        `SELECT id, tenant_id, prenom, job_title, email FROM public.team_members
+          WHERE email = $1 AND user_id IS NULL AND account_status != 'archived'
+          LIMIT 1`,
+        [email]
+      )
+      if (member) {
+        const inviteToken = crypto.randomBytes(32).toString('hex')
+        await query(
+          `UPDATE public.team_members
+              SET invitation_token = $1, invitation_sent_at = NOW(),
+                  invitation_expires_at = NOW() + INTERVAL '7 days',
+                  account_status = 'invited', updated_at = NOW()
+            WHERE id = $2`,
+          [inviteToken, member.id]
+        )
+        const originHeader = req.headers.origin
+        const inviteBase = typeof originHeader === 'string' && originHeader.length > 0
+          ? originHeader
+          : (process.env.NODE_ENV === 'production' ? 'https://101.nextgital.tech' : 'http://localhost:5173')
+        const inviteUrl = `${inviteBase}/invite/${inviteToken}`
+        const tenant = await queryOne<{ name: string }>(
+          `SELECT name FROM public.tenants WHERE id = $1`, [member.tenant_id]
+        )
+        try {
+          const tpl = teamInvitationEmail({
+            firstName:   member.prenom ?? '',
+            inviterName: 'L\'équipe',
+            tenantName:  tenant?.name ?? 'Next Gital',
+            jobTitle:    member.job_title ?? '',
+            inviteUrl,
+            sopCategories: [],
+          })
+          await sendEmail({ to: member.email, ...tpl })
+        } catch (e: any) {
+          console.error('[forgot-password:reinvite]', e?.message ?? e)
+        }
+      }
+      /* Always respond success to avoid email enumeration */
       return res.json({ success: true })
     }
 

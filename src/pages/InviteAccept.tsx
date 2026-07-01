@@ -7,8 +7,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react'
-import { memberAuthApi } from '@/lib/api'
+import { Loader2, ShieldCheck, AlertCircle, CheckCircle2, Eye, EyeOff, Mail } from 'lucide-react'
+import { memberAuthApi, authApi } from '@/lib/api'
 import { useMember } from '@/hooks/useMember'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,6 +49,24 @@ export default function InviteAccept() {
   const [pwd2, setPwd2]       = useState('')
   const [showPwd, setShowPwd] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+
+  /* Renvoi de lien : si le token est invalide/expiré, l'employé saisit son email
+     ici et le backend lui envoie un nouveau lien d'invitation. */
+  const [resendEmail, setResendEmail]   = useState('')
+  const [resendState, setResendState]   = useState<'idle' | 'sending' | 'sent'>('idle')
+
+  const requestNewLink = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resendEmail.trim()) return
+    setResendState('sending')
+    try {
+      await authApi.forgotPassword(resendEmail.trim())
+      setResendState('sent')
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Erreur lors de la demande')
+      setResendState('idle')
+    }
+  }
 
   useEffect(() => {
     memberAuthApi.verifyInvite(token)
@@ -105,14 +123,52 @@ export default function InviteAccept() {
                 <AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
               </div>
               <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">Lien invalide</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">{error}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">
-                Ce lien a peut-être expiré ou été remplacé par un plus récent.<br />
-                Vérifiez votre boîte mail pour un email d'invitation plus récent, ou contactez votre administrateur pour en demander un nouveau.
-              </p>
-              <Link to="/team-login">
-                <Button variant="outline" className="w-full">Aller à la page de connexion</Button>
-              </Link>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{error}</p>
+
+              {resendState === 'sent' ? (
+                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-4 text-left">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">Email envoyé</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                        Si un compte existe pour <strong>{resendEmail}</strong>, un nouveau lien vient d'être envoyé. Vérifiez votre boîte mail (et vos spams).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    Entrez votre email pour recevoir un nouveau lien d'invitation :
+                  </p>
+                  <form onSubmit={requestNewLink} className="space-y-3">
+                    <div className="relative">
+                      <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        type="email"
+                        autoFocus
+                        required
+                        value={resendEmail}
+                        onChange={e => setResendEmail(e.target.value)}
+                        placeholder="votre.email@exemple.com"
+                        className="pl-9"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      disabled={resendState === 'sending' || !resendEmail.trim()}
+                      className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white"
+                    >
+                      {resendState === 'sending' ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />}
+                      Recevoir un nouveau lien
+                    </Button>
+                  </form>
+                  <Link to="/team-login" className="block mt-4">
+                    <Button variant="outline" className="w-full">Aller à la page de connexion</Button>
+                  </Link>
+                </>
+              )}
             </div>
           )}
 
