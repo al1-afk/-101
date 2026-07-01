@@ -173,7 +173,8 @@ router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Resp
       )
     }
 
-    await query(
+    await tenantQuery(
+      member.tenant_id,
       `UPDATE public.team_members
           SET user_id = $1,
               account_status = 'active',
@@ -275,7 +276,8 @@ router.post('/auth/login', authLimiter, async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Ce compte est archivé.' })
     }
 
-    await query(
+    await tenantQuery(
+      member.tenant_id,
       `UPDATE public.team_members SET last_login_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [member.id],
     )
