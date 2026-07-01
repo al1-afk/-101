@@ -267,15 +267,15 @@ function MemberActions({ member, onOpen, onInvalidate }: {
             <Send className="w-4 h-4 mr-2" /> Renvoyer l'invitation
           </DropdownMenuItem>
         )}
+        {(member.account_status === 'invited' || member.account_status === 'active' || member.account_status === 'suspended') && (
+          <DropdownMenuItem onClick={() => runAndShare(() => teamMgmtApi.resetPwd(member.id), 'reset', 'Lien de réinitialisation créé')}>
+            <KeyRound className="w-4 h-4 mr-2" /> Réinitialiser le mot de passe
+          </DropdownMenuItem>
+        )}
         {member.account_status === 'active' && (
-          <>
-            <DropdownMenuItem onClick={() => runAndShare(() => teamMgmtApi.resetPwd(member.id), 'reset', 'Email de réinitialisation envoyé')}>
-              <KeyRound className="w-4 h-4 mr-2" /> Réinitialiser le mot de passe
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => run(() => teamMgmtApi.suspend(member.id), 'Compte suspendu')}>
-              <ShieldOff className="w-4 h-4 mr-2" /> Suspendre
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem onClick={() => run(() => teamMgmtApi.suspend(member.id), 'Compte suspendu')}>
+            <ShieldOff className="w-4 h-4 mr-2" /> Suspendre
+          </DropdownMenuItem>
         )}
         {member.account_status === 'suspended' && (
           <DropdownMenuItem onClick={() => run(() => teamMgmtApi.activate(member.id), 'Compte réactivé')}>
@@ -285,13 +285,29 @@ function MemberActions({ member, onOpen, onInvalidate }: {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
-            if (confirm(`Archiver ${member.first_name} ${member.last_name} ? Le compte ne pourra plus se connecter.`)) {
+            if (confirm(`Archiver ${member.first_name} ${member.last_name} ? Le compte ne pourra plus se connecter, mais restera dans la corbeille.`)) {
               run(() => teamMgmtApi.archive(member.id), 'Membre archivé')
+            }
+          }}
+          className="text-amber-600 focus:text-amber-700"
+        >
+          <Trash2 className="w-4 h-4 mr-2" /> Archiver
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            const msg = member.account_status === 'archived'
+              ? `Supprimer définitivement ${member.first_name} ${member.last_name} ?\n\nCette action est IRRÉVERSIBLE — toutes les données (tâches, accès SOP, historique) seront effacées.`
+              : `Supprimer définitivement ${member.first_name} ${member.last_name} ?\n\n⚠ Le membre sera d'abord archivé puis effacé. Toutes ses données (tâches, accès SOP, historique) seront perdues DÉFINITIVEMENT.`
+            if (confirm(msg)) {
+              run(async () => {
+                if (member.account_status !== 'archived') await teamMgmtApi.archive(member.id)
+                await teamMgmtApi.permanentDelete(member.id)
+              }, 'Membre supprimé définitivement')
             }
           }}
           className="text-red-600 focus:text-red-700"
         >
-          <Trash2 className="w-4 h-4 mr-2" /> Archiver
+          <Trash2 className="w-4 h-4 mr-2" /> Supprimer définitivement
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
