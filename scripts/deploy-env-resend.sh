@@ -31,7 +31,7 @@ if [[ -f .env.local ]]; then
 fi
 
 KEY="${RESEND_API_KEY:-}"
-FROM="${RESEND_FROM:-GestiQ <noreply@101.nextgital.tech>}"
+FROM="${RESEND_FROM:-NEXT GITAL <noreply@101.nextgital.tech>}"
 
 if [[ -z "$KEY" ]]; then
   echo "✗ RESEND_API_KEY missing from your local .env.local — add it first." >&2
