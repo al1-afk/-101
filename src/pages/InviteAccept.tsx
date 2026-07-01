@@ -88,7 +88,7 @@ export default function InviteAccept() {
           {/* Logo */}
           <div className="flex items-center justify-center mb-6">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-600/30">
-              <span className="text-white text-2xl font-extrabold">G</span>
+              <span className="text-white text-2xl font-extrabold">N</span>
             </div>
           </div>
 
@@ -105,7 +105,11 @@ export default function InviteAccept() {
                 <AlertCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
               </div>
               <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">Lien invalide</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">{error}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">{error}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">
+                Ce lien a peut-être expiré ou été remplacé par un plus récent.<br />
+                Vérifiez votre boîte mail pour un email d'invitation plus récent, ou contactez votre administrateur pour en demander un nouveau.
+              </p>
               <Link to="/team-login">
                 <Button variant="outline" className="w-full">Aller à la page de connexion</Button>
               </Link>
