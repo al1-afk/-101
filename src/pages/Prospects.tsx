@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   DragDropContext, Droppable, Draggable,
@@ -30,11 +30,19 @@ import {
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { prospectsSchema } from '@/lib/importExportSchemas'
 import {
-  DateRangeFilter, DEFAULT_RANGE, makeDatePredicate, type DateRange,
+  DateRangeFilter, makeDatePredicate, computeRange, type DateRange,
 } from '@/components/ui/DateRangeFilter'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 const TODAY = new Date().toISOString().slice(0, 10)
+
+/* Filtre par défaut : prospects du mois en cours (au lieu de "Toute la période"). */
+const DEFAULT_MONTH_RANGE: DateRange = (() => {
+  const r = computeRange('month')
+  return { preset: 'month', from: r.from, to: r.to }
+})()
+
+const PAGE_SIZE = 10
 
 function stageAccent(statut: ProspectStatut) {
   return PROSPECT_STAGES.find(s => s.id === statut)?.accent ?? '#64748B'
@@ -316,31 +324,52 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
             onClick={onClose}
           />
 
-          {/* Drawer */}
-          <motion.aside
-            key="drawer"
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[480px] bg-[var(--surface-card)] border-l border-border shadow-2xl flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+          {/* Wrapper de centrage (fixe + flex center) — évite que framer-motion
+              n'écrase le -translate-x/y de Tailwind quand il anime scale/y. */}
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            onClick={onClose}
           >
+            <motion.aside
+              key="modal"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-2xl max-h-[90vh] bg-[var(--surface-card)] border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto"
+            >
 
             {/* ── HERO HEADER ── */}
             <div
               className="relative flex-shrink-0 px-6 pt-5 pb-4"
               style={{ background: `linear-gradient(135deg, ${accent}18 0%, transparent 60%)` }}
             >
-              {/* Close */}
+              {/* Bouton Créer / Enregistrer centré horizontalement en haut */}
+              {tab === 'form' && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+                  <Button
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={busy}
+                    className="h-8 px-5 text-xs font-semibold shadow-md"
+                  >
+                    {busy && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {isEdit ? '💾 Enregistrer' : '➕ Créer'}
+                  </Button>
+                </div>
+              )}
+              {/* Close à droite */}
               <button
                 onClick={onClose}
                 className="absolute top-4 right-4 w-7 h-7 rounded-full bg-muted/60 hover:bg-muted flex items-center justify-center transition-colors"
+                title="Fermer"
               >
                 <X className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
 
               {isEdit ? (
-                <div className="flex items-start gap-4">
+                <div className="flex items-start gap-4 pr-10">
                   {/* Avatar */}
                   <div
                     className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0 shadow-lg"
@@ -392,7 +421,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 pr-10">
+                <div className="flex items-center gap-3 pr-32">
                   <div className="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center">
                     <UserPlus className="w-5 h-5 text-blue-600" />
                   </div>
@@ -698,7 +727,8 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                 )}
               </div>
             </div>
-          </motion.aside>
+            </motion.aside>
+          </div>
         </>
       )}
     </AnimatePresence>
@@ -884,7 +914,8 @@ export default function Prospects() {
   const [search,       setSearch]       = useState('')
   const [filterStatut, setFilterStatut] = useState<string>('all')
   const [todayOnly,    setTodayOnly]    = useState(false)
-  const [dateRange,    setDateRange]    = useState<DateRange>(DEFAULT_RANGE)
+  const [dateRange,    setDateRange]    = useState<DateRange>(DEFAULT_MONTH_RANGE)
+  const [page,         setPage]         = useState(1)
   const [drawerOpen,   setDrawerOpen]   = useState(false)
   const [editTarget,   setEditTarget]   = useState<Prospect | null>(null)
   const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
@@ -911,6 +942,12 @@ export default function Prospects() {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [prospects, search, filterStatut, todayOnly, dateMatch]
   )
+
+  /* Pagination — 10 par page, reset à 1 quand les filtres changent. */
+  useEffect(() => { setPage(1) }, [search, filterStatut, todayOnly, dateRange])
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageStart  = (page - 1) * PAGE_SIZE
+  const paginated  = filtered.slice(pageStart, pageStart + PAGE_SIZE)
 
   const openNew     = () => { setEditTarget(null); setDrawerOpen(true) }
   const openEdit    = (p: Prospect) => { setEditTarget(p); setDrawerOpen(true) }
@@ -1216,7 +1253,7 @@ export default function Prospects() {
                 </thead>
                 <tbody>
                   <AnimatePresence initial={false}>
-                    {filtered.map(p => (
+                    {paginated.map(p => (
                       <ProspectRow
                         key={p.id}
                         p={p}
@@ -1239,6 +1276,39 @@ export default function Prospects() {
                 </div>
               )}
             </div>
+
+            {/* ── Pagination ─────────────────────────────────────── */}
+            {filtered.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-border bg-muted/20 text-xs">
+                <p className="text-muted-foreground">
+                  <span className="font-semibold text-foreground">{pageStart + 1}</span>
+                  {' – '}
+                  <span className="font-semibold text-foreground">{Math.min(pageStart + PAGE_SIZE, filtered.length)}</span>
+                  {' sur '}
+                  <span className="font-semibold text-foreground">{filtered.length}</span>
+                  {' prospects'}
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="px-2.5 py-1 rounded-md border border-border bg-background hover:bg-muted/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    ← Préc.
+                  </button>
+                  <span className="px-2 text-muted-foreground">
+                    Page <span className="font-semibold text-foreground">{page}</span> / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    className="px-2.5 py-1 rounded-md border border-border bg-background hover:bg-muted/60 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Suiv. →
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

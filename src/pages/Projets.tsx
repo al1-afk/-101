@@ -537,7 +537,21 @@ export default function Projets() {
       {/* Form dialog */}
       <Dialog open={showForm} onOpenChange={(o) => { setShowForm(o); if (!o) setEditing(null) }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editing ? 'Modifier le projet' : 'Nouveau projet'}</DialogTitle></DialogHeader>
+          <DialogHeader className="relative">
+            <DialogTitle>{editing ? 'Modifier le projet' : 'Nouveau projet'}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={create.isPending || update.isPending || !(form.nom ?? '').trim()}
+                onClick={submit}
+              >
+                {editing ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5 sm:col-span-2">

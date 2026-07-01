@@ -12,7 +12,7 @@ function header(doc: jsPDF, title: string, subtitle: string) {
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
-  doc.text('GestiQ', 14, 11)
+  doc.text('NEXT GITAL', 14, 11)
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
   doc.text(title, 80, 11, { align: 'center' })
@@ -31,7 +31,7 @@ function footer(doc: jsPDF) {
     doc.setPage(i)
     doc.setFontSize(8)
     doc.setTextColor(150)
-    doc.text(`Page ${i} / ${pages}  —  Généré par GestiQ`, 105, 290, { align: 'center' })
+    doc.text(`Page ${i} / ${pages}  —  Généré par NEXT GITAL`, 105, 290, { align: 'center' })
   }
 }
 

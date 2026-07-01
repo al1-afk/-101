@@ -618,7 +618,7 @@ export default function Taches() {
                   <Brain className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-foreground">GestiQ Intelligence</p>
+                  <p className="text-sm font-semibold text-foreground">NEXT GITAL Intelligence</p>
                   <p className="text-xs text-muted-foreground">Analyse de votre pipeline aujourd'hui</p>
                 </div>
                 <span className="ml-auto text-xs text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-500/20 px-2 py-0.5 rounded-full font-medium">

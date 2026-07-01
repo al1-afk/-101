@@ -248,7 +248,21 @@ function ContratCard({ contrat, onDelete, onEdit }: {
       {/* ── Versement dialog ── */}
       <Dialog open={showVersForm} onOpenChange={setShowVersForm}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Nouveau versement · {contrat.numero}</DialogTitle></DialogHeader>
+          <DialogHeader className="relative">
+            <DialogTitle>Nouveau versement · {contrat.numero}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={vers.montant <= 0}
+                onClick={addVersement}
+              >
+                ➕ Créer
+              </Button>
+            </div>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -410,7 +424,21 @@ export default function Contrats() {
 
       <Dialog open={showForm} onOpenChange={(o) => { setShowForm(o); if (!o) setEditing(null) }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>{editing ? 'Modifier le contrat' : 'Nouveau contrat'}</DialogTitle></DialogHeader>
+          <DialogHeader className="relative">
+            <DialogTitle>{editing ? 'Modifier le contrat' : 'Nouveau contrat'}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={create.isPending || update.isPending || !form.numero || !form.client}
+                onClick={submit}
+              >
+                {editing ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">N° Contrat</label><Input value={form.numero} onChange={e => setForm(p => ({ ...p, numero: e.target.value }))} /></div>

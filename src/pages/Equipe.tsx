@@ -144,7 +144,7 @@ function TeamMemberForm({ member, onClose }: { member?: TeamMember; onClose: () 
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form id="team-member-form" onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <label className="form-label">Prénom *</label>
@@ -1720,8 +1720,19 @@ export default function Equipe() {
       {/* Member form dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-lg">
-          <DialogHeader>
+          <DialogHeader className="relative">
             <DialogTitle>{editing ? 'Modifier le membre' : 'Ajouter un membre'}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="submit"
+                form="team-member-form"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+              >
+                {editing ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
           </DialogHeader>
           <TeamMemberForm member={editing} onClose={() => { setShowForm(false); setEditing(undefined) }} />
         </DialogContent>

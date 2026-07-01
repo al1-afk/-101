@@ -274,10 +274,22 @@ function VehicleFormDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setForm(null)}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+        <DialogHeader className="relative">
           <DialogTitle>{form.id ? 'Modifier le véhicule' : 'Nouveau véhicule'}</DialogTitle>
+          {/* Bouton primaire centré horizontalement dans le header */}
+          <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+            <Button
+              type="submit"
+              form="vehicle-form"
+              size="sm"
+              disabled={loading}
+              className="h-8 px-5 text-xs font-semibold shadow-sm"
+            >
+              {form.id ? '💾 Enregistrer' : '➕ Créer'}
+            </Button>
+          </div>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form id="vehicle-form" onSubmit={onSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Immatriculation *">
               <Input value={form.immatriculation ?? ''} onChange={(e) => set('immatriculation', e.target.value)} placeholder="12345-A-67" required />

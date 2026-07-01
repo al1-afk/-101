@@ -7,6 +7,7 @@ import { apiLimiter, sanitizeBody, errorHandler } from './middleware/security'
 import helmet from 'helmet'
 
 import authRoutes     from './routes/auth'
+import { requireAuth, requireRole } from './middleware/auth'
 import crudRoutes     from './routes/crud'
 import tenantRoutes   from './routes/tenants'
 import stockRoutes    from './routes/stock'
@@ -14,7 +15,9 @@ import vehiclesRoutes from './routes/vehicles'
 import financeAiRoutes from './routes/financeAi'
 import publicLeadsRoutes from './routes/publicLeads'
 import teamRoutes      from './routes/team'
+import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib/expiryReminderScheduler'
 import mySpaceRoutes   from './routes/mySpace'
+import sendDocumentRoutes from './routes/sendDocument'
 
 dotenv.config({ path: '.env.local' })
 
@@ -97,6 +100,7 @@ app.use('/api/finance-ai', financeAiRoutes)
 app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/team',      teamRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
+app.use('/api/send-document', sendDocumentRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */
@@ -124,6 +128,14 @@ app.get('/health/services', (_req, res) => {
   })
 })
 
+/* Endpoint manuel : déclenche immédiatement le check rappels d'expiration.
+   Réservé aux admins authentifiés — l'action fanoute des mails à tous les
+   admins de tous les tenants et consomme le quota Resend. */
+app.post('/api/admin/run-expiry-reminders', requireAuth, requireRole('admin'), async (_req, res) => {
+  await checkAndSendExpiryReminders(pool)
+  res.json({ ok: true })
+})
+
 /* ── 404 ─────────────────────────────────────────────────────── */
 app.use((_req, res) => res.status(404).json({ error: 'Route introuvable' }))
 
@@ -131,5 +143,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Route introuvable' }))
 app.use(errorHandler)
 
 app.listen(PORT, () => {
-  console.log(`\n GestiQ API  →  http://localhost:${PORT}`)
+  console.log(`\n NEXT GITAL API  →  http://localhost:${PORT}`)
+  /* Démarre le scheduler de rappels d'expiration (domaines/hébergements) */
+  startExpiryReminderScheduler(pool)
 })

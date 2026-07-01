@@ -54,9 +54,9 @@ const SUGGESTIONS: Array<Omit<RoutineBlock, 'id'>> = [
   { titre: 'Coucher',        type: 'repos',         days: [1, 2, 3, 4, 5, 6, 7], heure: '23:00', duree_min: 30 },
 ]
 
-/* ── Pack: 5 prières islamiques (heures moyennes — Casablanca) ─── */
+/* ── Pack: 5 prières islamiques (heures moyennes — Oujda) ─── */
 const PRAYER_PACK: Array<Omit<RoutineBlock, 'id'>> = [
-  { titre: '🕌 Fajr',    type: 'reflexion', days: [1, 2, 3, 4, 5, 6, 7], heure: '05:30', duree_min: 15, notes: 'Prière de l\'aube — heures moyennes Casablanca, à ajuster selon la saison.' },
+  { titre: '🕌 Fajr',    type: 'reflexion', days: [1, 2, 3, 4, 5, 6, 7], heure: '05:30', duree_min: 15, notes: 'Prière de l\'aube — heures moyennes Oujda, à ajuster selon la saison.' },
   { titre: '🕌 Dhuhr',   type: 'reflexion', days: [1, 2, 3, 4, 5, 6, 7], heure: '13:00', duree_min: 15 },
   { titre: '🕌 Asr',     type: 'reflexion', days: [1, 2, 3, 4, 5, 6, 7], heure: '16:30', duree_min: 15 },
   { titre: '🕌 Maghrib', type: 'reflexion', days: [1, 2, 3, 4, 5, 6, 7], heure: '19:00', duree_min: 15 },
@@ -114,7 +114,7 @@ export function RoutineHebdo({ existingEvents }: { existingEvents: CalEvent[] })
       const result = await Notification.requestPermission()
       setNotifPerm(result)
       if (result === 'granted') {
-        new Notification('GestiQ', { body: 'Les rappels sont activés ✓', icon: '/icon-192.png' })
+        new Notification('NEXT GITAL', { body: 'Les rappels sont activés ✓', icon: '/icon-192.png' })
         toast.success('Rappels activés')
       } else if (result === 'denied') {
         toast.error('Notifications bloquées dans le navigateur')

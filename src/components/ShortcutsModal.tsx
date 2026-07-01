@@ -84,7 +84,7 @@ export default function ShortcutsModal() {
                   </div>
                   <div>
                     <p className="font-bold text-sm text-foreground">Raccourcis clavier</p>
-                    <p className="text-[11px] text-muted-foreground">GestiQ shortcuts</p>
+                    <p className="text-[11px] text-muted-foreground">NEXT GITAL shortcuts</p>
                   </div>
                 </div>
                 <button onClick={() => setOpen(false)}

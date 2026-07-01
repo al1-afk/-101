@@ -123,8 +123,8 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       })
     }
 
-    const user = await queryOne<{ id: string; password_hash: string; name: string; is_active: boolean }>(
-      `SELECT id, password_hash, name, is_active FROM users WHERE email = $1`, [email]
+    const user = await queryOne<{ id: string; password_hash: string; name: string; is_active: boolean; email_verified_at: string | null }>(
+      `SELECT id, password_hash, name, is_active, email_verified_at FROM users WHERE email = $1`, [email]
     )
 
     const valid = user ? await bcrypt.compare(password, user.password_hash) : false
@@ -161,6 +161,32 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     }
 
     if (!memberRow) return res.status(403).json({ error: 'Accès refusé' })
+
+    /* 1ʳᵉ connexion (email jamais vérifié) → émet un code par email
+       et exige /verify-login avant d'émettre les tokens. */
+    if (!user.email_verified_at) {
+      /* Invalide tout code non consommé pour cet utilisateur */
+      await query(
+        `UPDATE login_verification_codes SET used = true
+         WHERE user_id = $1 AND used = false`,
+        [user.id]
+      )
+      const code     = String(Math.floor(100000 + Math.random() * 900000))
+      const codeHash = await bcrypt.hash(code, 10)
+      await query(
+        `INSERT INTO login_verification_codes
+           (user_id, tenant_id, email, code_hash, expires_at, ip_address, user_agent)
+         VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes', $5::inet, $6)`,
+        [user.id, memberRow.tenant_id, email, codeHash, req.ip ?? '0.0.0.0', req.headers['user-agent'] ?? '']
+      )
+      try {
+        const tpl = loginCodeEmail(code)
+        await sendEmail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text })
+      } catch (e: any) {
+        console.error('[login:first-verify-email]', e?.message ?? e)
+      }
+      return res.json({ needsVerification: true, email })
+    }
 
     const { accessToken, tenantSlug: s } = await issueTokenPair(
       res,
@@ -209,8 +235,12 @@ router.post('/verify-login', authLimiter, async (req: Request, res: Response) =>
       return res.status(400).json({ error: 'Code incorrect' })
     }
 
-    /* Mark code consumed */
+    /* Mark code consumed + user email vérifié (idempotent). */
     await query(`UPDATE login_verification_codes SET used = true WHERE id = $1`, [row.id])
+    await query(
+      `UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $1`,
+      [row.user_id]
+    )
 
     /* Resolve the user + (optional) requested tenant — same logic as /login */
     const memberRow = tenantSlug

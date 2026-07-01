@@ -5,7 +5,7 @@ import {
   Plus, Search, Folder, ChevronRight, ChevronDown, Trash2, Pencil,
   TrendingUp, TrendingDown, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, FileText, Wallet,
-  Trophy, Calendar, Crown, BarChart3, Minus, FileSignature, Printer,
+  Trophy, Calendar, Crown, BarChart3, Minus, FileSignature, Printer, Send,
 } from 'lucide-react'
 import { contratsApi } from '@/lib/api'
 import { toast } from 'sonner'
@@ -41,7 +41,8 @@ import {
 } from '@/components/ui/DateRangeFilter'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { paiementsSchema, contratsSchema } from '@/lib/importExportSchemas'
-import { generatePaiementReceiptPDF } from '@/lib/generatePaiementReceiptPDF'
+import { generatePaiementReceiptPDF, generatePaiementReceiptPDFBlob } from '@/lib/generatePaiementReceiptPDF'
+import { SendDocumentDialog } from '@/components/SendDocumentDialog'
 
 function ClientCombobox({
   value, onChange, clients, onCreate, placeholder = 'Sélectionner un client',
@@ -393,6 +394,7 @@ export default function Paiements() {
   const [contratForm, setContratForm] = useState(EMPTY_CONTRAT)
   const [editingContratId, setEditingContratId] = useState<string | null>(null)
   const [expandedContrats, setExpandedContrats] = useState<Set<string>>(() => new Set())
+  const [sendTarget, setSendTarget] = useState<{ p: Paiement; nom: string; email: string | null } | null>(null)
 
   const openContratForm = () => {
     setEditingContratId(null)
@@ -885,6 +887,18 @@ export default function Paiements() {
                                   </div>
                                   <button
                                     type="button"
+                                    title="Envoyer le reçu au client"
+                                    aria-label={`Envoyer le reçu ${p.reference} au client`}
+                                    onClick={() => {
+                                      const c = clients.find(cl => cl.id === p.client_id)
+                                      setSendTarget({ p, nom, email: c?.email ?? null })
+                                    }}
+                                    className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                  >
+                                    <Send className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
                                     title="Imprimer le reçu"
                                     aria-label={`Imprimer le reçu ${p.reference}`}
                                     onClick={() => generatePaiementReceiptPDF(p, nom)}
@@ -1327,8 +1341,20 @@ export default function Paiements() {
       {/* ── Dialog : nouveau paiement ── */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-xl">
-          <DialogHeader>
+          <DialogHeader className="relative">
             <DialogTitle>Nouveau paiement</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={createP.isPending || !form.client_id || !form.montant}
+                onClick={submitForm}
+              >
+                ➕ Créer
+              </Button>
+            </div>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -1557,6 +1583,20 @@ export default function Paiements() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Envoyer le reçu au client (PDF joint) */}
+      {sendTarget && (
+        <SendDocumentDialog
+          open={!!sendTarget}
+          onClose={() => setSendTarget(null)}
+          kind="recu"
+          numero={sendTarget.p.reference}
+          filename={`recu-${sendTarget.p.reference}.pdf`}
+          defaultEmail={sendTarget.email ?? ''}
+          clientNom={sendTarget.nom}
+          buildPdf={() => generatePaiementReceiptPDFBlob(sendTarget.p, sendTarget.nom)}
+        />
+      )}
     </div>
   )
 }

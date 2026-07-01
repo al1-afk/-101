@@ -3,6 +3,9 @@ import { tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { safeColumn } from '../middleware/security'
 import { tableRbac } from '../middleware/rbac'
+import {
+  notifyNewProspect, notifyTaskValidation, notifyNewPaiement, notifyDevisAccepte,
+} from '../lib/notificationEmails'
 
 const router = Router()
 router.use(requireAuth)
@@ -132,12 +135,23 @@ router.post('/:table', async (req: Request, res: Response) => {
   const cols = keys.join(', ')
 
   try {
-    const row = await tenantQueryOne(
+    const row = await tenantQueryOne<any>(
       req.user!.tenantId,
       `INSERT INTO ${table} (${cols}) VALUES (${ph}) RETURNING *`,
       vals
     )
     res.status(201).json(row)
+
+    /* Fire-and-forget notifications email (post-create). */
+    if (row) {
+      const tid = req.user!.tenantId
+      console.log(`[crud:notif-hook] POST /api/${table} → row.id=${row.id} tid=${tid}`)
+      if (table === 'prospects') {
+        notifyNewProspect(tid, row).catch(e => console.error('[notif:prospect] async err:', e?.message))
+      } else if (table === 'paiements') {
+        notifyNewPaiement(tid, row).catch(e => console.error('[notif:paiement] async err:', e?.message))
+      }
+    }
   } catch (err: any) {
     console.error(`[POST /api/${table}]`, err?.code, err?.message, err?.detail, { keys })
     if (isProd) return res.status(500).json({ error: 'Erreur serveur' })
@@ -162,13 +176,21 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
   const vals = [...Object.values(data), id]
 
   try {
-    const row = await tenantQueryOne(
+    const row = await tenantQueryOne<any>(
       req.user!.tenantId,
       `UPDATE ${table} SET ${sets} WHERE id = $${keys.length + 1} RETURNING *`,
       vals
     )
     if (!row) return res.status(404).json({ error: 'Non trouvé' })
     res.json(row)
+
+    /* Fire-and-forget notifications email (post-update). */
+    const tid = req.user!.tenantId
+    if (table === 'team_member_tasks' && data.status === 'validation') {
+      void notifyTaskValidation(tid, row)
+    } else if (table === 'devis' && data.statut === 'accepte') {
+      void notifyDevisAccepte(tid, row)
+    }
   } catch (err: any) {
     console.error(`[PATCH /api/${table}/${id}]`, err?.code, err?.message, err?.detail, { keys })
     if (isProd) return res.status(500).json({ error: 'Erreur serveur' })

@@ -78,10 +78,10 @@ function generateICS(events: CalEvent[]): string {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//GestiQ//GestiQ Calendar//FR',
+    'PRODID:-//NEXT GITAL//NEXT GITAL Calendar//FR',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:GestiQ',
+    'X-WR-CALNAME:NEXT GITAL',
     'X-WR-TIMEZONE:Africa/Casablanca',
   ]
   for (const e of events) {

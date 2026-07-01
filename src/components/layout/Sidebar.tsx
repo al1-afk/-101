@@ -214,7 +214,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <span className="text-white font-black text-[15px] tracking-tight">G</span>
             </div>
             <div className="min-w-0">
-              <p className="font-extrabold text-[15px] tracking-tight text-slate-900 dark:text-white leading-none">GestiQ</p>
+              <p className="font-extrabold text-[15px] tracking-tight text-slate-900 dark:text-white leading-none">NEXT GITAL</p>
               <p className="text-[10px] font-semibold leading-none mt-1" style={{ background: 'linear-gradient(90deg, #2563EB, #7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
                 CRM & Gestion
               </p>

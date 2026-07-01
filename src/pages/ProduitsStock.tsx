@@ -1224,7 +1224,7 @@ function printTicket(ticket: {
 }) {
   const fmt = (v: number) =>
     new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v) + ' MAD'
-  const tenantSlug = sessionStorage.getItem('gestiq_tenant_slug') ?? 'GestiQ'
+  const tenantSlug = sessionStorage.getItem('gestiq_tenant_slug') ?? 'NEXT GITAL'
   const tenantName = (localStorage.getItem('gestiq_company') || tenantSlug).replace(/[<>]/g, '')
 
   const linesHtml = ticket.lines.map(l => `
@@ -1312,7 +1312,7 @@ function printTicket(ticket: {
 
   <div class="footer">
     Merci de votre visite !<br>
-    <span style="font-size:9px">Édité par GestiQ</span>
+    <span style="font-size:9px">Édité par NEXT GITAL</span>
   </div>
 
   <script>

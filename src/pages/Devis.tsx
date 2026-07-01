@@ -10,7 +10,7 @@ import {
   AlignLeft, List as ListIcon, Receipt,
   Bold, Italic, Underline, AlignCenter, AlignRight,
   ListOrdered, IndentIncrease, IndentDecrease, Eraser, Strikethrough,
-  BookMarked, Save, Package,
+  BookMarked, Save, Package, Send,
 } from 'lucide-react'
 import { useDevis, useCreateDevis, useUpdateDevis, useDeleteDevis, type Devis } from '@/hooks/useDevis'
 import { useClients, useCreateClient, type Client } from '@/hooks/useClients'
@@ -25,6 +25,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { formatCurrency, formatDate, getInitials } from '@/lib/utils'
 import { toast } from 'sonner'
 import { generateDevisPDFWithRetry } from '@/lib/generateDevisPDF'
+import { generateDevisPDFBlob }     from '@/lib/generateDevisPDFBlob'
+import { SendDocumentDialog }       from '@/components/SendDocumentDialog'
 import DevisTemplate from '@/components/devis/DevisTemplate'
 import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
@@ -1335,6 +1337,7 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
   const sp      = STATUT_PREVIEW[d.statut] ?? STATUT_PREVIEW.brouillon
   const hasTVA  = d.tva > 0
   const parsed  = parseDevisNotes(d.notes)
+  const [sendOpen, setSendOpen] = useState(false)
   const { conditions: parsedConds, bankInfo: parsedBank, prestations: parsedPrests } = parsed
 
   const bankParts = [
@@ -1371,6 +1374,9 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sp.cls}`}>{sp.label}</span>
           </div>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setSendOpen(true)}>
+              <Send className="w-3.5 h-3.5" /> Envoyer au client
+            </Button>
             <Button size="sm" className="bg-[#1E64C8] hover:bg-[#1558B0] text-white border-0"
               onClick={() => generateDevisPDFWithRetry(d, client).catch(console.error)}>
               <Download className="w-3.5 h-3.5" /> Télécharger PDF
@@ -1380,6 +1386,20 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
             </button>
           </div>
         </div>
+
+        <SendDocumentDialog
+          open={sendOpen}
+          onClose={() => setSendOpen(false)}
+          kind="devis"
+          numero={d.numero}
+          filename={`${d.numero}.pdf`}
+          defaultEmail={client?.email ?? ''}
+          clientNom={d.client_nom ?? client?.entreprise ?? client?.nom}
+          buildPdf={() => generateDevisPDFBlob(d, {
+            clientNom:   d.client_nom ?? client?.entreprise ?? client?.nom,
+            clientEmail: client?.email ?? undefined,
+          })}
+        />
 
         {/* ── A4 Preview */}
         <div className="bg-slate-200 p-6">
@@ -1404,9 +1424,9 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
                 <div className="px-5 py-5 border-b border-white/10 space-y-2">
                   <p className="text-[#00A2FF] text-[9px] font-bold uppercase tracking-widest mb-2">Contact</p>
                   {[
-                    { icon: '✉', v: 'info@gestiq.com' },
+                    { icon: '✉', v: 'info@nextgital.com' },
                     { icon: '✆', v: '+212 620002066'    },
-                    { icon: '⌂', v: 'www.gestiq.com' },
+                    { icon: '⌂', v: 'www.nextgital.com' },
                   ].map(({ icon, v }) => (
                     <div key={v} className="flex gap-2 items-start">
                       <span className="text-slate-400 text-[9px] mt-0.5 w-3">{icon}</span>
@@ -1669,6 +1689,7 @@ export default function DevisPage() {
   const [editing,      setEditing]      = useState<Devis | undefined>()
   const [delTarget,    setDelTarget]    = useState<Devis | null>(null)
   const [previewing,   setPreviewing]   = useState<Devis | null>(null)
+  const [sendTarget,   setSendTarget]   = useState<Devis | null>(null)
   const [statusConfirm, setStatusConfirm] = useState<{ devis: Devis; newStatut: Devis['statut'] } | null>(null)
   const { data: clients = [] } = useClients()
 
@@ -1823,8 +1844,11 @@ export default function DevisPage() {
                           Facturer
                         </button>
 
-                        {/* Hidden-until-hover: PDF, delete */}
+                        {/* Hidden-until-hover: envoi, PDF, delete */}
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" className="w-7 h-7 text-blue-500" onClick={() => setSendTarget(d)} title="Envoyer au client">
+                            <Send className="w-3.5 h-3.5" />
+                          </Button>
                           <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => generateDevisPDFWithRetry(d, clients.find(c => c.id === d.client_id)).catch(console.error)} title="Télécharger PDF">
                             <Download className="w-3.5 h-3.5" />
                           </Button>
@@ -1950,6 +1974,26 @@ export default function DevisPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Envoyer au client (PDF joint) */}
+      {sendTarget && (() => {
+        const c = clients.find(cl => cl.id === sendTarget.client_id)
+        return (
+          <SendDocumentDialog
+            open={!!sendTarget}
+            onClose={() => setSendTarget(null)}
+            kind="devis"
+            numero={sendTarget.numero}
+            filename={`${sendTarget.numero}.pdf`}
+            defaultEmail={c?.email ?? ''}
+            clientNom={sendTarget.client_nom ?? c?.entreprise ?? c?.nom}
+            buildPdf={() => generateDevisPDFBlob(sendTarget, {
+              clientNom:   sendTarget.client_nom ?? c?.entreprise ?? c?.nom,
+              clientEmail: c?.email ?? undefined,
+            })}
+          />
+        )
+      })()}
     </div>
   )
 }

@@ -132,7 +132,21 @@ export default function Hebergements() {
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Ajouter un hébergement</DialogTitle></DialogHeader>
+          <DialogHeader className="relative">
+            <DialogTitle>Ajouter un hébergement</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={create.isPending || !form.nom}
+                onClick={() => create.mutate(form)}
+              >
+                ➕ Créer
+              </Button>
+            </div>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2"><label className="form-label">Nom *</label><AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} /></div>

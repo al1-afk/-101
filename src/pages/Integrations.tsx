@@ -69,7 +69,7 @@ const INTEGRATIONS: IntegConfig[] = [
       { key: 'provider',    label: 'Fournisseur',        placeholder: 'resend / smtp',            hint: 'Resend recommandé pour les transactionnels' },
       { key: 'api_key',     label: 'API Key / SMTP Pass',placeholder: 're_xxxxxxxxxxxx',           type: 'password' },
       { key: 'from_email',  label: 'Email expéditeur',   placeholder: 'noreply@votreentreprise.ma',type: 'email' },
-      { key: 'from_name',   label: 'Nom expéditeur',     placeholder: 'GestiQ — Votre Entreprise' },
+      { key: 'from_name',   label: 'Nom expéditeur',     placeholder: 'NEXT GITAL — Votre Entreprise' },
       { key: 'smtp_host',   label: 'SMTP Host (optionnel)',placeholder:'smtp.gmail.com',           hint: 'Seulement si vous utilisez SMTP direct' },
       { key: 'smtp_port',   label: 'SMTP Port',          placeholder: '587' },
     ],

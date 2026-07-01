@@ -372,8 +372,19 @@ export default function AbonnementsClients() {
       {/* ── Dialog Nouveau/Edit ── */}
       <Dialog open={showNew || !!editing} onOpenChange={v => { if (!v) { setShowNew(false); setEditing(null) } }}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
+          <DialogHeader className="relative">
             <DialogTitle>{editing ? 'Modifier l\'abonnement' : 'Nouvel abonnement client'}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                onClick={saveSub}
+              >
+                {editing ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
           </DialogHeader>
           <div className="space-y-3 pt-2">
             <div className="space-y-1.5">

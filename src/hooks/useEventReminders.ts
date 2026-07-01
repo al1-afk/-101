@@ -39,7 +39,7 @@ function showNotif(e: CalEvent) {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   try {
     const body = `${e.heure} · ${e.titre}${e.notes ? `\n${e.notes}` : ''}`
-    new Notification('Rappel — GestiQ', {
+    new Notification('Rappel — NEXT GITAL', {
       body,
       icon: '/icon-192.png',
       badge: '/icon-192.png',

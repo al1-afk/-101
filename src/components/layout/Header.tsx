@@ -168,7 +168,7 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
           <Menu className="w-5 h-5" />
         </button>
         <nav className="flex items-center gap-1.5 text-sm min-w-0">
-          <span className="text-slate-400 dark:text-slate-500 font-medium hidden sm:inline">GestiQ</span>
+          <span className="text-slate-400 dark:text-slate-500 font-medium hidden sm:inline">NEXT GITAL</span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 flex-shrink-0 hidden sm:block" />
           <span className="font-semibold text-slate-700 dark:text-slate-200 capitalize truncate">
             {currentPage}
@@ -316,7 +316,7 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
                 <span className="text-white text-xs font-bold">NG</span>
               </div>
               <div className="text-left hidden sm:block">
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 leading-none">GestiQ</p>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 leading-none">NEXT GITAL</p>
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">Admin</p>
               </div>
             </button>

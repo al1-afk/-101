@@ -42,6 +42,8 @@ type TaskLike = {
   project_name?:   string | null
   team_member_id?: string | null
   team_member_name?:string | null
+  /** Images collées (Cmd+V) au moment de la création — data URLs base64. */
+  attachments?:    string[] | null
 }
 
 interface Props {
@@ -224,6 +226,28 @@ export default function TaskDetailDialog({
             />
           )}
         </div>
+
+        {task.attachments && task.attachments.length > 0 && (
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold flex items-center gap-1.5">
+              📎 Images collées ({task.attachments.length})
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {task.attachments.map((src, i) => (
+                <a
+                  key={i}
+                  href={src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block rounded-lg border border-border overflow-hidden hover:border-blue-400 transition-colors"
+                  title="Cliquer pour agrandir"
+                >
+                  <img src={src} alt={`Image ${i + 1}`} className="w-full h-32 object-cover" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Sous-tâches */}
         <div className="space-y-2">

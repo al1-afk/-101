@@ -54,14 +54,14 @@ function getNotifState() {
 
 export default function Parametres() {
   const [profile, setProfile] = useState({
-    fullname:  get(LS.fullname, 'GestiQ Admin'),
+    fullname:  get(LS.fullname, 'NEXT GITAL Admin'),
     role:      get(LS.role,     ''),
-    email:     'admin@gestiq.com',
+    email:     'info@nextgital.com',
     telephone: '0661000000',
   })
 
   const [entreprise, setEntreprise] = useState({
-    company:  get(LS.company,  'GestiQ Agency'),
+    company:  get(LS.company,  'NEXT GITAL Agency'),
     activity: get(LS.activity, ''),
     country:  get(LS.country,  'Maroc'),
     currency: get(LS.currency, 'MAD'),
@@ -169,7 +169,7 @@ export default function Parametres() {
             <Settings className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             Paramètres
           </h1>
-          <p className="page-sub">Configuration de votre espace GestiQ</p>
+          <p className="page-sub">Configuration de votre espace NEXT GITAL</p>
         </div>
       </div>
 
@@ -258,7 +258,7 @@ export default function Parametres() {
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">Adresse</label>
-                <AutocorrectInput value={entreprise.adresse} onChange={e => setEntreprise(p => ({ ...p, adresse: e.target.value }))} placeholder="Casablanca, Maroc" />
+                <AutocorrectInput value={entreprise.adresse} onChange={e => setEntreprise(p => ({ ...p, adresse: e.target.value }))} placeholder="Oujda, Maroc" />
               </div>
               <div className="space-y-1.5">
                 <label className="form-label">TVA par défaut (%)</label>
@@ -283,11 +283,14 @@ export default function Parametres() {
         </TabsContent>
 
         {/* ── Notifications ── */}
-        <TabsContent value="notifications">
+        <TabsContent value="notifications" className="space-y-4">
+          {/* Notifs système (son + navigateur) */}
+          <SystemNotificationsPanel />
+
           <div className="card-premium p-6 space-y-4">
             <h2 className="section-title flex items-center gap-2">
               <Bell className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              Notifications
+              Règles métier
             </h2>
             {NOTIFICATIONS.map(n => (
               <div key={n.key} className="flex items-center justify-between p-3 bg-muted rounded-lg">
@@ -378,7 +381,7 @@ export default function Parametres() {
               Installer l'application
             </h2>
             <p className="text-sm text-muted-foreground">
-              Installez GestiQ sur votre appareil pour y accéder en un clic, même hors ligne, comme une application native.
+              Installez NEXT GITAL sur votre appareil pour y accéder en un clic, même hors ligne, comme une application native.
             </p>
 
             {appInstalled ? (
@@ -386,7 +389,7 @@ export default function Parametres() {
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Application installée</p>
-                  <p className="text-xs text-emerald-600/80 dark:text-emerald-400/80">Vous utilisez GestiQ en mode application.</p>
+                  <p className="text-xs text-emerald-600/80 dark:text-emerald-400/80">Vous utilisez NEXT GITAL en mode application.</p>
                 </div>
               </div>
             ) : isIOS ? (
@@ -407,7 +410,7 @@ export default function Parametres() {
             ) : installPrompt ? (
               <Button onClick={handleInstall} className="gap-2">
                 <Download className="w-4 h-4" />
-                Installer GestiQ
+                Installer NEXT GITAL
               </Button>
             ) : (
               <div className="flex items-start gap-3 p-4 bg-muted rounded-lg border border-border">
@@ -415,7 +418,7 @@ export default function Parametres() {
                 <div className="space-y-1.5">
                   <p className="text-sm font-medium text-foreground">Installation manuelle</p>
                   <p className="text-xs text-muted-foreground">
-                    Votre navigateur n'a pas encore proposé l'installation. Sur Chrome / Edge, cherchez l'icône <Smartphone className="inline w-3.5 h-3.5 mx-0.5" /> dans la barre d'adresse, ou ouvrez le menu et choisissez <strong>« Installer GestiQ »</strong>.
+                    Votre navigateur n'a pas encore proposé l'installation. Sur Chrome / Edge, cherchez l'icône <Smartphone className="inline w-3.5 h-3.5 mx-0.5" /> dans la barre d'adresse, ou ouvrez le menu et choisissez <strong>« Installer NEXT GITAL »</strong>.
                   </p>
                 </div>
               </div>
@@ -438,6 +441,73 @@ export default function Parametres() {
           <WidgetIntegration />
         </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+/* ── Panneau : notifications système (son + browser push) ──────────── */
+function SystemNotificationsPanel() {
+  const [sound, setSound] = useState<'on' | 'off'>(() => {
+    try { return (localStorage.getItem('gestiq_notif_sound') as 'on' | 'off') ?? 'on' } catch { return 'on' }
+  })
+  const [push, setPush] = useState<'on' | 'off'>(() => {
+    try { return (localStorage.getItem('gestiq_browser_notifs') as 'on' | 'off') ?? 'on' } catch { return 'on' }
+  })
+  const [perm, setPerm] = useState<NotificationPermission>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
+  )
+
+  const toggleSound = (v: 'on' | 'off') => {
+    setSound(v)
+    try { localStorage.setItem('gestiq_notif_sound', v) } catch {}
+    if (v === 'on') {
+      /* Petit test sonore pour confirmer */
+      import('@/lib/notificationSound').then(m => m.playNotificationSound())
+    }
+  }
+  const togglePush = async (v: 'on' | 'off') => {
+    setPush(v)
+    try { localStorage.setItem('gestiq_browser_notifs', v) } catch {}
+    if (v === 'on' && 'Notification' in window && Notification.permission === 'default') {
+      const result = await Notification.requestPermission()
+      setPerm(result)
+    }
+  }
+
+  const Toggle = ({ value, onClick }: { value: 'on' | 'off'; onClick: () => void }) => (
+    <button
+      onClick={onClick}
+      className={`w-10 h-5 rounded-full transition-all relative ${value === 'on' ? 'bg-blue-600' : 'bg-border'}`}
+    >
+      <div className={`w-4 h-4 bg-white rounded-full absolute top-0.5 transition-all ${value === 'on' ? 'right-0.5' : 'left-0.5'}`} />
+    </button>
+  )
+
+  return (
+    <div className="card-premium p-6 space-y-4">
+      <h2 className="section-title flex items-center gap-2">
+        <Bell className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+        Notifications système
+      </h2>
+      <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+        <div>
+          <p className="text-sm font-medium text-foreground">🔔 Son de notification</p>
+          <p className="text-[11px] text-muted-foreground">Un bip discret à chaque nouvelle notification</p>
+        </div>
+        <Toggle value={sound} onClick={() => toggleSound(sound === 'on' ? 'off' : 'on')} />
+      </div>
+      <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+        <div>
+          <p className="text-sm font-medium text-foreground">🖥️ Notifications navigateur</p>
+          <p className="text-[11px] text-muted-foreground">
+            Notification système même si l'onglet est en arrière-plan
+            {perm === 'denied' && <span className="text-red-600 dark:text-red-400 ml-1">• Bloqué par le navigateur</span>}
+            {perm === 'default' && <span className="text-amber-600 dark:text-amber-400 ml-1">• Permission non demandée</span>}
+            {perm === 'granted' && <span className="text-emerald-600 dark:text-emerald-400 ml-1">• Autorisé</span>}
+          </p>
+        </div>
+        <Toggle value={push} onClick={() => togglePush(push === 'on' ? 'off' : 'on')} />
+      </div>
     </div>
   )
 }

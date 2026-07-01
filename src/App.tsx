@@ -110,7 +110,7 @@ export default function App() {
               <Route path="profile"      element={<MyProfile />} />
             </Route>
 
-            {/* ── Tenant workspace: gestiq.com/:tenantSlug/* ─────── */}
+            {/* ── Tenant workspace: nextgital.com/:tenantSlug/* ─────── */}
             <Route path="/:tenantSlug" element={
               <TenantProvider>
                 <ProtectedRoute><AppLayout /></ProtectedRoute>

@@ -55,7 +55,7 @@ export default function PwaInstallBanner() {
             <span className="text-white font-black text-[14px]">G</span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-foreground leading-none">Installer GestiQ</p>
+            <p className="text-sm font-semibold text-foreground leading-none">Installer NEXT GITAL</p>
             <p className="text-xs text-muted-foreground mt-0.5">Accès rapide depuis votre bureau</p>
           </div>
           <Button size="sm" onClick={install} className="flex-shrink-0 gap-1.5 text-xs">

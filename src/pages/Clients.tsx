@@ -110,7 +110,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form id="client-form" onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5 col-span-2 sm:col-span-1">
           <label className="form-label">Nom complet *</label>
@@ -439,8 +439,19 @@ export default function Clients() {
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader>
+          <DialogHeader className="relative">
             <DialogTitle>{editingClient ? 'Modifier le client' : 'Nouveau client'}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="submit"
+                form="client-form"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+              >
+                {editingClient ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
           </DialogHeader>
           <ClientForm client={editingClient} onClose={() => { setShowForm(false); setEditingClient(undefined) }} />
         </DialogContent>

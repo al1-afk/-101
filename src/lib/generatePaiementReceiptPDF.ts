@@ -36,7 +36,8 @@ function printPdf(doc: jsPDF, filename: string) {
   }
 }
 
-export function generatePaiementReceiptPDF(paiement: Paiement, clientNom: string): void {
+/** Construit le PDF du reçu sans imprimer ni sauver. */
+export function buildPaiementReceiptPDF(paiement: Paiement, clientNom: string): jsPDF {
   const doc = new jsPDF('p', 'mm', 'a4')
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
@@ -51,12 +52,12 @@ export function generatePaiementReceiptPDF(paiement: Paiement, clientNom: string
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(22)
   doc.setTextColor(58, 82, 107)
-  doc.text('GestiQ', m + 8, 31)
+  doc.text('NEXT GITAL', m + 8, 31)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(100, 116, 139)
-  doc.text('CRM & Gestion · Casablanca, Maroc · contact@gestiq.com', m + 8, 37)
+  doc.text('CRM & Gestion · Oujda, Maroc · info@nextgital.com', m + 8, 37)
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(17)
@@ -142,7 +143,18 @@ export function generatePaiementReceiptPDF(paiement: Paiement, clientNom: string
   doc.setFontSize(8)
   doc.setTextColor(100, 116, 139)
   doc.text('Merci pour votre paiement.', pageW / 2, pageH - 27, { align: 'center' })
-  doc.text('Ce reçu confirme l’enregistrement du paiement dans GestiQ.', pageW / 2, pageH - 21, { align: 'center' })
+  doc.text('Ce reçu confirme l’enregistrement du paiement dans NEXT GITAL.', pageW / 2, pageH - 21, { align: 'center' })
 
+  return doc
+}
+
+/** Imprime le reçu (comportement historique). */
+export function generatePaiementReceiptPDF(paiement: Paiement, clientNom: string): void {
+  const doc = buildPaiementReceiptPDF(paiement, clientNom)
   printPdf(doc, `recu-${paiement.reference}.pdf`)
+}
+
+/** Retourne le reçu sous forme de Blob (pour envoi email). */
+export function generatePaiementReceiptPDFBlob(paiement: Paiement, clientNom: string): Blob {
+  return buildPaiementReceiptPDF(paiement, clientNom).output('blob')
 }

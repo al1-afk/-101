@@ -22,6 +22,7 @@ import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/Autocorre
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { detectVideo } from '@/components/sop/videoEmbed'
+import { parseRichPaste, shouldParseAsRichPaste } from '@/lib/parseRichPaste'
 
 const MAX_IMAGE_MB = 10
 
@@ -149,8 +150,26 @@ export default function BlockEditor({ value, onChange, placeholder = 'Commencez 
 
   const openSlashAt = (idx: number) => { setInsertAt(idx); setSlashQuery(''); setSlashOpen(true) }
 
+  /* Notion-style rich paste : intercepte le collage multi-lignes n'importe où
+     dans l'éditeur, parse en blocs (titres, checklists, listes, tableaux…) et
+     les insère à la suite. Un collage mono-ligne reste géré nativement par
+     l'input focus, on ne préempte rien. */
+  const handleRichPaste = (e: React.ClipboardEvent) => {
+    const target = e.target as HTMLElement
+    // Ne pas voler le collage dans les champs "table" ou dans un champ de saisie de tableau/callout etc. qui a du sens en mono-ligne.
+    if (target.tagName === 'SELECT') return
+    const raw = e.clipboardData?.getData('text/plain') ?? ''
+    if (!shouldParseAsRichPaste(raw)) return
+    const parsed = parseRichPaste(raw)
+    if (parsed.length === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    onChange([...value, ...parsed])
+    toast.success(`${parsed.length} bloc${parsed.length > 1 ? 's' : ''} ajouté${parsed.length > 1 ? 's' : ''} depuis le presse-papier`)
+  }
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" onPaste={handleRichPaste}>
       <AnimatePresence>
         {value.map((blk, i) => (
           <motion.div

@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────
-   GestiQ API Client — remplace Supabase
+   NEXT GITAL API Client — remplace Supabase
    Toutes les requêtes sont envoyées à Express + PostgreSQL
 ───────────────────────────────────────────────────────────────── */
 

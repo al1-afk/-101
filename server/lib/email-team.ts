@@ -35,7 +35,7 @@ interface InviteOpts {
 
 export function teamInvitationEmail(opts: InviteOpts) {
   const { firstName, inviterName, tenantName, jobTitle, inviteUrl, sopCategories } = opts
-  const subject = `Bienvenue dans l'équipe ${tenantName} — votre accès GestiQ`
+  const subject = `Bienvenue dans l'équipe ${tenantName} — votre accès NEXT GITAL`
 
   const categoryList = sopCategories
     .map(c => `• ${CATEGORY_LABELS[c] ?? c}`)
@@ -44,7 +44,7 @@ export function teamInvitationEmail(opts: InviteOpts) {
   const text = [
     `Bonjour ${firstName},`,
     ``,
-    `${inviterName} vous a ajouté(e) à l'équipe ${tenantName} sur GestiQ.`,
+    `${inviterName} vous a ajouté(e) à l'équipe ${tenantName} sur NEXT GITAL.`,
     jobTitle ? `Votre poste : ${jobTitle}` : '',
     sopCategories.length ? `Votre accès SOPs :\n${categoryList}` : '',
     ``,
@@ -79,7 +79,7 @@ export function teamInvitationEmail(opts: InviteOpts) {
         <tr><td style="padding:32px 32px 12px;text-align:center;">
           <div style="display:inline-block;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-weight:800;font-size:22px;line-height:52px;text-align:center;">G</div>
           <h1 style="margin:18px 0 6px;font-size:20px;color:#0f172a;">Bienvenue dans l'équipe ${tenantName}</h1>
-          <p style="margin:0;font-size:14px;color:#64748b;">${inviterName} vous a invité(e) à rejoindre GestiQ.</p>
+          <p style="margin:0;font-size:14px;color:#64748b;">${inviterName} vous a invité(e) à rejoindre NEXT GITAL.</p>
         </td></tr>
         <tr><td style="padding:8px 32px 0;">
           <p style="margin:18px 0 0;font-size:15px;color:#0f172a;line-height:1.6;">Bonjour <strong>${firstName}</strong>,</p>
@@ -99,7 +99,7 @@ export function teamInvitationEmail(opts: InviteOpts) {
           <p style="margin:18px 0 0;font-size:13px;color:#64748b;line-height:1.6;">Une fois connecté(e), vous trouverez vos <strong>SOPs</strong>, vos <strong>tâches</strong> et votre <strong>progression</strong> sur votre espace personnel.</p>
         </td></tr>
         <tr><td style="padding:16px 32px;border-top:1px solid #e2e8f0;background:#f8fafc;text-align:center;">
-          <p style="margin:0;font-size:11px;color:#94a3b8;">GestiQ — Gestion d'équipe · Ne répondez pas à ce message</p>
+          <p style="margin:0;font-size:11px;color:#94a3b8;">NEXT GITAL — Gestion d'équipe · Ne répondez pas à ce message</p>
         </td></tr>
       </table>
     </td></tr>
@@ -116,12 +116,12 @@ interface ResetOpts {
 
 export function teamPasswordResetEmail(opts: ResetOpts) {
   const { firstName, resetUrl } = opts
-  const subject = `Réinitialisation de votre mot de passe GestiQ`
+  const subject = `Réinitialisation de votre mot de passe NEXT GITAL`
 
   const text = [
     `Bonjour ${firstName},`,
     ``,
-    `Votre administrateur a déclenché une réinitialisation de votre mot de passe GestiQ.`,
+    `Votre administrateur a déclenché une réinitialisation de votre mot de passe NEXT GITAL.`,
     ``,
     `Pour définir un nouveau mot de passe, cliquez ci-dessous :`,
     resetUrl,
@@ -155,7 +155,7 @@ export function teamPasswordResetEmail(opts: ResetOpts) {
           </p>
         </td></tr>
         <tr><td style="padding:16px 32px;border-top:1px solid #e2e8f0;background:#f8fafc;text-align:center;">
-          <p style="margin:0;font-size:11px;color:#94a3b8;">GestiQ — Gestion d'équipe · Ne répondez pas à ce message</p>
+          <p style="margin:0;font-size:11px;color:#94a3b8;">NEXT GITAL — Gestion d'équipe · Ne répondez pas à ce message</p>
         </td></tr>
       </table>
     </td></tr>

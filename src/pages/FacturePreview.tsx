@@ -4,13 +4,15 @@
  */
 import { useRef, useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Loader2, Copy, Check, Printer, Download } from 'lucide-react'
+import { ArrowLeft, Loader2, Copy, Check, Printer, Download, Send } from 'lucide-react'
 
 import { useFactures } from '@/hooks/useFactures'
 import { useClients }  from '@/hooks/useClients'
 import { Button }       from '@/components/ui/button'
 import FactureTemplate  from '@/components/facture/FactureTemplate'
 import { openPrint, buildPdfFilename } from '@/components/devis/DevisActions'
+import { SendDocumentDialog } from '@/components/SendDocumentDialog'
+import { generateFacturePDFBlob } from '@/lib/generatePdf'
 
 const A4_W_PX = 794
 const A4_H_PX = 1123
@@ -20,9 +22,10 @@ export default function FacturePreview() {
   const navigate     = useNavigate()
   const templateRef  = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const [copied, setCopied] = useState(false)
-  const [scale, setScale]   = useState(1)
-  const [pages, setPages]   = useState(1)
+  const [copied,   setCopied]   = useState(false)
+  const [scale,    setScale]    = useState(1)
+  const [pages,    setPages]    = useState(1)
+  const [sendOpen, setSendOpen] = useState(false)
 
   useEffect(() => {
     const el = containerRef.current
@@ -125,6 +128,16 @@ export default function FacturePreview() {
                 </Button>
 
                 <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSendOpen(true)}
+                  className="flex items-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  <span className="hidden sm:inline">Envoyer au client</span>
+                </Button>
+
+                <Button
                   size="sm"
                   onClick={() => { const e = templateRef.current; if (e) openPrint(e, filename, true) }}
                   className="flex items-center gap-2 bg-[#1e64c4] hover:bg-[#1558b0] text-white border-0"
@@ -185,6 +198,17 @@ export default function FacturePreview() {
         )}
         <div className="h-12" />
       </div>
+
+      <SendDocumentDialog
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        kind="facture"
+        numero={facture.numero}
+        filename={`${facture.numero}.pdf`}
+        defaultEmail={facture.client_email ?? client?.email ?? undefined}
+        clientNom={facture.client_nom ?? client?.entreprise ?? client?.nom ?? undefined}
+        buildPdf={() => generateFacturePDFBlob(facture)}
+      />
     </div>
   )
 }

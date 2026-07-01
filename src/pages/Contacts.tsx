@@ -249,8 +249,20 @@ export default function Contacts() {
       {/* ── Dialog ajouter/modifier ── */}
       <Dialog open={showForm} onOpenChange={(o) => { if (!o) { setShowForm(false); setEditing(undefined) } }}>
         <DialogContent className="max-w-xl">
-          <DialogHeader>
+          <DialogHeader className="relative">
             <DialogTitle>{editing ? 'Modifier le contact' : 'Nouveau contact'}</DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={!form.nom.trim() || createM.isPending || updateM.isPending}
+                onClick={submit}
+              >
+                {editing ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">

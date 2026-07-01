@@ -69,7 +69,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
       else                        document.documentElement.classList.add('dark')
     } catch {}
     markOnboardingDone()
-    toast.success(`Bienvenue, ${data.fullname || 'sur GestiQ'} !`)
+    toast.success(`Bienvenue, ${data.fullname || 'sur NEXT GITAL'} !`)
     onClose()
   }
 
@@ -233,7 +233,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
                     <Sparkles className="w-8 h-8 text-blue-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white">GestiQ est prêt, {data.fullname || 'bienvenue'} !</h3>
+                    <h3 className="text-lg font-bold text-white">NEXT GITAL est prêt, {data.fullname || 'bienvenue'} !</h3>
                     <p className="text-sm text-slate-400 mt-1">{data.company} — {data.activity || data.country}</p>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-xs">

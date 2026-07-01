@@ -38,8 +38,8 @@ function relativeTime(iso: string): string {
 }
 
 const RENEWALS = [
-  { nom: 'gestiq.ma',  type: 'Domaine',     expiration: '2026-05-15', jours: 33, prix: 120 },
-  { nom: 'gestiq.com', type: 'Domaine',     expiration: '2026-06-01', jours: 50, prix: 150 },
+  { nom: 'nextgital.com',  type: 'Domaine',     expiration: '2026-05-15', jours: 33, prix: 120 },
+  { nom: 'nextgital.com', type: 'Domaine',     expiration: '2026-06-01', jours: 50, prix: 150 },
   { nom: 'VPS Contabo',   type: 'Hébergement', expiration: '2026-04-30', jours: 18, prix: 350 },
   { nom: 'Canva Pro',     type: 'Abonnement',  expiration: '2026-04-25', jours: 13, prix: 130 },
 ]
@@ -263,7 +263,7 @@ export default function Dashboard() {
   }, [factures, prospects, devis])
 
   // ── Greeting name ──
-  const userName = (() => { try { return localStorage.getItem('gestiq_fullname') || 'GestiQ' } catch { return 'GestiQ' } })()
+  const userName = (() => { try { return localStorage.getItem('gestiq_fullname') || 'NEXT GITAL' } catch { return 'NEXT GITAL' } })()
 
   const showAlert    = !alertDismissed && (kpis.facturesImpayees > 0 || kpis.devisPending > 0)
   const topAnomalies = anomalies.filter(a => a.severity === 'critical').slice(0, 2)

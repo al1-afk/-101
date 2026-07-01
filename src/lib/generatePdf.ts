@@ -13,7 +13,9 @@ const STATUT_LABELS: Record<string, string> = {
   refusee:   'Refusée',
 }
 
-export function generateFacturePDF(facture: Facture): void {
+/** Construit le document PDF (jsPDF) sans le sauver ni l'imprimer.
+ *  Utilisé par `generateFacturePDF` (save) et `generateFacturePDFBlob` (email). */
+export function buildFacturePDF(facture: Facture): jsPDF {
   const doc   = new jsPDF('p', 'mm', 'a4')
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
@@ -23,12 +25,12 @@ export function generateFacturePDF(facture: Facture): void {
   doc.setFontSize(22)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(58, 82, 107)
-  doc.text('GestiQ', m, 22)
+  doc.text('NEXT GITAL', m, 22)
 
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(100, 116, 139)
-  doc.text('Casablanca, Maroc  ·  contact@gestiq.com', m, 28)
+  doc.text('Oujda, Maroc  ·  info@nextgital.com', m, 28)
 
   /* ── Header right: invoice meta ───────────────────────────── */
   doc.setFontSize(18)
@@ -180,10 +182,20 @@ export function generateFacturePDF(facture: Facture): void {
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(148, 163, 184)
   doc.text(
-    'GestiQ · Casablanca, Maroc · contact@gestiq.com · Merci pour votre confiance.',
+    'NEXT GITAL · Oujda, Maroc · info@nextgital.com · Merci pour votre confiance.',
     pageW / 2, pageH - 13, { align: 'center' }
   )
 
-  /* ── Save ────────────────────────────────────────────────── */
+  return doc
+}
+
+/** Télécharge la facture au format PDF (comportement historique). */
+export function generateFacturePDF(facture: Facture): void {
+  const doc = buildFacturePDF(facture)
   doc.save(`${facture.numero}.pdf`)
+}
+
+/** Retourne le PDF sous forme de Blob (pour envoi email). */
+export function generateFacturePDFBlob(facture: Facture): Blob {
+  return buildFacturePDF(facture).output('blob')
 }

@@ -80,6 +80,9 @@ export function useAuth() {
   ) => {
     await purgeClientSession()
     const data: any = await authApi.login(email, password, tenantSlug)
+    /* 1ʳᵉ connexion : le serveur exige la vérif email avant les tokens.
+       Retourne l'info à Auth.tsx pour basculer sur l'étape "code". */
+    if (data?.needsVerification) return { needsVerification: true as const, email }
     tokenStore.set(data.token)
     const payload = parseJwt(data.token)
     let allowedModules: string[] | null = null

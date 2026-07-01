@@ -43,6 +43,8 @@ import {
 import { Globe2 } from 'lucide-react'
 import FactureTemplate from '@/components/facture/FactureTemplate'
 import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
+import { SendDocumentDialog } from '@/components/SendDocumentDialog'
+import { generateFacturePDFBlob } from '@/lib/generatePdf'
 import { toast } from 'sonner'
 
 /* ─── Status config ──────────────────────────────────────────────── */
@@ -178,7 +180,7 @@ function SendEmailDialog({
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const base           = tenantSlug ? `/${tenantSlug}` : ''
   const [emailTo, setEmailTo] = useState(facture?.client_email || '')
-  const subject = `Facture ${facture?.numero} — GestiQ`
+  const subject = `Facture ${facture?.numero} — NEXT GITAL`
   const body = [
     `Bonjour,`,
     ``,
@@ -189,7 +191,7 @@ function SendEmailDialog({
     `N'hésitez pas à nous contacter pour toute question.`,
     ``,
     `Cordialement,`,
-    `GestiQ`,
+    `NEXT GITAL`,
   ].join('\n').trim()
 
   const handleOpenMailto = () => {
@@ -1138,6 +1140,7 @@ export default function Factures() {
   const [viewTarget,   setViewTarget]  = useState<Facture | null>(null)
   const [deleteTarget, setDeleteTarget]= useState<Facture | null>(null)
   const [emailTarget,  setEmailTarget] = useState<Facture | null>(null)
+  const [sendTarget,   setSendTarget]  = useState<Facture | null>(null)
 
   const closeWizard = () => { setShowForm(false); setEditing(undefined); setWizardStep(1) }
 
@@ -1507,17 +1510,27 @@ export default function Factures() {
                                   Aperçu / PDF
                                 </DropdownMenuItem>
 
-                                {/* Envoyer par email */}
+                                {/* Envoyer au client (PDF joint) */}
+                                <DropdownMenuItem
+                                  className="gap-2 text-sm cursor-pointer"
+                                  onClick={() => setSendTarget(f)}
+                                  disabled={['annulee', 'refusee'].includes(f.statut)}
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  Envoyer au client
+                                  {f.statut === 'envoyee' && (
+                                    <span className="ml-auto text-[10px] text-muted-foreground">déjà envoyée</span>
+                                  )}
+                                </DropdownMenuItem>
+
+                                {/* Ancien : ouvre le client mail local */}
                                 <DropdownMenuItem
                                   className="gap-2 text-sm cursor-pointer"
                                   onClick={() => handleMarkEnvoyee(f)}
                                   disabled={['annulee', 'refusee', 'envoyee'].includes(f.statut)}
                                 >
-                                  <Send className="w-3.5 h-3.5" />
-                                  Envoyer par email
-                                  {f.statut === 'envoyee' && (
-                                    <span className="ml-auto text-[10px] text-muted-foreground">déjà envoyée</span>
-                                  )}
+                                  <MailOpen className="w-3.5 h-3.5" />
+                                  <span className="text-muted-foreground">Ouvrir dans messagerie</span>
                                 </DropdownMenuItem>
 
                                 {/* Marquer payée */}
@@ -1644,7 +1657,7 @@ export default function Factures() {
         loading={deleteFacture.isPending}
       />
 
-      {/* Send email */}
+      {/* Send email (ancien flow mailto) */}
       <SendEmailDialog
         facture={emailTarget}
         open={!!emailTarget}
@@ -1654,6 +1667,20 @@ export default function Factures() {
           setEmailTarget(null)
         }}
       />
+
+      {/* Envoyer au client (PDF joint via serveur) */}
+      {sendTarget && (
+        <SendDocumentDialog
+          open={!!sendTarget}
+          onClose={() => setSendTarget(null)}
+          kind="facture"
+          numero={sendTarget.numero}
+          filename={`${sendTarget.numero}.pdf`}
+          defaultEmail={sendTarget.client_email}
+          clientNom={sendTarget.client_nom}
+          buildPdf={() => generateFacturePDFBlob(sendTarget)}
+        />
+      )}
     </div>
   )
 }

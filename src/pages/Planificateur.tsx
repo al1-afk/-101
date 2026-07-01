@@ -358,7 +358,7 @@ function buildWeekICS(data: PlannerData, weekKey: string): string {
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//GestiQ//Planificateur//FR',
+    'PRODID:-//NEXT GITAL//Planificateur//FR',
     'CALSCALE:GREGORIAN',
   ]
   const sanitize = (s: string) => s.replace(/\\/g, '\\\\').replace(/[\n\r]/g, ' ').replace(/[,;]/g, ' ')
@@ -482,7 +482,7 @@ export default function Planificateur() {
       const r = await Notification.requestPermission()
       setNotifPerm(r)
       if (r === 'granted') {
-        new Notification('GestiQ', { body: 'Rappels du planificateur activés ✓', icon: '/icon-192.png' })
+        new Notification('NEXT GITAL', { body: 'Rappels du planificateur activés ✓', icon: '/icon-192.png' })
         toast.success('Rappels activés')
       } else if (r === 'denied') {
         toast.error('Notifications bloquées dans le navigateur')

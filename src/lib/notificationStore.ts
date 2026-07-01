@@ -2,7 +2,12 @@
  * Notification store — persisted in localStorage, scoped per-user.
  * Used by hooks (useTaskNotifier, useValidationNotifier) to push
  * notifications, and by NotificationBell to display them.
+ *
+ * Side-effects on add: joue un son (si activé) + montre une notif
+ * navigateur (si activée + permission accordée + onglet en arrière-plan).
  */
+import { playNotificationSound } from './notificationSound'
+import { showBrowserNotification } from './browserNotifications'
 
 export type NotificationType = 'task_assigned' | 'task_validated' | 'task_sent_to_validation' | 'info'
 
@@ -47,6 +52,14 @@ export function addNotification(scope: 'admin' | 'member', n: Omit<Notification,
     ...n,
   }
   writeNotifications(scope, [newN, ...existing])
+  /* Side-effects : son + push browser (chacun respecte sa propre préférence) */
+  playNotificationSound()
+  showBrowserNotification({
+    title: n.title,
+    body:  n.message,
+    url:   n.link,
+    tag:   n.type,
+  })
 }
 
 export function markAllRead(scope: 'admin' | 'member') {

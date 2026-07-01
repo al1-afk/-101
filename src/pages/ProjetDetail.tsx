@@ -37,6 +37,7 @@ import {
 } from '@/hooks/useTeamMemberTasks'
 import BlockEditor from '@/components/BlockEditor'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
+import { serializeTaskDesc } from '@/lib/taskNotes'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
 import ProjetChat, { type ProjetMessage } from '@/components/projet/ProjetChat'
@@ -47,6 +48,7 @@ import type { SopBlock } from '@/hooks/useSops'
 import { useQueryClient } from '@tanstack/react-query'
 import { projetsApi } from '@/lib/api'
 import { formatDate, formatCurrency, getInitials, cn } from '@/lib/utils'
+import { extractImageFilesFromClipboard, compressImageToDataURL } from '@/lib/pasteImage'
 import { toast } from 'sonner'
 
 /* ─── Status & priority config ─────────────────────────────────── */
@@ -597,7 +599,23 @@ function TasksTab({
   const [seeding, setSeeding] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const [taskForm, setTaskForm] = useState({ title: '', team_member_id: 'none', priority: 'normal' as TaskPriority, due_date: '', category: '' })
+  const [taskImages, setTaskImages] = useState<string[]>([])
+  const [taskBlocks, setTaskBlocks] = useState<SopBlock[]>([])
+  const [showTaskDescription, setShowTaskDescription] = useState(false)
   const [reqForm,  setReqForm]  = useState({ title: '', team_member_id: 'none', priority: 'high' as TaskPriority, due_date: '', price: '' })
+
+  const handleTaskPaste = async (e: React.ClipboardEvent) => {
+    const files = extractImageFilesFromClipboard(e)
+    if (files.length === 0) return
+    e.preventDefault()
+    try {
+      const urls = await Promise.all(files.map(compressImageToDataURL))
+      setTaskImages(p => [...p, ...urls])
+      toast.success(`${urls.length} image${urls.length > 1 ? 's' : ''} collée${urls.length > 1 ? 's' : ''}`)
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Impossible de coller l\'image')
+    }
+  }
 
   const openTask = openTaskId ? tasks.find(t => t.id === openTaskId) : null
 
@@ -685,6 +703,7 @@ function TasksTab({
   const submitTask = (e: React.FormEvent) => {
     e.preventDefault()
     if (!taskForm.title.trim()) return
+    const description = serializeTaskDesc({ blocks: taskBlocks })
     create.mutate({
       project_id:     projet.id,
       ...assigneeFields(taskForm.team_member_id),
@@ -692,8 +711,16 @@ function TasksTab({
       priority:       taskForm.priority,
       due_date:       taskForm.due_date || null,
       category:       taskForm.category.trim() || null,
+      attachments:    taskImages,
+      description:    description || null,
     } as any, {
-      onSuccess: () => { setTaskForm({ title: '', team_member_id: 'none', priority: 'normal', due_date: '', category: '' }); setShowTaskForm(false) },
+      onSuccess: () => {
+        setTaskForm({ title: '', team_member_id: 'none', priority: 'normal', due_date: '', category: '' })
+        setTaskImages([])
+        setTaskBlocks([])
+        setShowTaskDescription(false)
+        setShowTaskForm(false)
+      },
     })
   }
 
@@ -737,8 +764,25 @@ function TasksTab({
         </div>
 
         {showTaskForm && (
-          <form onSubmit={submitTask} className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
-            <AutocorrectInput autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche…" />
+          <form onSubmit={submitTask} onPaste={handleTaskPaste} className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+            <AutocorrectInput autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche… (Cmd+V pour coller une image)" />
+            {taskImages.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {taskImages.map((src, i) => (
+                  <div key={i} className="relative group/img">
+                    <img src={src} alt={`Pièce jointe ${i + 1}`} className="h-20 w-20 object-cover rounded-lg border border-border" />
+                    <button
+                      type="button"
+                      onClick={() => setTaskImages(p => p.filter((_, j) => j !== i))}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity"
+                      title="Retirer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <AutocorrectInput value={taskForm.category} onChange={e => setTaskForm(p => ({ ...p, category: e.target.value }))} placeholder="Catégorie (ex: Design)" className="h-9" />
               <Select value={taskForm.team_member_id} onValueChange={v => setTaskForm(p => ({ ...p, team_member_id: v }))}>
@@ -759,8 +803,37 @@ function TasksTab({
               </Select>
               <Input type="date" value={taskForm.due_date} onChange={e => setTaskForm(p => ({ ...p, due_date: e.target.value }))} className="h-9" />
             </div>
+            {showTaskDescription ? (
+              <div className="rounded-lg border border-border bg-background p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
+                    Description (Cmd+V pour coller un contenu structuré)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setShowTaskDescription(false); setTaskBlocks([]) }}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Masquer
+                  </button>
+                </div>
+                <BlockEditor
+                  value={taskBlocks}
+                  onChange={setTaskBlocks}
+                  placeholder="Décris la tâche — tape « / » pour insérer, ou Cmd+V pour coller titres, checklists, tableaux…"
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowTaskDescription(true)}
+                className="text-[11px] text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Ajouter description (titres, checklists, tableaux via Cmd+V)
+              </button>
+            )}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowTaskForm(false)}>Annuler</Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowTaskForm(false); setTaskImages([]); setTaskBlocks([]); setShowTaskDescription(false) }}>Annuler</Button>
               <Button type="submit" size="sm" disabled={create.isPending}>
                 {create.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Créer
@@ -1057,6 +1130,16 @@ function TaskRow({
           >
             {task.title}
           </button>
+          {task.attachments?.length > 0 && (
+            <button
+              type="button"
+              onClick={onOpen}
+              className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors"
+              title={`${task.attachments.length} pièce${task.attachments.length > 1 ? 's' : ''} jointe${task.attachments.length > 1 ? 's' : ''}`}
+            >
+              📎 {task.attachments.length}
+            </button>
+          )}
           {isRequest && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
               📌 Demande

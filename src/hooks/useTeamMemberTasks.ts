@@ -23,6 +23,7 @@ export interface TeamMemberTask {
   elapsed_seconds:   number            // total time tracked
   is_request:        boolean           // change request from client
   request_price:     number | null     // billable price for change request
+  attachments:       string[]          // data URLs (base64) — images collées via Cmd+V
   created_at:        string
   updated_at:        string
   completed_at:      string | null

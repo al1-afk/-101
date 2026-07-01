@@ -41,7 +41,11 @@ export default function Auth() {
     setError(null)
     setLoading(true)
     try {
-      await signIn(email, password)
+      const res: any = await signIn(email, password)
+      if (res?.needsVerification) {
+        setStage('verify')
+        setResendIn(30)
+      }
     } catch (err: any) {
       setError(err.message || 'Identifiants incorrects')
     } finally {
@@ -107,7 +111,7 @@ export default function Auth() {
                 : <span className="text-white font-bold text-2xl">N</span>}
             </div>
             <h1 className="text-2xl font-bold text-white">
-              {stage === 'verify' ? 'Confirmation' : 'GestiQ CRM'}
+              {stage === 'verify' ? 'Confirmation' : 'NEXT GITAL CRM'}
             </h1>
             <p className="text-slate-400 text-sm mt-1 text-center">
               {stage === 'verify'
@@ -211,7 +215,7 @@ export default function Auth() {
           )}
 
           <p className="text-center text-xs text-slate-600 mt-6">
-            Accès restreint — Espace privé GestiQ
+            Accès restreint — Espace privé NEXT GITAL
           </p>
         </div>
       </motion.div>

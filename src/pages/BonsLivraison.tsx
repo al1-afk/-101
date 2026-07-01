@@ -301,10 +301,22 @@ export default function BonsLivraison() {
       {/* ── Form Dialog ──────────────────────────────────────────── */}
       <Dialog open={showForm} onOpenChange={v => { if (!v) setShowForm(false) }}>
         <DialogContent className="max-w-3xl max-h-[95dvh] overflow-y-auto">
-          <DialogHeader>
+          <DialogHeader className="relative">
             <DialogTitle>
               {editing ? `Modifier ${editing.numero}` : 'Nouveau bon de livraison'}
             </DialogTitle>
+            {/* Bouton primaire centré horizontalement dans le header */}
+            <div className="absolute left-1/2 -translate-x-1/2 -top-0.5">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-5 text-xs font-semibold shadow-sm"
+                disabled={create.isPending || update.isPending || !form.titre.trim()}
+                onClick={handleSubmit}
+              >
+                {editing ? '💾 Enregistrer' : '➕ Créer'}
+              </Button>
+            </div>
           </DialogHeader>
 
           <div className="space-y-5">

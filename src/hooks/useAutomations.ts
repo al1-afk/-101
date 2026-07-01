@@ -123,7 +123,7 @@ const DEFAULT_LOGS: AutoLog[] = [
   { id: 'l2', rule_id: '2', rule_label: 'Relance urgente — J+15',     action_type: 'send_whatsapp', status: 'success', entity_ref: 'FAC-2026-001', executed_at: '2026-04-14T09:01:55Z' },
   { id: 'l3', rule_id: '3', rule_label: 'Facture auto depuis devis',   action_type: 'update_status', status: 'success', entity_ref: 'DEV-2026-004', executed_at: '2026-04-16T08:30:22Z' },
   { id: 'l4', rule_id: '1', rule_label: 'Relance paiement — J+7',     action_type: 'send_email',    status: 'failed',  entity_ref: 'FAC-2026-005', error: 'Email introuvable', executed_at: '2026-04-13T09:00:44Z' },
-  { id: 'l5', rule_id: '4', rule_label: 'Alerte renouvellement domaine', action_type: 'create_task', status: 'success', entity_ref: 'gestiq.ma',  executed_at: '2026-04-10T09:00:12Z' },
+  { id: 'l5', rule_id: '4', rule_label: 'Alerte renouvellement domaine', action_type: 'create_task', status: 'success', entity_ref: 'nextgital.com',  executed_at: '2026-04-10T09:00:12Z' },
 ]
 
 function loadRules(): AutoRule[] {

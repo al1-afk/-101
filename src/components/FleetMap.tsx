@@ -23,7 +23,7 @@ function loadMaps() {
   return _mapsPromise
 }
 
-/* Default view: Casablanca centre when no positions yet */
+/* Default view: Oujda centre when no positions yet */
 const DEFAULT_CENTER = { lat: 33.5731, lng: -7.5898 }
 const DEFAULT_ZOOM   = 11
 

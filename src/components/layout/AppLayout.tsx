@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
@@ -12,6 +12,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useOfflineSync } from '@/hooks/useOfflineSync'
 import { useEventReminders } from '@/hooks/useEventReminders'
 import { useValidationNotifier } from '@/hooks/useValidationNotifier'
+import { maybeRequestPermissionOnce } from '@/lib/browserNotifications'
 import PwaInstallBanner from '@/components/PwaInstallBanner'
 import ShortcutsModal from '@/components/ShortcutsModal'
 import OfflineBanner from '@/components/OfflineBanner'
@@ -33,6 +34,9 @@ export default function AppLayout() {
   useEventReminders()
   /* Toast manager when a team member completes a task → status validation */
   useValidationNotifier()
+
+  /* Demande gentiment la permission pour les notifs navigateur (1ère visite). */
+  useEffect(() => { maybeRequestPermissionOnce() }, [])
 
   const handleToggle = () => {
     setCollapsed(prev => {
