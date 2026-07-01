@@ -1215,12 +1215,38 @@ function MemberAccessDialog({ member, onClose }: { member: TenantMember; onClose
    TEAM MEMBERS ACCESS MANAGER — manage SOP category access per team_member
 ═══════════════════════════════════════════════════════════════════ */
 function TeamMembersAccessManager() {
+  const qc = useQueryClient()
+  const [showArchive, setShowArchive] = useState(false)
   const { data: members = [], isLoading } = useQuery({
     queryKey: ['team', 'members'],
     queryFn:  () => teamMgmtApi.list(),
     staleTime: 1000 * 60,
   })
+  const { data: archived = [] } = useQuery({
+    queryKey: ['team', 'members', 'archived'],
+    queryFn:  () => teamMgmtApi.listArchived(),
+    staleTime: 1000 * 60,
+    enabled:  showArchive,
+  })
   const [editing, setEditing] = useState<any | null>(null)
+
+  const restoreMut = useMutation({
+    mutationFn: (id: string) => teamMgmtApi.restore(id),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['team', 'members'] })
+      qc.invalidateQueries({ queryKey: ['team', 'members', 'archived'] })
+      toast.success('Membre restauré — une invitation lui a été renvoyée')
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
+  })
+  const permanentDeleteMut = useMutation({
+    mutationFn: (id: string) => teamMgmtApi.permanentDelete(id),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['team', 'members', 'archived'] })
+      toast.success('Membre supprimé définitivement')
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
+  })
 
   const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
     active:    { label: 'Actif',     cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
@@ -1238,15 +1264,29 @@ function TeamMembersAccessManager() {
   return (
     <>
       <div className="card-premium p-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-violet-500" />
             <h3 className="font-semibold text-sm">Membres d'équipe</h3>
             <Badge variant="outline" className="text-[10px]">{members.length}</Badge>
           </div>
-          <span className="text-[11px] text-muted-foreground italic">
-            Accès aux catégories SOP pour les collaborateurs (connexion via /team-login)
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground italic hidden md:inline">
+              Accès aux catégories SOP (connexion via /team-login)
+            </span>
+            <Button
+              size="sm"
+              variant={showArchive ? 'default' : 'secondary'}
+              onClick={() => setShowArchive(v => !v)}
+              className="gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {showArchive ? 'Fermer l\'archive' : 'Voir l\'archive'}
+              {archived.length > 0 && !showArchive && (
+                <span className="text-[10px] bg-slate-500/20 px-1.5 py-0.5 rounded">{archived.length}</span>
+              )}
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -1303,6 +1343,77 @@ function TeamMembersAccessManager() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {showArchive && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <div className="flex items-center gap-2 mb-2">
+              <Trash2 className="w-4 h-4 text-slate-500" />
+              <h4 className="font-semibold text-xs uppercase tracking-widest text-muted-foreground">Archive</h4>
+              <Badge variant="outline" className="text-[10px]">{archived.length}</Badge>
+            </div>
+            {archived.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic text-center py-6">
+                Aucun membre archivé.
+              </p>
+            ) : (
+              <div className="rounded-md border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="text-left px-3 py-2">Membre</th>
+                      <th className="text-left px-3 py-2">Type</th>
+                      <th className="text-left px-3 py-2">Archivé le</th>
+                      <th className="px-3 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {archived.map((m: any) => (
+                      <tr key={m.id} className="hover:bg-muted/30 opacity-80">
+                        <td className="px-3 py-2">
+                          <div className="font-medium text-sm">{m.first_name} {m.last_name}</div>
+                          <div className="text-xs text-muted-foreground">{m.email}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">
+                          {TYPE_LABEL[m.member_type] ?? m.member_type}
+                          {m.job_title && <div className="text-[10px]">{m.job_title}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">
+                          {m.updated_at ? formatDate(m.updated_at) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => restoreMut.mutate(m.id)}
+                              disabled={restoreMut.isPending}
+                              title="Restaurer ce membre et lui renvoyer une invitation"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" /> Restaurer
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => {
+                                if (confirm(`Supprimer définitivement ${m.first_name} ${m.last_name} ?\n\nCette action est irréversible — toutes les données du membre (accès SOP, tâches, historique) seront effacées.`)) {
+                                  permanentDeleteMut.mutate(m.id)
+                                }
+                              }}
+                              disabled={permanentDeleteMut.isPending}
+                              title="Supprimer définitivement"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

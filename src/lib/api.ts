@@ -226,6 +226,9 @@ export const teamMgmtApi = {
   resend:  (id: string) => api.post<{ success: true; invitation_url: string }>(`/api/team/members/${id}/resend`, {}),
   resetPwd:(id: string) => api.post<{ success: true; reset_url: string }>(`/api/team/members/${id}/reset-password`, {}),
   archive: (id: string) => api.delete<{ success: true }>(`/api/team/members/${id}`),
+  listArchived:    () => api.get<TeamMemberRow[]>('/api/team/members?archived=true'),
+  restore:         (id: string) => api.post<{ success: true }>(`/api/team/members/${id}/restore`, {}),
+  permanentDelete: (id: string) => api.delete<{ success: true }>(`/api/team/members/${id}/permanent`),
 
   tasks:        (memberId: string) => api.get<any[]>(`/api/team/members/${memberId}/tasks`),
   addTask:      (memberId: string, t: TeamTaskInput) => api.post<any>(`/api/team/members/${memberId}/tasks`, t),

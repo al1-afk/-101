@@ -408,27 +408,48 @@ router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) =
   const creatorId  = req.user!.userId
 
   try {
-    /* Check email uniqueness within tenant */
-    const existing = await tenantQueryOne(
+    /* Check email uniqueness within tenant.
+       Si le membre existe et est archivé → on le restaure automatiquement
+       (met à jour ses infos + réémet une invitation). Sinon → 409. */
+    const existing = await tenantQueryOne<{ id: string; account_status: string }>(
       tenantId,
-      `SELECT id FROM public.team_members WHERE email = $1`, [email],
+      `SELECT id, account_status FROM public.team_members WHERE email = $1`, [email],
     )
-    if (existing) return res.status(409).json({ error: 'Un membre avec cet email existe déjà' })
+    if (existing && existing.account_status !== 'archived') {
+      return res.status(409).json({ error: 'Un membre avec cet email existe déjà' })
+    }
 
     const token = crypto.randomBytes(32).toString('hex')
 
-    const member = await tenantQueryOne<{ id: string }>(
-      tenantId,
-      `INSERT INTO public.team_members
-         (tenant_id, prenom, nom, email, telephone, poste, job_title,
-          member_type, account_status, invitation_token, invitation_sent_at,
-          invitation_expires_at, created_by, statut, role)
-       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 'invited', $8, NOW(),
-               NOW() + INTERVAL '7 days', $9, 'actif', 'viewer')
-       RETURNING id`,
-      [tenantId, first_name, last_name, email, phone ?? null, job_title ?? null,
-       memberType, token, creatorId],
-    )
+    const member = existing
+      ? await tenantQueryOne<{ id: string }>(
+          tenantId,
+          `UPDATE public.team_members SET
+             prenom = $2, nom = $3, telephone = $4, poste = $5, job_title = $5,
+             member_type = $6, account_status = 'invited',
+             invitation_token = $7, invitation_sent_at = NOW(),
+             invitation_expires_at = NOW() + INTERVAL '7 days',
+             statut = 'actif', updated_at = NOW()
+           WHERE id = $1
+           RETURNING id`,
+          [existing.id, first_name, last_name, phone ?? null, job_title ?? null, memberType, token],
+        )
+      : await tenantQueryOne<{ id: string }>(
+          tenantId,
+          `INSERT INTO public.team_members
+             (tenant_id, prenom, nom, email, telephone, poste, job_title,
+              member_type, account_status, invitation_token, invitation_sent_at,
+              invitation_expires_at, created_by, statut, role)
+           VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 'invited', $8, NOW(),
+                   NOW() + INTERVAL '7 days', $9, 'actif', 'viewer')
+           RETURNING id`,
+          [tenantId, first_name, last_name, email, phone ?? null, job_title ?? null,
+           memberType, token, creatorId],
+        )
+
+    if (existing) {
+      await logActivity(tenantId, member!.id, 'restored_from_archive', { by: creatorId })
+    }
 
     /* Insert SOP access */
     const validAccess = Array.isArray(sop_categories)
@@ -487,16 +508,18 @@ router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) =
   }
 })
 
-/* GET /api/team/members — list with access summary */
+/* GET /api/team/members — list with access summary.
+   ?archived=true → retourne UNIQUEMENT les membres archivés (corbeille). */
 router.get('/members', ...requireAdminMgr, async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId
+  const onlyArchived = req.query.archived === 'true'
   try {
     const members = await tenantQuery(
       tenantId,
       `SELECT m.id, m.prenom AS first_name, m.nom AS last_name, m.email, m.telephone,
               m.job_title, m.member_type, m.account_status, m.last_login_at,
               m.invitation_sent_at, m.invitation_accepted_at, m.avatar_url,
-              m.created_at,
+              m.created_at, m.updated_at,
               COALESCE(
                 (SELECT json_agg(json_build_object('category', sop_category, 'level', access_level))
                    FROM public.team_member_sop_access WHERE team_member_id = m.id), '[]'::json
@@ -505,8 +528,8 @@ router.get('/members', ...requireAdminMgr, async (req: Request, res: Response) =
                 (SELECT COUNT(*)::int FROM public.team_member_tasks WHERE team_member_id = m.id AND status = 'todo'), 0
               ) AS open_tasks_count
          FROM public.team_members m
-        WHERE m.account_status != 'archived'
-        ORDER BY m.created_at DESC`,
+        WHERE m.account_status ${onlyArchived ? '=' : '!='} 'archived'
+        ORDER BY ${onlyArchived ? 'm.updated_at' : 'm.created_at'} DESC`,
     )
     res.json(members)
   } catch (err: any) {
@@ -760,6 +783,61 @@ router.delete('/members/:id', ...requireAdminMgr, async (req: Request, res: Resp
     res.json({ success: true })
   } catch (err: any) {
     console.error('[team:archive]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* POST /api/team/members/:id/restore — désarchive et repasse en 'invited'. */
+router.post('/members/:id/restore', ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  try {
+    const m = await tenantQueryOne<{ account_status: string }>(
+      tenantId,
+      `SELECT account_status FROM public.team_members WHERE id = $1`, [id],
+    )
+    if (!m) return res.status(404).json({ error: 'Membre introuvable' })
+    if (m.account_status !== 'archived') {
+      return res.status(400).json({ error: 'Ce membre n\'est pas archivé' })
+    }
+    await tenantQuery(
+      tenantId,
+      `UPDATE public.team_members
+          SET account_status = 'invited', statut = 'actif', updated_at = NOW()
+        WHERE id = $1`,
+      [id],
+    )
+    await logActivity(tenantId, id, 'restored', { by: req.user!.userId })
+    res.json({ success: true })
+  } catch (err: any) {
+    console.error('[team:restore]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* DELETE /api/team/members/:id/permanent — suppression définitive (uniquement pour les archivés).
+   Nettoie SOP access, tasks et activity du membre avant de supprimer la ligne. */
+router.delete('/members/:id/permanent', ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  try {
+    const m = await tenantQueryOne<{ account_status: string; email: string }>(
+      tenantId,
+      `SELECT account_status, email FROM public.team_members WHERE id = $1`, [id],
+    )
+    if (!m) return res.status(404).json({ error: 'Membre introuvable' })
+    if (m.account_status !== 'archived') {
+      return res.status(400).json({ error: 'Seul un membre archivé peut être supprimé définitivement' })
+    }
+    await tenantQuery(tenantId, `DELETE FROM public.team_member_sop_access WHERE team_member_id = $1`, [id])
+    await tenantQuery(tenantId, `DELETE FROM public.team_member_tasks WHERE team_member_id = $1`, [id])
+    await tenantQuery(tenantId, `DELETE FROM public.team_member_activity WHERE team_member_id = $1`, [id])
+    await tenantQuery(tenantId, `DELETE FROM public.team_members WHERE id = $1`, [id])
+    res.json({ success: true })
+  } catch (err: any) {
+    console.error('[team:permanent-delete]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
