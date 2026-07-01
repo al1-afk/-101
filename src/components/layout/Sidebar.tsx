@@ -211,7 +211,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
               style={{ background: 'linear-gradient(135deg, #2563EB 0%, #4F46E5 100%)', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
             >
-              <span className="text-white font-black text-[15px] tracking-tight">G</span>
+              <span className="text-white font-black text-[15px] tracking-tight">N</span>
             </div>
             <div className="min-w-0">
               <p className="font-extrabold text-[15px] tracking-tight text-slate-900 dark:text-white leading-none">NEXT GITAL</p>
@@ -227,7 +227,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             className="w-9 h-9 rounded-xl flex items-center justify-center"
             style={{ background: 'linear-gradient(135deg, #2563EB 0%, #4F46E5 100%)', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
           >
-            <span className="text-white font-black text-[15px]">G</span>
+            <span className="text-white font-black text-[15px]">N</span>
           </div>
         )}
 
