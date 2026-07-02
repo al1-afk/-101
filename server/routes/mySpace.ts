@@ -31,7 +31,8 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 /* Resolve the team_member row for the current user (cached per-request via res.locals) */
 async function resolveMember(req: Request): Promise<{ id: string; tenantId: string } | null> {
   if ((req as any)._memberCache) return (req as any)._memberCache
-  const row = await queryOne<{ id: string; tenant_id: string; account_status: string }>(
+  const row = await tenantQueryOne<{ id: string; tenant_id: string; account_status: string }>(
+    req.user!.tenantId,
     `SELECT id, tenant_id, account_status
        FROM public.team_members
       WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
