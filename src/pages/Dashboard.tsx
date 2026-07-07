@@ -11,6 +11,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, LineChart, Line,
 } from 'recharts'
+import { useQuery } from '@tanstack/react-query'
 import { useProspects } from '@/hooks/useProspects'
 import { useClients }   from '@/hooks/useClients'
 import { useFactures }  from '@/hooks/useFactures'
@@ -19,8 +20,9 @@ import { useDepenses }  from '@/hooks/useDepenses'
 import { useAlerts }    from '@/hooks/useAlerts'
 import { useCountUp }   from '@/hooks/useCountUp'
 import { useClientSubscriptions, computeMrrMetrics } from '@/hooks/useClientSubscriptions'
+import { abonnementsApi, domainesApi, hebergementsApi } from '@/lib/api'
 import { computeCashFlowProjection, detectAnomalies } from '@/lib/intelligence'
-import { formatCurrency, formatCurrencyCompact, formatDate, useIsMobileViewport } from '@/lib/utils'
+import { formatCurrency, formatCurrencyCompact, formatDate, getDaysUntil, useIsMobileViewport } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import VisionWidgets from '@/components/VisionWidgets'
@@ -37,12 +39,18 @@ function relativeTime(iso: string): string {
   return `Il y a ${d}j`
 }
 
-const RENEWALS = [
-  { nom: 'nextgital.com',  type: 'Domaine',     expiration: '2026-05-15', jours: 33, prix: 120 },
-  { nom: 'nextgital.com', type: 'Domaine',     expiration: '2026-06-01', jours: 50, prix: 150 },
-  { nom: 'VPS Contabo',   type: 'Hébergement', expiration: '2026-04-30', jours: 18, prix: 350 },
-  { nom: 'Canva Pro',     type: 'Abonnement',  expiration: '2026-04-25', jours: 13, prix: 130 },
-]
+type RenewalKind = 'Abonnement' | 'Domaine' | 'Hébergement'
+interface RenewalRow { key: string; nom: string; type: RenewalKind; expiration: string; jours: number; prix: number; cycle?: string }
+interface AbonnementRow { id: string; nom: string; fournisseur?: string; montant: number; cycle: 'mensuel' | 'annuel' | 'trimestriel'; date_renouvellement: string; statut: 'actif' | 'pause' | 'annule' }
+interface DomaineRow    { id: string; nom: string; date_expiration: string; prix_renouvellement: number }
+interface HebergementRow{ id: string; nom: string; date_expiration: string; prix_mensuel: number }
+
+function abonnementMensuel(a: AbonnementRow): number {
+  if (a.cycle === 'mensuel')     return a.montant
+  if (a.cycle === 'annuel')      return a.montant / 12
+  if (a.cycle === 'trimestriel') return a.montant / 3
+  return 0
+}
 
 /* ─── Sparkline ───────────────────────────────────────────────────── */
 function Sparkline({ data, color }: { data: { v: number }[]; color: string }) {
@@ -158,6 +166,18 @@ export default function Dashboard() {
   const { data: devis     = [] } = useDevis()
   const { data: depenses  = [] } = useDepenses()
   const { data: subs      = [] } = useClientSubscriptions()
+  const { data: abonnements = [] } = useQuery<AbonnementRow[]>({
+    queryKey: ['abonnements'],
+    queryFn: () => abonnementsApi.list({ orderBy: 'date_renouvellement', order: 'asc' }) as Promise<AbonnementRow[]>,
+  })
+  const { data: domaines = [] } = useQuery<DomaineRow[]>({
+    queryKey: ['domaines'],
+    queryFn: () => domainesApi.list({ orderBy: 'date_expiration', order: 'asc' }) as Promise<DomaineRow[]>,
+  })
+  const { data: hebergements = [] } = useQuery<HebergementRow[]>({
+    queryKey: ['hebergements'],
+    queryFn: () => hebergementsApi.list({ orderBy: 'date_expiration', order: 'asc' }) as Promise<HebergementRow[]>,
+  })
   const { alerts, criticalCount } = useAlerts()
   const [alertDismissed, setAlertDismissed] = useState(false)
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('monthly')
@@ -262,6 +282,42 @@ export default function Dashboard() {
     return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5)
   }, [factures, prospects, devis])
 
+  // ── Renouvellements réels (Abonnements + Domaines + Hébergements) ──
+  const renewals = useMemo<RenewalRow[]>(() => {
+    const rows: RenewalRow[] = []
+    for (const a of abonnements) {
+      if (a.statut !== 'actif' || !a.date_renouvellement) continue
+      rows.push({
+        key: `abo-${a.id}`, nom: a.nom, type: 'Abonnement',
+        expiration: a.date_renouvellement, jours: getDaysUntil(a.date_renouvellement),
+        prix: a.montant, cycle: a.cycle,
+      })
+    }
+    for (const d of domaines) {
+      if (!d.date_expiration) continue
+      rows.push({
+        key: `dom-${d.id}`, nom: d.nom, type: 'Domaine',
+        expiration: d.date_expiration, jours: getDaysUntil(d.date_expiration),
+        prix: d.prix_renouvellement,
+      })
+    }
+    for (const h of hebergements) {
+      if (!h.date_expiration) continue
+      rows.push({
+        key: `heb-${h.id}`, nom: h.nom, type: 'Hébergement',
+        expiration: h.date_expiration, jours: getDaysUntil(h.date_expiration),
+        prix: h.prix_mensuel,
+      })
+    }
+    return rows.sort((a, b) => a.jours - b.jours).slice(0, 8)
+  }, [abonnements, domaines, hebergements])
+
+  const totalMensuelAbo = useMemo(
+    () => abonnements.filter(a => a.statut === 'actif').reduce((s, a) => s + abonnementMensuel(a), 0),
+    [abonnements],
+  )
+  const renouvellementsUrgents = renewals.filter(r => r.jours <= 15).length
+
   // ── Greeting name ──
   const userName = (() => { try { return localStorage.getItem('gestiq_fullname') || 'NEXT GITAL' } catch { return 'NEXT GITAL' } })()
 
@@ -338,6 +394,84 @@ export default function Dashboard() {
 
       {/* ── Vision : Cap mensuel + Objectif du mois ── */}
       <VisionWidgets />
+
+      {/* ── Renouvellements à venir (Abonnements + Domaines + Hébergements) ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.18, duration: 0.4 }}
+        className="card-premium p-6"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Repeat className="w-4 h-4 text-violet-500" />
+            <h2 className="section-title">Renouvellements à venir</h2>
+            {renouvellementsUrgents > 0 && (
+              <span className="badge-pill badge-danger">{renouvellementsUrgents} urgent{renouvellementsUrgents > 1 ? 's' : ''}</span>
+            )}
+          </div>
+          <Link to="/abonnements" className="text-xs text-blue-500 hover:text-blue-600 font-medium flex items-center gap-0.5">
+            Abonnements <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
+        <div className="flex items-center justify-between mb-4 px-3 py-2 rounded-xl bg-violet-50 dark:bg-violet-900/20">
+          <div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">Coût mensuel abonnements</p>
+            <p className="text-sm font-bold text-violet-700 dark:text-violet-300">{formatCurrency(totalMensuelAbo)}</p>
+          </div>
+          <p className="text-[11px] text-slate-400">{abonnements.filter(a => a.statut === 'actif').length} actifs</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          {renewals.map(r => {
+            const urgent  = r.jours <= 15
+            const warning = r.jours <= 30
+            const linkTo = r.type === 'Domaine' ? '/domaines' : r.type === 'Hébergement' ? '/hebergements' : '/abonnements'
+            return (
+              <Link
+                key={r.key} to={linkTo}
+                className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={cn(
+                    'w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0',
+                    r.type === 'Domaine' ? 'bg-blue-100 dark:bg-blue-900/30'
+                      : r.type === 'Hébergement' ? 'bg-violet-100 dark:bg-violet-900/30'
+                      : 'bg-amber-100 dark:bg-amber-900/30',
+                  )}>
+                    {r.type === 'Domaine'
+                      ? <Globe  className="w-4 h-4 text-blue-500" />
+                      : r.type === 'Hébergement'
+                      ? <Server className="w-4 h-4 text-violet-500" />
+                      : <Repeat className="w-4 h-4 text-amber-500" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{r.nom}</p>
+                    <p className="text-xs text-slate-400 truncate">
+                      {formatDate(r.expiration)}
+                      {r.prix > 0 && <> · {formatCurrency(r.prix)}{r.cycle ? `/${r.cycle}` : ''}</>}
+                    </p>
+                  </div>
+                </div>
+                <span className={cn(
+                  'badge-pill flex-shrink-0',
+                  r.jours <= 0 ? 'badge-danger'
+                  : urgent  ? 'badge-danger'
+                  : warning ? 'badge-warning'
+                  :            'badge-success',
+                )}>
+                  {r.jours <= 0 ? 'Expiré' : `${r.jours}j`}
+                </span>
+              </Link>
+            )
+          })}
+          {renewals.length === 0 && (
+            <div className="md:col-span-2 flex flex-col items-center justify-center py-8 gap-2">
+              <CheckCircle2 className="w-9 h-9 text-emerald-400" />
+              <p className="text-sm text-slate-400 font-medium">Aucun renouvellement à venir</p>
+            </div>
+          )}
+        </div>
+      </motion.div>
 
       {/* ── Alert banner ── */}
       {showAlert && (
@@ -732,7 +866,7 @@ export default function Dashboard() {
       )}
 
       {/* ══ BOTTOM ROW ══════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6">
 
         {/* Factures impayées */}
         <motion.div
@@ -776,60 +910,6 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-400 font-medium">Tout est à jour !</p>
               </div>
             )}
-          </div>
-        </motion.div>
-
-        {/* Renouvellements */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.47, duration: 0.4 }}
-          className="card-premium p-6"
-        >
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2">
-              <Repeat className="w-4 h-4 text-violet-500" />
-              <h2 className="section-title">Renouvellements</h2>
-            </div>
-            <Link to="/domaines" className="text-xs text-blue-500 hover:text-blue-600 font-medium flex items-center gap-0.5">
-              Voir tout <ChevronRight className="w-3 h-3" />
-            </Link>
-          </div>
-          <div className="space-y-2.5">
-            {RENEWALS.map((r, i) => {
-              const urgent  = r.jours <= 15
-              const warning = r.jours <= 30
-              return (
-                <div key={i} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={cn(
-                      'w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0',
-                      r.type === 'Domaine' ? 'bg-blue-100 dark:bg-blue-900/30'
-                        : r.type === 'Hébergement' ? 'bg-violet-100 dark:bg-violet-900/30'
-                        : 'bg-amber-100 dark:bg-amber-900/30',
-                    )}>
-                      {r.type === 'Domaine'
-                        ? <Globe  className="w-4 h-4 text-blue-500" />
-                        : r.type === 'Hébergement'
-                        ? <Server className="w-4 h-4 text-violet-500" />
-                        : <Repeat className="w-4 h-4 text-amber-500" />}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{r.nom}</p>
-                      <p className="text-xs text-slate-400">{formatDate(r.expiration)}</p>
-                    </div>
-                  </div>
-                  <span className={cn(
-                    'badge-pill flex-shrink-0',
-                    urgent  ? 'badge-danger'
-                    : warning ? 'badge-warning'
-                    :            'badge-success',
-                  )}>
-                    {r.jours}j
-                  </span>
-                </div>
-              )
-            })}
           </div>
         </motion.div>
       </div>
