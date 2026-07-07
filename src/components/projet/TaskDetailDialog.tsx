@@ -72,7 +72,14 @@ export default function TaskDetailDialog({
   const [newComment,  setNewComment]  = useState('')
   const [newSubtask,  setNewSubtask]  = useState('')
   const [saveState,   setSaveState]   = useState<'idle' | 'saving' | 'saved'>('idle')
-  const [editMode,    setEditMode]    = useState(initial.blocks.length === 0)   // pour membre : aperçu par défaut si du contenu
+  const [editMode,    setEditMode]    = useState(false)   // masqué par défaut ; on ouvre l'éditeur sur clic « Modifier » / « Ajouter »
+  /* Groupe Description + Sous-tâches + Liens masqué derrière un bouton « Modifier »
+     — on l'ouvre d'office si la tâche a déjà du contenu, pour ne rien cacher. */
+  const hasAnyDetail =
+    initial.blocks.length > 0 ||
+    initial.subtasks.length > 0 ||
+    initial.attachments.length > 0
+  const [showDetails, setShowDetails] = useState(hasAnyDetail)
   const lastSerialized = useRef<string>(task.description ?? '')
 
   useEffect(() => {
@@ -82,6 +89,8 @@ export default function TaskDetailDialog({
     setSubtasks(initial.subtasks)
     setComments(initial.comments)
     setAttachments(initial.attachments)
+    setEditMode(false)
+    setShowDetails(hasAnyDetail)
     lastSerialized.current = task.description ?? ''
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, task.id])
@@ -208,6 +217,21 @@ export default function TaskDetailDialog({
           {task.is_request && task.request_price != null && <Pill label={`💰 ${task.request_price} MAD`} />}
         </div>
 
+        {/* Bouton « Modifier » — révèle Description + Sous-tâches + Liens (masqués si tâche vide) */}
+        {!showDetails && (
+          <div className="flex justify-center py-1">
+            <button
+              type="button"
+              onClick={() => setShowDetails(true)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold border border-border bg-background hover:bg-muted transition-colors inline-flex items-center gap-2"
+            >
+              ✏ Modifier
+            </button>
+          </div>
+        )}
+
+        {showDetails && (
+        <>
         {/* Description riche (BlockEditor — texte, titres, images, vidéos, code, listes, callouts…) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -234,13 +258,13 @@ export default function TaskDetailDialog({
           </div>
 
           {blocks.length === 0 && !editMode && (
-            /* État vide : bouton clair pour ajouter une description */
+            /* État vide : lien discret pour ajouter une description */
             <button
               type="button"
               onClick={() => setEditMode(true)}
-              className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border-2 border-dashed border-border bg-muted/20 text-sm text-muted-foreground hover:border-blue-400 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 hover:text-blue-600 dark:hover:text-blue-400 transition-all"
+              className="text-[12px] text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 transition-colors inline-flex items-center gap-1"
             >
-              <span className="text-lg">+</span> Ajouter une description
+              <Plus className="w-3 h-3" /> Ajouter une description
             </button>
           )}
 
@@ -379,6 +403,19 @@ export default function TaskDetailDialog({
             </div>
           )}
         </div>
+
+        {/* Fermer le panneau d'édition (revient à la vue épurée : commentaires seuls) */}
+        <div className="flex justify-center pt-1">
+          <button
+            type="button"
+            onClick={() => { setShowDetails(false); setEditMode(false) }}
+            className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Fermer l'édition ↑
+          </button>
+        </div>
+        </>
+        )}
 
         {/* Commentaires */}
         <div className="space-y-2">
