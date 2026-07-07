@@ -187,43 +187,60 @@ export default function TaskDetailDialog({
         </div>
 
         {/* Description riche (BlockEditor — texte, titres, images, vidéos, code, listes, callouts…) */}
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
-              Description
+            <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold flex items-center gap-1.5">
+              📝 Description
             </label>
-            <div className="flex items-center gap-1">
-              {blocks.length > 0 && (
-                <div className="flex items-center gap-1 p-0.5 rounded-lg border border-border bg-muted/30">
-                  <button onClick={() => setEditMode(false)}
-                    className={cn('px-2 py-0.5 rounded text-[11px] font-semibold transition-colors',
-                      !editMode ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-                    👁 Aperçu
-                  </button>
-                  <button onClick={() => setEditMode(true)}
-                    className={cn('px-2 py-0.5 rounded text-[11px] font-semibold transition-colors',
-                      editMode ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-                    ✏ Édition
-                  </button>
-                </div>
-              )}
-            </div>
+            {blocks.length > 0 && (
+              editMode ? (
+                <button
+                  onClick={() => setEditMode(false)}
+                  className="px-3 py-1 rounded-md text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1"
+                >
+                  ✓ Terminer
+                </button>
+              ) : (
+                <button
+                  onClick={() => setEditMode(true)}
+                  className="px-3 py-1 rounded-md text-[11px] font-semibold border border-border bg-background hover:bg-muted transition-colors flex items-center gap-1"
+                >
+                  ✏ Modifier
+                </button>
+              )
+            )}
           </div>
-          <p className="text-[11px] text-muted-foreground -mt-1">
-            {editMode
-              ? 'Tape « / » pour insérer titre, image, vidéo, liste, code, callout, tableau…'
-              : 'Aperçu formaté de la description.'}
-          </p>
-          {!editMode && blocks.length > 0 ? (
-            <div className="rounded-lg border border-border bg-background p-4">
+
+          {blocks.length === 0 && !editMode && (
+            /* État vide : bouton clair pour ajouter une description */
+            <button
+              type="button"
+              onClick={() => setEditMode(true)}
+              className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border-2 border-dashed border-border bg-muted/20 text-sm text-muted-foreground hover:border-blue-400 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 hover:text-blue-600 dark:hover:text-blue-400 transition-all"
+            >
+              <span className="text-lg">+</span> Ajouter une description
+            </button>
+          )}
+
+          {blocks.length > 0 && !editMode && (
+            /* Mode Aperçu — affichage clair et lisible */
+            <div className="rounded-lg border border-border bg-background p-5 shadow-sm">
               <SopBlocksRenderer blocks={blocks} />
             </div>
-          ) : (
-            <BlockEditor
-              value={blocks}
-              onChange={setBlocks}
-              placeholder="Cliquer pour commencer à décrire la tâche — tape « / » pour insérer une image, un titre, une liste…"
-            />
+          )}
+
+          {editMode && (
+            /* Mode Édition */
+            <div className="space-y-2">
+              <p className="text-[11px] text-muted-foreground italic">
+                💡 Tape « / » pour insérer un titre, une image, une vidéo, une liste, un tableau… ou colle du contenu structuré (Cmd+V).
+              </p>
+              <BlockEditor
+                value={blocks}
+                onChange={setBlocks}
+                placeholder="Commencez à décrire la tâche…"
+              />
+            </div>
           )}
         </div>
 
