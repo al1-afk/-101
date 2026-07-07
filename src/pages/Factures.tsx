@@ -470,11 +470,13 @@ function FactureWizard({
 
   /* ── International invoice state (persisted inside notes JSON) ── */
   const initialMeta = facture
-    ? (() => { try { const d = JSON.parse(facture.notes ?? '{}'); return { isInternational: !!d.isInternational, currency: (d.currency as Currency) ?? 'MAD', bilingual: !!d.bilingual } } catch { return { isInternational: false, currency: 'MAD' as Currency, bilingual: false } } })()
-    : { isInternational: defaultScope === 'international', currency: (defaultScope === 'international' ? 'EUR' : 'MAD') as Currency, bilingual: defaultScope === 'international' }
+    ? (() => { try { const d = JSON.parse(facture.notes ?? '{}'); return { isInternational: !!d.isInternational, currency: (d.currency as Currency) ?? 'MAD', bilingual: !!d.bilingual, template: (d.template as 'default' | 'simple') ?? 'default', clientIce: typeof d.clientIce === 'string' ? d.clientIce : '' } } catch { return { isInternational: false, currency: 'MAD' as Currency, bilingual: false, template: 'default' as const, clientIce: '' } } })()
+    : { isInternational: defaultScope === 'international', currency: (defaultScope === 'international' ? 'EUR' : 'MAD') as Currency, bilingual: defaultScope === 'international', template: 'default' as const, clientIce: '' }
   const [isInternational, setIsInternational] = useState(initialMeta.isInternational)
   const [currency,        setCurrency]        = useState<Currency>(initialMeta.currency)
   const [bilingual,       setBilingual]       = useState(initialMeta.bilingual)
+  const [template,        setTemplate]        = useState<'default' | 'simple'>(initialMeta.template)
+  const [clientIce,       setClientIce]       = useState<string>(initialMeta.clientIce)
 
   /* International factures default to no TVA (export tax-free). */
   const [tvaEnabled, setTvaEnabled] = useState(() =>
@@ -505,7 +507,7 @@ function FactureWizard({
   const previewRef = useRef<HTMLDivElement>(null)
 
   /* ── Resizable left panel ── */
-  const [panelWidth, setPanelWidth] = useState(340)
+  const [panelWidth, setPanelWidth] = useState(400)
   const isResizing = useRef(false)
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -589,6 +591,8 @@ function FactureWizard({
       isInternational,
       currency,
       bilingual,
+      template,
+      clientIce: clientIce.trim() || undefined,
     }
     const notes = JSON.stringify(notesData)
 
@@ -666,6 +670,7 @@ function FactureWizard({
         prestations: prestations.map(({ id: _id, ...p }) => p),
         conditions, bankInfo, signature,
         isInternational, currency, bilingual,
+        template, clientIce: clientIce.trim() || undefined,
       }),
     }
 
@@ -756,6 +761,34 @@ function FactureWizard({
                 >
                   <Plus className="w-3.5 h-3.5" /> Ajouter une prestation
                 </button>
+
+                {/* Template selector — label au-dessus + menu pleine largeur (lisible même en panneau étroit) */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 divide-y divide-slate-200 dark:divide-slate-600">
+                  <div className="p-2.5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-3.5 h-3.5 text-slate-400" />
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Modèle de facture</p>
+                    </div>
+                    <Select value={template} onValueChange={v => setTemplate(v as 'default' | 'simple')}>
+                      <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">Détaillé (par défaut)</SelectItem>
+                        <SelectItem value="simple">Simple (Nextgital)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {template === 'simple' && (
+                    <div className="p-2.5 space-y-1.5">
+                      <p className="text-xs text-slate-600 dark:text-slate-300">ICE client</p>
+                      <Input
+                        value={clientIce}
+                        onChange={e => setClientIce(e.target.value)}
+                        placeholder="003549446000085"
+                        className="h-8 text-xs w-full font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
 
                 {/* International invoice block */}
                 <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 divide-y divide-slate-200 dark:divide-slate-600">

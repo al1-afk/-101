@@ -7,6 +7,7 @@
 import { forwardRef } from 'react'
 import type { Facture } from '@/hooks/useFactures'
 import type { Client }  from '@/hooks/useClients'
+import FactureTemplateSimple from './FactureTemplateSimple'
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type Currency  = 'MAD' | 'EUR' | 'USD' | 'GBP'
@@ -28,6 +29,8 @@ interface FactureNotesData {
   isInternational?: boolean
   currency?:        Currency
   bilingual?:       boolean
+  template?:        'default' | 'simple'
+  clientIce?:       string
 }
 
 /* ─── Helpers ────────────────────────────────────────────────── */
@@ -146,6 +149,10 @@ interface FactureTemplateProps {
 const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
   ({ facture: f, client }, ref) => {
     const parsed = parseNotes(f.notes)
+    /* Dispatch : template Simple (Nextgital épuré) si l'utilisateur l'a choisi. */
+    if (parsed.template === 'simple') {
+      return <FactureTemplateSimple ref={ref} facture={f} client={client} />
+    }
     const { prestations, conditions, bankInfo, signature } = parsed
     const intl      = !!parsed.isInternational
     const currency  = (parsed.currency ?? 'MAD') as Currency
