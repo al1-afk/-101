@@ -128,6 +128,28 @@ export default function TaskDetailDialog({
     setSubtasks(p => [...p, { id: newId(), title: t, done: false }])
     setNewSubtask('')
   }
+
+  /** Coller un bloc multi-lignes dans "+ Ajouter une sous-tâche"
+      → chaque ligne devient une sous-tâche. Numéros, puces, cases
+      « - [ ] », « □ », « • » et « 1. » sont automatiquement retirés. */
+  const handleSubtaskPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const raw = e.clipboardData?.getData('text/plain') ?? ''
+    if (!raw.includes('\n')) return
+    e.preventDefault()
+    const lines = raw
+      .split(/\r?\n/)
+      .map(l => l.replace(/^\s*(?:[-•*□☐☑]|\[[ xX]\]|\d+[.)])\s*/, '').trim())
+      .filter(Boolean)
+    if (lines.length === 0) return
+    const newOnes: SubTask[] = lines.map(title => ({
+      id: newId(),
+      title,
+      done: /^[✓✅]/.test(title) || title.startsWith('[x]') || title.startsWith('[X]'),
+    }))
+    setSubtasks(p => [...p, ...newOnes])
+    setNewSubtask('')
+    toast.success(`${newOnes.length} sous-tâche${newOnes.length > 1 ? 's' : ''} ajoutée${newOnes.length > 1 ? 's' : ''}`)
+  }
   const toggleSubtask = (id: string) => setSubtasks(p => p.map(s => s.id === id ? { ...s, done: !s.done } : s))
   const removeSubtask = (id: string) => setSubtasks(p => p.filter(s => s.id !== id))
 
@@ -303,13 +325,17 @@ export default function TaskDetailDialog({
               value={newSubtask}
               onChange={e => setNewSubtask(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addSubtask())}
-              placeholder="+ Ajouter une sous-tâche"
+              onPaste={handleSubtaskPaste}
+              placeholder="+ Ajouter une sous-tâche (Cmd+V pour coller plusieurs lignes)"
               className="h-7 text-sm border-dashed"
             />
             <Button size="sm" variant="secondary" onClick={addSubtask} disabled={!newSubtask.trim()}>
               <Plus className="w-3 h-3" />
             </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground italic pl-1">
+            💡 Astuce : colle plusieurs lignes ici → chaque ligne devient une sous-tâche.
+          </p>
         </div>
 
         {/* Pièces jointes / liens */}
