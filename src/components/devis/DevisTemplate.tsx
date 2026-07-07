@@ -6,6 +6,10 @@
 import { forwardRef } from 'react'
 import type { Devis }  from '@/hooks/useDevis'
 import type { Client } from '@/hooks/useClients'
+import DevisTemplateSimple    from './DevisTemplateSimple'
+import DevisTemplateOffer     from './DevisTemplateOffer'
+import DevisTemplateExecutive from './DevisTemplateExecutive'
+import type { DevisTemplateKind } from './templateShared'
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type BlockType = 'title' | 'paragraph' | 'list'
@@ -23,6 +27,8 @@ interface DevisNotesData {
   conditions:  string[]
   bankInfo:    { banque: string; iban: string; swift: string }
   signature?:  string | null
+  template?:   DevisTemplateKind
+  clientIce?:  string
 }
 
 /* ─── Helpers ────────────────────────────────────────────────── */
@@ -141,6 +147,10 @@ interface DevisTemplateProps {
 const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
   ({ devis: d, client }, ref) => {
     const parsed = parseNotes(d.notes)
+    /* Dispatch vers un template alternatif si l'utilisateur l'a choisi. */
+    if (parsed.template === 'simple')    return <DevisTemplateSimple    ref={ref} devis={d} client={client} />
+    if (parsed.template === 'offer')     return <DevisTemplateOffer     ref={ref} devis={d} client={client} />
+    if (parsed.template === 'executive') return <DevisTemplateExecutive ref={ref} devis={d} client={client} />
     const { prestations, conditions, bankInfo, signature } = parsed
 
     const hasTVA      = d.tva > 0

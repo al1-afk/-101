@@ -63,6 +63,8 @@ export const CURRENCY_SYMBOL: Record<Currency, string> = {
 }
 
 /* ─── Notes JSON structure ─────────────────────────────────────────── */
+export type DevisTemplateKind = 'default' | 'simple' | 'offer' | 'executive'
+
 export interface DevisNotesData {
   prestations: Omit<Prestation, 'id'>[]
   conditions:  string[]
@@ -72,6 +74,9 @@ export interface DevisNotesData {
   isInternational?: boolean
   currency?:        Currency
   bilingual?:       boolean    // FR + EN labels on the PDF
+  /* Template & ICE client — utilisés par les modèles alternatifs. */
+  template?:        DevisTemplateKind
+  clientIce?:       string
 }
 
 export const DEFAULT_BANK: BankInfo = { banque: 'CIH', iban: '230 570 6435881221008400 29', swift: 'CIHMMAMC' }
@@ -741,6 +746,14 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
     return c.length ? c : ['Délai de livraison : 7 jours ouvrables']
   })
   const [newCondition,   setNewCondition]   = useState('')
+  const [template,       setTemplate]       = useState<DevisTemplateKind>(() => {
+    if (!editDevis?.notes) return 'default'
+    try { const d = JSON.parse(editDevis.notes) as DevisNotesData; return (d.template as DevisTemplateKind) ?? 'default' } catch { return 'default' }
+  })
+  const [clientIce,      setClientIce]      = useState<string>(() => {
+    if (!editDevis?.notes) return ''
+    try { const d = JSON.parse(editDevis.notes) as DevisNotesData; return typeof d.clientIce === 'string' ? d.clientIce : '' } catch { return '' }
+  })
   const [signature, setSignature] = useState<string | null>(() => {
     // Load saved company signature from localStorage
     try { return localStorage.getItem('ng_signature') ?? null } catch { return null }
@@ -757,7 +770,7 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   const previewRef  = useRef<HTMLDivElement>(null)
 
   /* ── Resizable left panel ── */
-  const [panelWidth, setPanelWidth] = useState(340)
+  const [panelWidth, setPanelWidth] = useState(400)
   const isResizing = useRef(false)
 
   /* ── Mobile view tab — split-screen is unusable below md, so on
@@ -838,6 +851,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       conditions,
       bankInfo,
       signature,
+      template,
+      clientIce: clientIce.trim() || undefined,
     }
     const notes = JSON.stringify(notesData)
 
@@ -897,6 +912,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
         conditions,
         bankInfo,
         signature,
+        template,
+        clientIce: clientIce.trim() || undefined,
       }),
     }
 
@@ -1000,6 +1017,37 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                 >
                   <Plus className="w-3.5 h-3.5" /> Ajouter une prestation
                 </button>
+
+                {/* Template selector — label au-dessus + menu large pour rester lisible même en panneau étroit */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 divide-y divide-slate-200 dark:divide-slate-600">
+                  <div className="p-2.5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-3.5 h-3.5 text-slate-400" />
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Modèle de devis</p>
+                    </div>
+                    <Select value={template} onValueChange={v => setTemplate(v as DevisTemplateKind)}>
+                      <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">Détaillé (par défaut)</SelectItem>
+                        <SelectItem value="simple">Simple (Nextgital)</SelectItem>
+                        <SelectItem value="offer">Proposition sans tableau</SelectItem>
+                        <SelectItem value="executive">Executive (premium)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(template === 'simple' || template === 'offer') && (
+                    <div className="p-2.5 space-y-1.5">
+                      <p className="text-xs text-slate-600 dark:text-slate-300">ICE client</p>
+                      <Input
+                        value={clientIce}
+                        onChange={e => setClientIce(e.target.value)}
+                        placeholder="003549446000085"
+                        className="h-8 text-xs w-full font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 {/* TVA */}
                 <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30">
                   <div>
