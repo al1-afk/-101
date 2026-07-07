@@ -28,28 +28,35 @@ export interface UsefulLink {
 }
 
 export interface ProjetEnvelope {
-  text:         string
-  blocks:       SopBlock[]
-  infos:        string             // notes libres contact client
-  credentials:  Credential[]
-  usefulLinks:  UsefulLink[]
+  text:              string
+  blocks:            SopBlock[]
+  infos:             string             // notes libres contact client
+  credentials:       Credential[]
+  usefulLinks:       UsefulLink[]
+  domainExpiration:  string | null      // YYYY-MM-DD
+  hostingExpiration: string | null      // YYYY-MM-DD
 }
 
 const SENTINEL = '__projet_meta__'
 
 export function parseProjet(notes: string | null | undefined): ProjetEnvelope {
-  const empty: ProjetEnvelope = { text: '', blocks: [], infos: '', credentials: [], usefulLinks: [] }
+  const empty: ProjetEnvelope = {
+    text: '', blocks: [], infos: '', credentials: [], usefulLinks: [],
+    domainExpiration: null, hostingExpiration: null,
+  }
   if (!notes) return empty
   const trimmed = notes.trim()
   if (trimmed.startsWith('{') && trimmed.includes(SENTINEL)) {
     try {
       const d = JSON.parse(trimmed) as Partial<ProjetEnvelope> & { sentinel?: string }
       return {
-        text:        d.text ?? '',
-        blocks:      d.blocks ?? [],
-        infos:       d.infos ?? '',
-        credentials: d.credentials ?? [],
-        usefulLinks: d.usefulLinks ?? [],
+        text:              d.text ?? '',
+        blocks:            d.blocks ?? [],
+        infos:             d.infos ?? '',
+        credentials:       d.credentials ?? [],
+        usefulLinks:       d.usefulLinks ?? [],
+        domainExpiration:  d.domainExpiration ?? null,
+        hostingExpiration: d.hostingExpiration ?? null,
       }
     } catch { /* fall through */ }
   }
@@ -58,21 +65,32 @@ export function parseProjet(notes: string | null | undefined): ProjetEnvelope {
 
 export function serializeProjet(e: Partial<ProjetEnvelope>): string {
   const full: ProjetEnvelope = {
-    text:        e.text ?? '',
-    blocks:      e.blocks ?? [],
-    infos:       e.infos ?? '',
-    credentials: e.credentials ?? [],
-    usefulLinks: e.usefulLinks ?? [],
+    text:              e.text ?? '',
+    blocks:            e.blocks ?? [],
+    infos:             e.infos ?? '',
+    credentials:       e.credentials ?? [],
+    usefulLinks:       e.usefulLinks ?? [],
+    domainExpiration:  e.domainExpiration ?? null,
+    hostingExpiration: e.hostingExpiration ?? null,
   }
   const isEmpty =
     !full.text.trim() &&
     full.blocks.length === 0 &&
     !full.infos.trim() &&
     full.credentials.length === 0 &&
-    full.usefulLinks.length === 0
+    full.usefulLinks.length === 0 &&
+    !full.domainExpiration &&
+    !full.hostingExpiration
   if (isEmpty) return ''
   /* If nothing structured, keep plain text for backward compat */
-  if (full.blocks.length === 0 && !full.infos.trim() && full.credentials.length === 0 && full.usefulLinks.length === 0) {
+  if (
+    full.blocks.length === 0 &&
+    !full.infos.trim() &&
+    full.credentials.length === 0 &&
+    full.usefulLinks.length === 0 &&
+    !full.domainExpiration &&
+    !full.hostingExpiration
+  ) {
     return full.text
   }
   return JSON.stringify({ sentinel: SENTINEL, ...full })

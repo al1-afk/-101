@@ -7,7 +7,7 @@ import {
   Calendar, Clock, CircleDot, Check, MoreHorizontal,
   Crown, User as UserIcon, LayoutGrid, List as ListIcon,
   Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
-  MessageSquare, Settings,
+  MessageSquare, Settings, Globe, Server, CalendarCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -47,7 +47,8 @@ import { projetMessagesApi } from '@/lib/api'
 import type { SopBlock } from '@/hooks/useSops'
 import { useQueryClient } from '@tanstack/react-query'
 import { projetsApi } from '@/lib/api'
-import { formatDate, formatCurrency, getInitials, cn } from '@/lib/utils'
+import { formatDate, formatCurrency, getInitials, getDaysUntil, cn } from '@/lib/utils'
+import { parseProjet, serializeProjet } from '@/lib/projetNotes'
 import { extractImageFilesFromClipboard, compressImageToDataURL } from '@/lib/pasteImage'
 import { toast } from 'sonner'
 
@@ -154,6 +155,14 @@ export default function ProjetDetail() {
     return Math.round((done / tasks.length) * 100)
   }, [tasks])
 
+  /* Domain & hosting expirations live inside projet.notes envelope */
+  const envelope = useMemo(() => parseProjet(projet.notes), [projet.notes])
+
+  const updateEnvelope = (patch: { domainExpiration?: string | null; hostingExpiration?: string | null }) => {
+    const next = serializeProjet({ ...envelope, ...patch })
+    updateProjet.mutate({ id: projet.id, notes: next })
+  }
+
   const handleDelete = async () => {
     await deleteProjet.mutateAsync(projet.id)
     navigate(`${base}/projets`)
@@ -213,6 +222,31 @@ export default function ProjetDetail() {
           <Kpi label="Progression"   value={`${taskProgression ?? projet.progression}%`} sub={tasks.length > 0 ? `${tasks.filter(t => t.status === 'done').length}/${tasks.length} tâches` : undefined} />
           <Kpi label="Équipe"        value={String(assignees.length)} sub={`membre${assignees.length > 1 ? 's' : ''}`} />
           <Kpi label="Tâches"        value={String(tasks.length)}     sub={`${tasks.filter(t => t.status === 'in_progress').length} en cours`} />
+        </div>
+
+        {/* Échéances : domaine · hébergement · fin projet */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+          <ExpirationCard
+            icon={Globe}
+            label="Nom de domaine"
+            iconClass="text-blue-500"
+            value={envelope.domainExpiration}
+            onChange={(v) => updateEnvelope({ domainExpiration: v })}
+          />
+          <ExpirationCard
+            icon={Server}
+            label="Hébergement"
+            iconClass="text-violet-500"
+            value={envelope.hostingExpiration}
+            onChange={(v) => updateEnvelope({ hostingExpiration: v })}
+          />
+          <ExpirationCard
+            icon={CalendarCheck}
+            label="Fin du projet"
+            iconClass="text-emerald-500"
+            value={toDateInput(projet.date_fin_prevue)}
+            onChange={(v) => updateProjet.mutate({ id: projet.id, date_fin_prevue: v || null })}
+          />
         </div>
 
         {/* Progress bar */}
@@ -361,6 +395,47 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub?: string
       <p className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground">{label}</p>
       <p className="text-xl font-extrabold text-foreground mt-1">{value}</p>
       {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+    </div>
+  )
+}
+
+/* ─── Expiration tile (domaine · hébergement · fin projet) ─────── */
+function ExpirationCard({
+  icon: Icon, label, iconClass, value, onChange,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  iconClass: string
+  value: string | null
+  onChange: (v: string) => void
+}) {
+  const days = value ? getDaysUntil(value) : null
+  const badge = (() => {
+    if (days == null) return { text: 'Non défini', cls: 'bg-muted text-muted-foreground' }
+    if (days < 0)     return { text: `Expiré il y a ${Math.abs(days)}j`, cls: 'bg-red-500/10 text-red-600 dark:text-red-400' }
+    if (days === 0)   return { text: "Aujourd'hui", cls: 'bg-red-500/10 text-red-600 dark:text-red-400' }
+    if (days <= 15)   return { text: `Dans ${days}j`, cls: 'bg-red-500/10 text-red-600 dark:text-red-400' }
+    if (days <= 30)   return { text: `Dans ${days}j`, cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' }
+    if (days <= 60)   return { text: `Dans ${days}j`, cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' }
+    return { text: `Dans ${days}j`, cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' }
+  })()
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <Icon className={cn('w-3.5 h-3.5', iconClass)} />
+        <p className="text-[11px] uppercase tracking-wider font-bold text-muted-foreground">{label}</p>
+      </div>
+      <div className="flex items-center gap-2 mt-1.5">
+        <input
+          type="date"
+          value={value ?? ''}
+          onChange={e => onChange(e.target.value)}
+          className="text-sm font-semibold text-foreground bg-transparent border-0 outline-none p-0 focus:ring-0 min-w-0 flex-1"
+        />
+        <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap', badge.cls)}>
+          {badge.text}
+        </span>
+      </div>
     </div>
   )
 }
@@ -598,11 +673,16 @@ function TasksTab({
   const [showTemplateDialog, setShowTemplateDialog] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
-  const [taskForm, setTaskForm] = useState({ title: '', team_member_id: 'none', priority: 'normal' as TaskPriority, due_date: '', category: '' })
+  /** Date du jour au format YYYY-MM-DD (fuseau local) — pré-rempli sur les nouveaux formulaires. */
+  const todayISO = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+  const [taskForm, setTaskForm] = useState({ title: '', team_member_id: 'none', priority: 'normal' as TaskPriority, due_date: todayISO, category: '' })
   const [taskImages, setTaskImages] = useState<string[]>([])
   const [taskBlocks, setTaskBlocks] = useState<SopBlock[]>([])
   const [showTaskDescription, setShowTaskDescription] = useState(false)
-  const [reqForm,  setReqForm]  = useState({ title: '', team_member_id: 'none', priority: 'high' as TaskPriority, due_date: '', price: '' })
+  const [reqForm,  setReqForm]  = useState({ title: '', team_member_id: 'none', priority: 'high' as TaskPriority, due_date: todayISO, price: '' })
 
   const handleTaskPaste = async (e: React.ClipboardEvent) => {
     const files = extractImageFilesFromClipboard(e)
