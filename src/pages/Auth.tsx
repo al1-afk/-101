@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Eye, EyeOff, Lock, Mail, ArrowRight, Loader2, X, KeyRound, CheckCircle, ShieldCheck, ArrowLeft } from 'lucide-react'
+import {
+  Eye, EyeOff, Lock, Mail, ArrowRight, Loader2, X, KeyRound,
+  CheckCircle, ShieldCheck, ArrowLeft, Sparkles, Zap, Shield, Cable,
+} from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { authApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 type AuthStage = 'credentials' | 'verify'
 
@@ -18,13 +22,11 @@ export default function Auth() {
   const [error, setError] = useState<string | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
 
-  /* 2FA-on-login state */
-  const [stage,   setStage]   = useState<AuthStage>('credentials')
-  const [code,    setCode]    = useState('')
+  const [stage,    setStage]    = useState<AuthStage>('credentials')
+  const [code,     setCode]     = useState('')
   const [resendIn, setResendIn] = useState(0)
   const [resending, setResending] = useState(false)
 
-  /* Countdown for the "Renvoyer le code" link */
   useEffect(() => {
     if (resendIn <= 0) return
     const t = setTimeout(() => setResendIn(v => v - 1), 1000)
@@ -38,187 +40,348 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
-    setLoading(true)
+    setError(null); setLoading(true)
     try {
       const res: any = await signIn(email, password)
-      if (res?.needsVerification) {
-        setStage('verify')
-        setResendIn(30)
-      }
+      if (res?.needsVerification) { setStage('verify'); setResendIn(30) }
     } catch (err: any) {
       setError(err.message || 'Identifiants incorrects')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
-    setLoading(true)
+    setError(null); setLoading(true)
     try {
       await verifyLogin(email, code.trim())
     } catch (err: any) {
       setError(err.message || 'Code incorrect')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   const handleResend = async () => {
     if (resendIn > 0 || resending) return
-    setResending(true)
-    setError(null)
+    setResending(true); setError(null)
     try {
       await resendLoginCode(email)
       setResendIn(30)
     } catch (err: any) {
       setError(err.message || 'Erreur lors du renvoi')
-    } finally {
-      setResending(false)
-    }
+    } finally { setResending(false) }
   }
 
   const backToCredentials = () => {
-    setStage('credentials')
-    setCode('')
-    setError(null)
+    setStage('credentials'); setCode(''); setError(null)
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#020617] flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background effects */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-blue-800/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-900/5 rounded-full blur-3xl" />
-      </div>
+    <div className="min-h-[100dvh] w-full flex bg-background">
 
-      <motion.div
-        initial={{ opacity: 0, y: 24, scale: 0.97 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="relative w-full max-w-md"
-      >
-        {/* Card */}
-        <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/60 rounded-2xl p-8 shadow-2xl">
-          {/* Logo */}
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center mb-4 shadow-lg shadow-blue-600/30">
-              {stage === 'verify'
-                ? <ShieldCheck className="w-7 h-7 text-white" />
-                : <span className="text-white font-bold text-2xl">N</span>}
+      {/* ══ LEFT — Navy hero brand panel (hidden on mobile) ══════════ */}
+      <aside className="hidden lg:flex relative w-[46%] xl:w-[42%] flex-col overflow-hidden text-white"
+             style={{ background: 'var(--gradient-hero)' }}>
+        {/* Mesh grid + orbs */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-70"
+          style={{
+            backgroundImage:
+              'radial-gradient(at 85% 15%, rgba(6,182,212,0.35) 0%, transparent 55%), radial-gradient(at 15% 85%, rgba(37,99,235,0.28) 0%, transparent 50%), radial-gradient(at 55% 50%, rgba(255,255,255,0.05) 0%, transparent 60%)',
+          }}
+        />
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.35]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)',
+            backgroundSize: '38px 38px',
+            maskImage: 'radial-gradient(ellipse at 50% 40%, black 0%, transparent 75%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at 50% 40%, black 0%, transparent 75%)',
+          }}
+        />
+        {/* Floating cyan orb */}
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          transition={{ duration: 1 }}
+          className="absolute -top-32 -right-32 w-[420px] h-[420px] rounded-full blur-3xl pointer-events-none"
+          style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.45) 0%, transparent 65%)' }}
+        />
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          transition={{ duration: 1.2, delay: 0.2 }}
+          className="absolute -bottom-40 -left-20 w-[380px] h-[380px] rounded-full blur-3xl pointer-events-none"
+          style={{ background: 'radial-gradient(circle, rgba(37,99,235,0.4) 0%, transparent 65%)' }}
+        />
+
+        <div className="relative z-10 flex flex-col h-full p-10 xl:p-14">
+          {/* Top — Logo */}
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="flex items-center gap-3"
+          >
+            <div
+              className="w-11 h-11 rounded-2xl flex items-center justify-center relative overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)', boxShadow: '0 12px 32px -8px rgba(6,182,212,0.5)' }}
+            >
+              <span className="text-white font-black text-[17px] tracking-tight relative z-10">N</span>
+              <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white/25 blur-md" />
             </div>
-            <h1 className="text-2xl font-bold text-white">
-              {stage === 'verify' ? 'Confirmation' : 'NEXT GITAL CRM'}
-            </h1>
-            <p className="text-slate-400 text-sm mt-1 text-center">
-              {stage === 'verify'
-                ? <>Code envoyé à <span className="text-blue-400 font-medium">{email}</span></>
-                : 'Connectez-vous à votre espace'}
-            </p>
+            <div>
+              <p className="font-bold text-[15px] tracking-tight leading-none">NEXT GITAL</p>
+              <p className="text-[10.5px] font-semibold leading-none mt-1 text-cyan-200/85 uppercase tracking-[0.15em]">
+                Enterprise ERP · FTTH
+              </p>
+            </div>
+          </motion.div>
+
+          {/* Middle — Marketing */}
+          <div className="flex-1 flex flex-col justify-center max-w-lg mt-16 xl:mt-0">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-sm w-fit mb-6"
+            >
+              <Sparkles className="w-3 h-3 text-cyan-300" />
+              <span className="text-white/85 text-[10.5px] font-semibold uppercase tracking-[0.14em]">
+                Édition 2026
+              </span>
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="text-4xl xl:text-5xl font-black tracking-[-0.03em] leading-[1.05]"
+            >
+              L'infrastructure de votre entreprise{' '}
+              <span className="bg-gradient-to-r from-cyan-200 via-white to-cyan-300 bg-clip-text text-transparent">
+                sans friction
+              </span>
+              .
+            </motion.h1>
+
+            <motion.p
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="text-white/65 text-[15px] mt-5 leading-relaxed"
+            >
+              CRM, projets FTTH, devis, factures, planning terrain — tout dans une seule plateforme premium,
+              propulsée par l'IA Nexi.
+            </motion.p>
+
+            {/* Bullets */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.32 }}
+              className="mt-10 space-y-3.5"
+            >
+              {[
+                { icon: Zap,    text: 'Génération de devis en 30 secondes avec IA' },
+                { icon: Cable,  text: 'Suivi temps réel de vos chantiers fibre optique' },
+                { icon: Shield, text: 'Conformité comptable Maroc + chiffrement bout-en-bout' },
+              ].map((b) => {
+                const Icon = b.icon
+                return (
+                  <div key={b.text} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/10 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
+                      <Icon className="w-4 h-4 text-cyan-300" />
+                    </div>
+                    <span className="text-white/80 text-[13.5px]">{b.text}</span>
+                  </div>
+                )
+              })}
+            </motion.div>
           </div>
 
-          {stage === 'verify' ? (
-            <VerifyStep
-              code={code}
-              setCode={setCode}
-              loading={loading}
-              error={error}
-              resendIn={resendIn}
-              resending={resending}
-              onSubmit={handleVerify}
-              onResend={handleResend}
-              onBack={backToCredentials}
-            />
-          ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-300">Email</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="votre@email.com"
-                  className="pl-9 bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 focus-visible:border-blue-500"
-                  required
-                  autoFocus
+          {/* Bottom — Trust footer */}
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="mt-14 flex items-center gap-4 pt-6 border-t border-white/10"
+          >
+            <div className="flex -space-x-2">
+              {['#22D3EE', '#3B82F6', '#8B5CF6'].map((c) => (
+                <div
+                  key={c}
+                  className="w-8 h-8 rounded-full border-2 border-navy-800"
+                  style={{ background: `linear-gradient(135deg, ${c}, ${c}88)` }}
                 />
-              </div>
+              ))}
             </div>
-
-            {/* Password */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-300">Mot de passe</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="pl-9 pr-9 bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 focus-visible:border-blue-500"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
+            <div className="text-[11.5px] leading-tight">
+              <p className="text-white font-semibold">+120 équipes terrain</p>
+              <p className="text-white/50">utilisent NEXT GITAL au Maroc</p>
             </div>
+          </motion.div>
+        </div>
+      </aside>
 
-            {/* Error */}
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400"
+      {/* ══ RIGHT — Auth card ═════════════════════════════════════════ */}
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-8 relative overflow-hidden">
+        {/* Subtle mesh for right side */}
+        <div className="absolute inset-0 pointer-events-none opacity-60 dark:opacity-40"
+             style={{ backgroundImage: 'var(--gradient-mesh)' }} />
+
+        {/* Mobile logo (visible < lg) */}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          className="absolute top-5 left-5 lg:hidden flex items-center gap-2.5"
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)', boxShadow: '0 8px 20px -6px rgba(6,182,212,0.5)' }}
+          >
+            <span className="text-white font-black text-[14px] tracking-tight">N</span>
+          </div>
+          <div>
+            <p className="font-bold text-[13.5px] tracking-tight text-foreground leading-none">NEXT GITAL</p>
+            <p className="text-[9.5px] font-semibold leading-none mt-1 bg-gradient-to-r from-electric-600 to-cyan-500 bg-clip-text text-transparent uppercase tracking-widest">
+              Enterprise ERP
+            </p>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          className="relative w-full max-w-[420px]"
+        >
+          <div className="card-premium p-8 sm:p-10">
+            {/* Icon + title */}
+            <div className="flex flex-col items-start mb-8">
+              <div
+                className="w-12 h-12 rounded-2xl flex items-center justify-center mb-5 relative overflow-hidden"
+                style={{ background: 'linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)', boxShadow: '0 12px 32px -8px rgba(37,99,235,0.4)' }}
               >
-                {error}
-              </motion.div>
+                {stage === 'verify'
+                  ? <ShieldCheck className="w-6 h-6 text-white relative z-10" />
+                  : <span className="text-white font-black text-xl relative z-10">N</span>}
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-white/25 blur-md" />
+              </div>
+              <h1 className="text-[24px] font-black tracking-[-0.02em] text-foreground leading-none">
+                {stage === 'verify' ? 'Confirmation' : 'Bienvenue'}
+              </h1>
+              <p className="text-[13px] text-muted-foreground mt-2">
+                {stage === 'verify'
+                  ? <>Code envoyé à <span className="text-electric-600 dark:text-cyan-400 font-semibold">{email}</span></>
+                  : 'Connectez-vous à votre espace de gestion'}
+              </p>
+            </div>
+
+            {stage === 'verify' ? (
+              <VerifyStep
+                code={code}
+                setCode={setCode}
+                loading={loading}
+                error={error}
+                resendIn={resendIn}
+                resending={resending}
+                onSubmit={handleVerify}
+                onResend={handleResend}
+                onBack={backToCredentials}
+              />
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Email */}
+                <div>
+                  <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                    Adresse email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="vous@nextgital.ma"
+                      className="pl-10 h-11"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Mot de passe
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setResetOpen(true)}
+                      className="text-[11.5px] font-medium text-electric-600 dark:text-cyan-400 hover:underline"
+                    >
+                      Oublié ?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="pl-10 pr-10 h-11"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md text-slate-400 hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Error */}
+                <AnimatePresence>
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: 'auto' }}
+                      exit={{ opacity: 0, y: -6, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25 text-[13px] text-red-700 dark:text-red-300">
+                        <span className="w-4 h-4 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="w-1 h-1 rounded-full bg-red-500" />
+                        </span>
+                        <span className="leading-snug">{error}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Submit */}
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  size="lg"
+                  className="w-full mt-2"
+                >
+                  {loading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Connexion…</>
+                  ) : (
+                    <>Se connecter <ArrowRight className="w-4 h-4" /></>
+                  )}
+                </Button>
+              </form>
             )}
 
-            {/* Submit */}
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-11 text-base mt-2 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white shadow-lg shadow-blue-600/30 border-0"
-            >
-              {loading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <>
-                  Se connecter
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </Button>
-
-            {/* Forgot password */}
-            <div className="text-center pt-1">
-              <button
-                type="button"
-                onClick={() => setResetOpen(true)}
-                className="text-sm text-blue-400 hover:text-blue-300 hover:underline transition-colors"
-              >
-                Mot de passe oublié ?
-              </button>
+            {/* Footer */}
+            <div className="pt-6 mt-6 border-t border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center gap-2 text-[11.5px] text-muted-foreground">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Espace privé sécurisé · SSL 256-bit</span>
             </div>
-          </form>
-          )}
+          </div>
 
-          <p className="text-center text-xs text-slate-600 mt-6">
-            Accès restreint — Espace privé NEXT GITAL
+          {/* Signup helper */}
+          <p className="text-center text-[12px] text-muted-foreground mt-5">
+            Pas encore de compte ? <span className="font-semibold text-foreground">Contactez votre administrateur</span>.
           </p>
-        </div>
-      </motion.div>
+        </motion.div>
+      </main>
 
       <ResetPasswordModal
         open={resetOpen}
@@ -229,7 +392,7 @@ export default function Auth() {
   )
 }
 
-/* ── Verify step — 6-digit code received by email ───────────────── */
+/* ─── Verify step ─────────────────────────────────────────────────── */
 function VerifyStep({
   code, setCode, loading, error, resendIn, resending,
   onSubmit, onResend, onBack,
@@ -249,10 +412,12 @@ function VerifyStep({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium text-slate-300">Code de vérification</label>
+      <div>
+        <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+          Code de vérification
+        </label>
         <div className="relative">
-          <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           <Input
             ref={inputRef}
             type="text"
@@ -260,59 +425,59 @@ function VerifyStep({
             autoComplete="one-time-code"
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="123456"
+            placeholder="••••••"
             maxLength={6}
-            className="pl-9 bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 focus-visible:border-blue-500 text-center tracking-[0.5em] font-mono text-lg"
+            className="pl-10 h-12 text-center tracking-[0.5em] font-mono text-lg"
             required
           />
         </div>
-        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-          Entrez le code à 6 chiffres reçu par email. Il expire dans 10 minutes.
+        <p className="text-[11.5px] text-muted-foreground mt-2 leading-relaxed">
+          Entrez le code à 6 chiffres reçu par email. Il expire dans <span className="font-semibold text-foreground">10 minutes</span>.
         </p>
       </div>
 
-      {error && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400"
-        >
-          {error}
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: 'auto' }}
+            exit={{ opacity: 0, y: -6, height: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25 text-[13px] text-red-700 dark:text-red-300">
+              <span className="w-4 h-4 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <span className="w-1 h-1 rounded-full bg-red-500" />
+              </span>
+              <span className="leading-snug">{error}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <Button
-        type="submit"
-        disabled={loading || code.length !== 6}
-        className="w-full h-11 text-base mt-2 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white shadow-lg shadow-blue-600/30 border-0"
-      >
+      <Button type="submit" disabled={loading || code.length !== 6} size="lg" className="w-full mt-2">
         {loading ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
+          <><Loader2 className="w-4 h-4 animate-spin" /> Vérification…</>
         ) : (
-          <>
-            Vérifier
-            <CheckCircle className="w-4 h-4" />
-          </>
+          <>Vérifier <CheckCircle className="w-4 h-4" /></>
         )}
       </Button>
 
-      <div className="flex items-center justify-between pt-2 text-sm">
+      <div className="flex items-center justify-between pt-2 text-[12.5px]">
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-1 text-slate-400 hover:text-slate-200 transition-colors"
+          className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Retour
+          <ArrowLeft className="w-3.5 h-3.5" /> Retour
         </button>
         {resendIn > 0 ? (
-          <span className="text-slate-500">Renvoi possible dans {resendIn}s</span>
+          <span className="text-muted-foreground">Renvoi dans <span className="font-semibold text-foreground tabular-nums">{resendIn}s</span></span>
         ) : (
           <button
             type="button"
             onClick={onResend}
             disabled={resending}
-            className="text-blue-400 hover:text-blue-300 hover:underline transition-colors disabled:opacity-50"
+            className="text-electric-600 dark:text-cyan-400 hover:underline disabled:opacity-50 font-medium"
           >
             {resending ? 'Envoi…' : 'Renvoyer le code'}
           </button>
@@ -322,7 +487,7 @@ function VerifyStep({
   )
 }
 
-/* ── Reset password modal — 3 steps: email → code → new password ── */
+/* ─── Reset password modal ────────────────────────────────────────── */
 function ResetPasswordModal({
   open,
   onClose,
@@ -340,10 +505,7 @@ function ResetPasswordModal({
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
-  const reset = () => {
-    setStep(1); setCode(''); setNewPwd(''); setError(null); setLoading(false)
-  }
-
+  const reset = () => { setStep(1); setCode(''); setNewPwd(''); setError(null); setLoading(false) }
   const handleClose = () => { reset(); onClose() }
 
   const requestCode = async (e: React.FormEvent) => {
@@ -353,10 +515,8 @@ function ResetPasswordModal({
       await authApi.forgotPassword(email)
       setStep(2)
     } catch (err: any) {
-      setError(err.message || 'Erreur lors de l\'envoi')
-    } finally {
-      setLoading(false)
-    }
+      setError(err.message || "Erreur lors de l'envoi")
+    } finally { setLoading(false) }
   }
 
   const submitReset = async (e: React.FormEvent) => {
@@ -367,9 +527,7 @@ function ResetPasswordModal({
       setStep(3)
     } catch (err: any) {
       setError(err.message || 'Erreur lors de la réinitialisation')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
@@ -377,138 +535,194 @@ function ResetPasswordModal({
       {open && (
         <motion.div
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-navy-900/80 backdrop-blur-md flex items-center justify-center p-4"
           onClick={handleClose}
         >
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.96 }}
+            initial={{ opacity: 0, y: 16, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0,  scale: 1    }}
+            exit={{    opacity: 0, y: 10, scale: 0.97 }}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-md bg-slate-900 border border-slate-700/60 rounded-2xl p-7 shadow-2xl"
+            className="relative w-full max-w-md rounded-2xl overflow-hidden card-premium p-7 sm:p-8"
           >
+            {/* Subtle mesh backdrop inside modal */}
+            <div className="absolute inset-0 pointer-events-none opacity-40 dark:opacity-30"
+                 style={{ backgroundImage: 'var(--gradient-primary-soft)' }} />
+
             <button
               type="button"
               onClick={handleClose}
-              className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition-colors"
+              className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors z-10"
               aria-label="Fermer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
-                <KeyRound className="w-5 h-5 text-blue-400" />
+            {/* Icon + title */}
+            <div className="relative flex items-center gap-3 mb-5">
+              <div
+                className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)', boxShadow: '0 8px 20px -6px rgba(37,99,235,0.4)' }}
+              >
+                {step === 3 ? <CheckCircle className="w-5 h-5 text-white" /> : <KeyRound className="w-5 h-5 text-white" />}
               </div>
-              <div>
-                <h2 className="text-white font-semibold text-lg">
-                  {step === 3 ? 'Succès' : 'Réinitialiser le mot de passe'}
+              <div className="min-w-0">
+                <h2 className="text-foreground font-bold text-[16px] tracking-[-0.01em] leading-tight">
+                  {step === 3 ? 'Mot de passe modifié' : 'Réinitialiser le mot de passe'}
                 </h2>
-                <p className="text-slate-400 text-xs">
+                <p className="text-muted-foreground text-[12px] mt-0.5">
                   {step === 1 && 'Entrez votre email pour recevoir un code'}
-                  {step === 2 && `Code envoyé à ${email}`}
-                  {step === 3 && 'Votre mot de passe a été modifié'}
+                  {step === 2 && <>Code envoyé à <span className="text-foreground font-medium">{email}</span></>}
+                  {step === 3 && 'Vous pouvez maintenant vous connecter'}
                 </p>
               </div>
             </div>
 
-            {/* Step 1 — Email */}
+            {/* Step indicator */}
+            {step !== 3 && (
+              <div className="relative flex items-center gap-2 mb-6">
+                {[1, 2].map((s) => (
+                  <div
+                    key={s}
+                    className={cn(
+                      'h-1 flex-1 rounded-full transition-all',
+                      s <= step
+                        ? 'bg-gradient-primary'
+                        : 'bg-black/[0.08] dark:bg-white/[0.08]',
+                    )}
+                  />
+                ))}
+                <span className="text-[10.5px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
+                  {step}/2
+                </span>
+              </div>
+            )}
+
+            {/* Step 1 */}
             {step === 1 && (
-              <form onSubmit={requestCode} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-300">Email</label>
+              <form onSubmit={requestCode} className="relative space-y-4">
+                <div>
+                  <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                    Adresse email
+                  </label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <Input
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="votre@email.com"
-                      className="pl-9 bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 focus-visible:border-blue-500"
+                      placeholder="vous@nextgital.ma"
+                      className="pl-10 h-11"
                       required
                       autoFocus
                     />
                   </div>
                 </div>
 
-                {error && (
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
-                    {error}
-                  </div>
-                )}
+                <AnimatePresence>
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: 'auto' }}
+                      exit={{ opacity: 0, y: -6, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25 text-[13px] text-red-700 dark:text-red-300">
+                        <span className="w-4 h-4 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="w-1 h-1 rounded-full bg-red-500" />
+                        </span>
+                        <span className="leading-snug">{error}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-                <Button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full h-11 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white shadow-lg shadow-blue-600/30 border-0"
-                >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Envoyer le code'}
+                <Button type="submit" disabled={loading} size="lg" className="w-full">
+                  {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Envoi…</> : <>Envoyer le code <ArrowRight className="w-4 h-4" /></>}
                 </Button>
               </form>
             )}
 
-            {/* Step 2 — Code + new password */}
+            {/* Step 2 */}
             {step === 2 && (
-              <form onSubmit={submitReset} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-300">Code reçu (6 chiffres)</label>
+              <form onSubmit={submitReset} className="relative space-y-4">
+                <div>
+                  <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                    Code reçu · 6 chiffres
+                  </label>
                   <Input
                     type="text"
                     inputMode="numeric"
                     maxLength={6}
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456"
-                    className="bg-slate-800/60 border-slate-700 text-white text-center tracking-[0.5em] text-lg font-mono placeholder:text-slate-600 focus-visible:border-blue-500"
+                    placeholder="••••••"
+                    className="h-12 text-center tracking-[0.5em] text-lg font-mono"
                     required
                     autoFocus
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-300">Nouveau mot de passe</label>
+                <div>
+                  <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                    Nouveau mot de passe
+                  </label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                     <Input
                       type={showPwd ? 'text' : 'password'}
                       value={newPassword}
                       onChange={(e) => setNewPwd(e.target.value)}
                       placeholder="Min. 8 caractères"
                       minLength={8}
-                      className="pl-9 pr-9 bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 focus-visible:border-blue-500"
+                      className="pl-10 pr-10 h-11"
                       required
                     />
                     <button
                       type="button"
                       onClick={() => setShowPwd(!showPwd)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md text-slate-400 hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
                     >
                       {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
 
-                {error && (
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
-                    {error}
-                  </div>
-                )}
+                <AnimatePresence>
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: 'auto' }}
+                      exit={{ opacity: 0, y: -6, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25 text-[13px] text-red-700 dark:text-red-300">
+                        <span className="w-4 h-4 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="w-1 h-1 rounded-full bg-red-500" />
+                        </span>
+                        <span className="leading-snug">{error}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <div className="flex gap-2">
                   <Button
                     type="button"
                     variant="secondary"
+                    size="lg"
                     onClick={() => { setStep(1); setError(null) }}
-                    className="flex-1 h-11 bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                    className="flex-1"
                   >
-                    Retour
+                    <ArrowLeft className="w-4 h-4" /> Retour
                   </Button>
                   <Button
                     type="submit"
                     disabled={loading || code.length !== 6}
-                    className="flex-1 h-11 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white shadow-lg shadow-blue-600/30 border-0"
+                    size="lg"
+                    className="flex-1"
                   >
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Valider'}
+                    {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Validation…</> : 'Valider'}
                   </Button>
                 </div>
               </form>
@@ -516,20 +730,19 @@ function ResetPasswordModal({
 
             {/* Step 3 — Success */}
             {step === 3 && (
-              <div className="text-center py-2 space-y-4">
-                <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
-                  <CheckCircle className="w-8 h-8 text-emerald-400" />
-                </div>
-                <p className="text-slate-300 text-sm">
-                  Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.
-                </p>
-                <Button
-                  type="button"
-                  onClick={handleClose}
-                  className="w-full h-11 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white shadow-lg shadow-blue-600/30 border-0"
+              <div className="relative text-center py-4 space-y-5">
+                <motion.div
+                  initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+                  className="w-16 h-16 rounded-2xl bg-emerald-500/10 ring-4 ring-emerald-500/10 flex items-center justify-center mx-auto"
                 >
-                  Retour à la connexion
-                  <ArrowRight className="w-4 h-4" />
+                  <CheckCircle className="w-8 h-8 text-emerald-500" />
+                </motion.div>
+                <p className="text-[13px] text-muted-foreground max-w-xs mx-auto">
+                  Votre mot de passe a été modifié avec succès. Vous pouvez maintenant vous reconnecter.
+                </p>
+                <Button type="button" onClick={handleClose} size="lg" className="w-full">
+                  Retour à la connexion <ArrowRight className="w-4 h-4" />
                 </Button>
               </div>
             )}

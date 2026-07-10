@@ -97,9 +97,9 @@ export default function AppLayout() {
 
       <main
         className={cn(
-          'pt-14 md:pt-16 transition-all duration-300 min-h-[100dvh]',
-          'pl-0 md:pl-64',
-          collapsed && 'md:pl-16',
+          'pt-14 md:pt-16 transition-[padding] duration-300 min-h-[100dvh]',
+          'pl-0 md:pl-[260px]',
+          collapsed && 'md:pl-[68px]',
         )}
       >
         <OfflineBanner />

@@ -1,27 +1,31 @@
-import { useState } from 'react'
-import { NavLink, useLocation, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
+import {
+  DragDropContext, Droppable, Draggable,
+  type DropResult,
+} from '@hello-pangea/dnd'
 import {
   LayoutDashboard, Users, UserCheck, FileText, Receipt, FileSignature,
   CreditCard, DollarSign, TrendingUp, Globe, Server, Package, ShoppingCart,
-  Repeat, BarChart3, CheckSquare, Building2, ChevronDown,
-  Settings, Briefcase, Banknote, Wallet, Activity, X,
+  Repeat, BarChart3, CheckSquare, Building2, ChevronDown, ChevronsLeft,
+  Settings, Briefcase, Banknote, Wallet, Activity,
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
+  Plus, Star, Command, Search, GripVertical,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
 import { useVehicleAlerts } from '@/hooks/useVehicles'
 import { useAuth } from '@/hooks/useAuth'
+import { openGlobalSearch } from '@/components/GlobalSearch'
 
 interface NavItem {
   label: string
   href:  string
   icon:  React.ElementType
   badge?: string
-  /** Module key — used by per-user access overrides. Same as href without leading slash; '' for dashboard */
   module?: string
-  /** Si true → caché pour tous sauf admin (filtre AVANT filterItem) */
   adminOnly?: boolean
 }
 
@@ -135,12 +139,40 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   },
 ]
 
+/** Flat lookup for favorite / recent rendering */
+const ALL_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items)
+
 function getInitialExpanded(): string[] {
   try {
     const stored = localStorage.getItem('sidebar-expanded-groups')
     if (stored) return JSON.parse(stored)
-  } catch {}
+  } catch {/* ignore */}
   return NAV_GROUPS.map(g => g.title)
+}
+
+function getFavorites(): string[] {
+  try {
+    const raw = localStorage.getItem('sidebar-favorites')
+    if (raw) return JSON.parse(raw)
+  } catch {/* ignore */}
+  return ['/', '/factures', '/devis']
+}
+function saveFavorites(f: string[]) {
+  try { localStorage.setItem('sidebar-favorites', JSON.stringify(f)) } catch {/* ignore */}
+}
+function getRecents(): string[] {
+  try {
+    const raw = localStorage.getItem('sidebar-recents')
+    if (raw) return JSON.parse(raw)
+  } catch {/* ignore */}
+  return []
+}
+function pushRecent(href: string) {
+  try {
+    const cur = getRecents().filter(h => h !== href)
+    const next = [href, ...cur].slice(0, 4)
+    localStorage.setItem('sidebar-recents', JSON.stringify(next))
+  } catch {/* ignore */}
 }
 
 interface SidebarProps {
@@ -148,28 +180,54 @@ interface SidebarProps {
   onToggle:  () => void
 }
 
+/* ── Badge chip ── */
+function BadgeChip({ kind, count, active }: { kind: string; count?: number; active: boolean }) {
+  const label = kind === 'Stock' || kind === 'Vehicles' ? String(count ?? 0) : kind
+  const tone =
+    kind === 'IA'       ? 'text-violet-600 dark:text-violet-300 bg-violet-500/10 border-violet-500/20' :
+    kind === 'MRR'      ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/20' :
+    kind === 'Auto'     ? 'text-amber-600 dark:text-amber-300 bg-amber-500/10 border-amber-500/20' :
+    kind === 'Soon'     ? 'text-pink-600 dark:text-pink-300 bg-pink-500/10 border-pink-500/20' :
+    kind === 'Stock'    ? 'text-red-600 dark:text-red-300 bg-red-500/10 border-red-500/20' :
+    kind === 'Vehicles' ? 'text-orange-600 dark:text-orange-300 bg-orange-500/10 border-orange-500/20' :
+                          'text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 border-cyan-500/20'
+  return (
+    <span className={cn(
+      'ml-auto text-[9.5px] font-bold leading-none px-1.5 py-[3px] rounded-md border tracking-wide',
+      active ? 'bg-white/15 text-white border-white/25' : tone,
+    )}>
+      {kind === 'IA' ? 'IA ✦' : label}
+    </span>
+  )
+}
+
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const location       = useLocation()
+  const navigate       = useNavigate()
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const base           = tenantSlug ? `/${tenantSlug}` : ''
   const [expandedGroups, setExpandedGroups] = useState<string[]>(getInitialExpanded)
+  const [favorites, setFavorites]           = useState<string[]>(getFavorites)
+  const [recents,   setRecents]             = useState<string[]>(getRecents)
   const { data: stockAlerts = [] } = useStockAlerts()
   const stockAlertCount = stockAlerts.length
   const { data: vehicleAlerts } = useVehicleAlerts()
   const vehicleAlertCount = (vehicleAlerts?.documents.length ?? 0) + (vehicleAlerts?.maintenance.length ?? 0)
 
-  /* Per-user module filter — admins see everything; others get the
-     allowed_modules list when set, role default otherwise */
+  /* Track recents on route change */
+  useEffect(() => {
+    const raw = location.pathname.replace(base, '') || '/'
+    if (raw === '/' || raw === '/parametres') return
+    pushRecent(raw)
+    setRecents(getRecents())
+  }, [location.pathname, base])
+
   const { role: userRole, allowedModules } = useAuth()
   const filterItem = (item: NavItem): boolean => {
-    /* Items marqués adminOnly cachés à tous sauf admin */
     if (item.adminOnly && userRole !== 'admin') return false
     if (userRole === 'admin') return true
-    /* No module key on item → show by default (Settings link, etc.) */
     if (!item.module) return true
-    /* Explicit override: only the listed modules are visible */
     if (Array.isArray(allowedModules)) return allowedModules.includes(item.module)
-    /* No override yet — let everything through (role-default behaviour). */
     return true
   }
   const VISIBLE_GROUPS = NAV_GROUPS
@@ -178,27 +236,102 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   const toggleGroup = (title: string) => {
     setExpandedGroups(prev => {
-      const next = prev.includes(title)
-        ? prev.filter(g => g !== title)
-        : [...prev, title]
-      try { localStorage.setItem('sidebar-expanded-groups', JSON.stringify(next)) } catch {}
+      const next = prev.includes(title) ? prev.filter(g => g !== title) : [...prev, title]
+      try { localStorage.setItem('sidebar-expanded-groups', JSON.stringify(next)) } catch {/* ignore */}
       return next
     })
+  }
+  const toggleFavorite = (href: string) => {
+    const next = favorites.includes(href) ? favorites.filter(h => h !== href) : [...favorites, href].slice(0, 6)
+    setFavorites(next); saveFavorites(next)
+  }
+  const onFavoriteDragEnd = (result: DropResult) => {
+    if (!result.destination) return
+    const from = result.source.index
+    const to   = result.destination.index
+    if (from === to) return
+    const next = [...favorites]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    setFavorites(next); saveFavorites(next)
+  }
+
+  const favoriteItems = useMemo(
+    () => favorites.map(h => ALL_ITEMS.find(i => i.href === h)).filter(Boolean) as NavItem[],
+    [favorites],
+  )
+  const recentItems = useMemo(
+    () => recents.map(h => ALL_ITEMS.find(i => i.href === h)).filter(Boolean).slice(0, 3) as NavItem[],
+    [recents],
+  )
+
+  const renderBadge = (item: NavItem, isActive: boolean) => {
+    if (!item.badge) return null
+    if (item.badge === 'Stock')    return stockAlertCount > 0    ? <BadgeChip kind="Stock"    count={stockAlertCount}    active={isActive} /> : null
+    if (item.badge === 'Vehicles') return vehicleAlertCount > 0  ? <BadgeChip kind="Vehicles" count={vehicleAlertCount}  active={isActive} /> : null
+    return <BadgeChip kind={item.badge} active={isActive} />
+  }
+
+  const renderItem = (item: NavItem, opts?: { showStar?: boolean }) => {
+    const fullHref = item.href === '/' ? base || '/' : `${base}${item.href}`
+    const isActive = item.href === '/'
+      ? location.pathname === base || location.pathname === base + '/'
+      : location.pathname.startsWith(`${base}${item.href}`)
+    const isFav = favorites.includes(item.href)
+    return (
+      <div key={item.href} className="group/nav relative">
+        <NavLink
+          to={fullHref}
+          title={collapsed ? item.label : undefined}
+          className={cn(
+            'sidebar-item',
+            isActive && 'active',
+            collapsed && 'justify-center px-0',
+          )}
+        >
+          <item.icon className={cn('sidebar-icon-el flex-shrink-0', collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
+          {!collapsed && (
+            <>
+              <span className="flex-1 truncate">{item.label}</span>
+              {renderBadge(item, isActive)}
+            </>
+          )}
+        </NavLink>
+        {/* Favorite star — visible on hover, filled when starred */}
+        {!collapsed && opts?.showStar !== false && (
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.href) }}
+            className={cn(
+              'absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-opacity',
+              isFav ? 'opacity-100' : 'opacity-0 group-hover/nav:opacity-100',
+              'hover:bg-black/5 dark:hover:bg-white/10',
+            )}
+            aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          >
+            <Star className={cn('w-3 h-3', isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-400')} />
+          </button>
+        )}
+      </div>
+    )
   }
 
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 h-[100dvh] z-40 flex flex-col transition-all duration-300',
-        'border-r border-slate-200/80 dark:border-slate-800/60',
-        'bg-white dark:bg-[#060d1c]',
+        'fixed left-0 top-0 h-[100dvh] z-40 flex flex-col transition-[width] duration-300',
+        'border-r',
+        'backdrop-blur-2xl backdrop-saturate-150',
         'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]',
-        collapsed ? 'w-16' : 'w-64',
+        collapsed ? 'w-[68px]' : 'w-[260px]',
       )}
+      style={{
+        background: 'var(--sidebar-bg)',
+        borderColor: 'var(--sidebar-border)',
+      }}
     >
       {/* ── Logo ── */}
       <div className={cn(
-        'flex items-center h-16 px-4 flex-shrink-0 border-b border-slate-100 dark:border-slate-800/60',
+        'flex items-center h-16 px-3 flex-shrink-0',
         collapsed ? 'justify-center' : 'justify-between',
       )}>
         {!collapsed && (
@@ -208,15 +341,16 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             className="flex items-center gap-2.5 min-w-0"
           >
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #2563EB 0%, #4F46E5 100%)', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 relative overflow-hidden"
+              style={{ background: 'var(--gradient-primary)', boxShadow: 'var(--shadow-blue)' }}
             >
-              <span className="text-white font-black text-[15px] tracking-tight">N</span>
+              <span className="text-white font-black text-[15px] tracking-tight relative z-10">N</span>
+              <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white/25 blur-md" />
             </div>
             <div className="min-w-0">
-              <p className="font-extrabold text-[15px] tracking-tight text-slate-900 dark:text-white leading-none">NEXT GITAL</p>
-              <p className="text-[10px] font-semibold leading-none mt-1" style={{ background: 'linear-gradient(90deg, #2563EB, #7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                CRM & Gestion
+              <p className="font-bold text-[14px] tracking-tight text-foreground leading-none">NEXT GITAL</p>
+              <p className="text-[10px] font-semibold leading-none mt-1 bg-gradient-primary bg-clip-text text-transparent">
+                Enterprise ERP
               </p>
             </div>
           </motion.div>
@@ -224,8 +358,8 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
         {collapsed && (
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg, #2563EB 0%, #4F46E5 100%)', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center relative overflow-hidden"
+            style={{ background: 'var(--gradient-primary)', boxShadow: 'var(--shadow-blue)' }}
           >
             <span className="text-white font-black text-[15px]">N</span>
           </div>
@@ -234,27 +368,174 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {!collapsed && (
           <button
             onClick={onToggle}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white transition-colors flex-shrink-0"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors flex-shrink-0"
             title="Réduire"
           >
-            <X className="w-4 h-4" />
+            <ChevronsLeft className="w-4 h-4" />
           </button>
         )}
       </div>
 
-      {/* ── Navigation ── */}
-      <div className="flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5">
-        {VISIBLE_GROUPS.map(group => (
-          <div key={group.title} className="mb-2">
+      {/* ── Search launcher ── */}
+      {!collapsed && (
+        <div className="px-3 pb-2">
+          <button
+            onClick={openGlobalSearch}
+            className="w-full flex items-center gap-2 h-8 px-2.5 rounded-lg
+                       text-[12.5px] text-slate-500 dark:text-slate-400
+                       bg-black/[0.03] dark:bg-white/[0.04]
+                       hover:bg-black/[0.05] dark:hover:bg-white/[0.07]
+                       border border-transparent hover:border-electric-500/20
+                       transition-all"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="flex-1 text-left">Rechercher partout</span>
+            <span className="flex items-center gap-0.5">
+              <span className="kbd">⌘</span><span className="kbd">K</span>
+            </span>
+          </button>
+        </div>
+      )}
 
-            {/* Section label */}
+      {/* ── Quick create ── */}
+      {!collapsed && (
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => navigate(`${base}/devis?new=1`)}
+              className="btn-primary flex-1 h-8 px-2.5 text-[12px] justify-center"
+              title="Nouveau devis"
+            >
+              <Plus className="w-3.5 h-3.5" /> Créer
+            </button>
+            <button
+              onClick={() => navigate(`${base}/factures?new=1`)}
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-foreground bg-black/[0.03] dark:bg-white/[0.04] hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
+              title="Nouvelle facture"
+            >
+              <Receipt className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => navigate(`${base}/clients?new=1`)}
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-foreground bg-black/[0.03] dark:bg-white/[0.04] hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
+              title="Nouveau client"
+            >
+              <Users className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Navigation ── */}
+      <div className="flex-1 overflow-y-auto py-2 px-2.5 space-y-4">
+
+        {/* Favoris — drag & drop to reorder */}
+        {!collapsed && favoriteItems.length > 0 && (
+          <div>
+            <div className="px-2 pb-1 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-600 flex items-center gap-1">
+                <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" /> Favoris
+              </p>
+              <span className="text-[9px] font-medium text-slate-400 dark:text-slate-600 flex items-center gap-1 opacity-70">
+                <GripVertical className="w-2.5 h-2.5" /> Glisser pour trier
+              </span>
+            </div>
+            <DragDropContext onDragEnd={onFavoriteDragEnd}>
+              <Droppable droppableId="favorites">
+                {(dropProvided, dropSnapshot) => (
+                  <div
+                    ref={dropProvided.innerRef}
+                    {...dropProvided.droppableProps}
+                    className={cn(
+                      'space-y-[2px] rounded-lg transition-colors',
+                      dropSnapshot.isDraggingOver && 'bg-electric-500/[0.04]',
+                    )}
+                  >
+                    {favoriteItems.map((item, index) => {
+                      const fullHref = item.href === '/' ? base || '/' : `${base}${item.href}`
+                      const isActive = item.href === '/'
+                        ? location.pathname === base || location.pathname === base + '/'
+                        : location.pathname.startsWith(`${base}${item.href}`)
+                      return (
+                        <Draggable key={item.href} draggableId={item.href} index={index}>
+                          {(dragProvided, dragSnapshot) => (
+                            <div
+                              ref={dragProvided.innerRef}
+                              {...dragProvided.draggableProps}
+                              className={cn(
+                                'group/nav relative rounded-lg',
+                                dragSnapshot.isDragging && 'shadow-premium bg-white dark:bg-navy-800 ring-1 ring-electric-500/25',
+                              )}
+                              style={dragProvided.draggableProps.style}
+                            >
+                              {/* Drag handle — appears on hover */}
+                              <button
+                                {...dragProvided.dragHandleProps}
+                                aria-label="Réordonner"
+                                className={cn(
+                                  'absolute left-[-2px] top-1/2 -translate-y-1/2 z-10',
+                                  'w-4 h-6 flex items-center justify-center rounded',
+                                  'text-slate-300 dark:text-slate-600 cursor-grab active:cursor-grabbing',
+                                  'transition-opacity',
+                                  dragSnapshot.isDragging
+                                    ? 'opacity-100 text-electric-500'
+                                    : 'opacity-0 group-hover/nav:opacity-100',
+                                )}
+                              >
+                                <GripVertical className="w-3 h-3" />
+                              </button>
+                              <NavLink
+                                to={fullHref}
+                                title={item.label}
+                                className={cn('sidebar-item', isActive && 'active')}
+                              >
+                                <item.icon className="sidebar-icon-el flex-shrink-0 w-[15px] h-[15px]" />
+                                <span className="flex-1 truncate">{item.label}</span>
+                                {renderBadge(item, isActive)}
+                              </NavLink>
+                              {/* Star toggle */}
+                              <button
+                                onClick={e => { e.preventDefault(); e.stopPropagation(); toggleFavorite(item.href) }}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-black/5 dark:hover:bg-white/10"
+                                aria-label="Retirer des favoris"
+                              >
+                                <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                              </button>
+                            </div>
+                          )}
+                        </Draggable>
+                      )
+                    })}
+                    {dropProvided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
+          </div>
+        )}
+
+        {/* Récents */}
+        {!collapsed && recentItems.length > 0 && (
+          <div>
+            <p className="px-2 pb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-600">
+              Récents
+            </p>
+            <div className="space-y-[2px]">
+              {recentItems.map(item => renderItem(item, { showStar: true }))}
+            </div>
+          </div>
+        )}
+
+        {/* Groupes */}
+        {VISIBLE_GROUPS.map(group => (
+          <div key={group.title}>
             {!collapsed && (
               <button
                 onClick={() => toggleGroup(group.title)}
-                className="w-full flex items-center justify-between px-2 py-1 mb-1
-                           text-[10px] font-bold uppercase tracking-[0.12em]
+                className="w-full flex items-center justify-between px-2 py-1 mb-0.5
+                           text-[10px] font-bold uppercase tracking-[0.14em]
                            text-slate-400 dark:text-slate-600
-                           hover:text-blue-500 dark:hover:text-slate-400
+                           hover:text-electric-600 dark:hover:text-cyan-400
                            transition-colors duration-150 rounded select-none"
               >
                 {group.title}
@@ -274,99 +555,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.18, ease: 'easeInOut' }}
-                  className="overflow-hidden space-y-0.5"
+                  className="overflow-hidden space-y-[2px]"
                 >
-                  {group.items.map(item => {
-                    const fullHref = item.href === '/' ? base || '/' : `${base}${item.href}`
-                    const isActive = item.href === '/'
-                      ? location.pathname === base || location.pathname === base + '/'
-                      : location.pathname.startsWith(`${base}${item.href}`)
-
-                    return (
-                      <NavLink
-                        key={item.href}
-                        to={fullHref}
-                        title={collapsed ? item.label : undefined}
-                        className={cn(
-                          'sidebar-item',
-                          isActive && 'active',
-                          collapsed && 'justify-center px-0',
-                        )}
-                      >
-                        <item.icon
-                          className={cn(
-                            'sidebar-icon-el flex-shrink-0 transition-colors',
-                            collapsed ? 'w-5 h-5' : 'w-4 h-4',
-                          )}
-                        />
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1 truncate">{item.label}</span>
-                            {item.badge === 'IA' && (
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none',
-                                isActive
-                                  ? 'bg-white/20 text-white border border-white/30'
-                                  : 'bg-violet-50 text-violet-600 border border-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-800/50'
-                              )}>
-                                IA ✦
-                              </span>
-                            )}
-                            {item.badge === 'MRR' && (
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none',
-                                isActive
-                                  ? 'bg-white/20 text-white border border-white/30'
-                                  : 'bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/50'
-                              )}>
-                                MRR
-                              </span>
-                            )}
-                            {item.badge === 'Auto' && (
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none',
-                                isActive
-                                  ? 'bg-white/20 text-white border border-white/30'
-                                  : 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800/50'
-                              )}>
-                                Auto
-                              </span>
-                            )}
-                            {item.badge === 'Soon' && (
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none',
-                                isActive
-                                  ? 'bg-white/20 text-white border border-white/30'
-                                  : 'bg-pink-50 text-pink-600 border border-pink-200 dark:bg-pink-950/50 dark:text-pink-300 dark:border-pink-800/50'
-                              )}>
-                                Soon
-                              </span>
-                            )}
-                            {item.badge === 'Stock' && stockAlertCount > 0 && (
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none',
-                                isActive
-                                  ? 'bg-white/20 text-white border border-white/30'
-                                  : 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800/50'
-                              )}>
-                                {stockAlertCount}
-                              </span>
-                            )}
-                            {item.badge === 'Vehicles' && vehicleAlertCount > 0 && (
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none',
-                                isActive
-                                  ? 'bg-white/20 text-white border border-white/30'
-                                  : 'bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-950/50 dark:text-orange-300 dark:border-orange-800/50'
-                              )}>
-                                {vehicleAlertCount}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </NavLink>
-                    )
-                  })}
+                  {group.items.map(item => renderItem(item))}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -375,17 +566,35 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </div>
 
       {/* ── Footer ── */}
-      <div className="border-t border-slate-100 dark:border-slate-800/60 p-2.5 flex-shrink-0">
+      <div className="p-2.5 flex-shrink-0 border-t" style={{ borderColor: 'var(--sidebar-border)' }}>
+        {!collapsed && (
+          <div className="flex items-center gap-2 px-2 py-2 rounded-xl bg-black/[0.02] dark:bg-white/[0.03] mb-1.5">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center relative overflow-hidden flex-shrink-0"
+              style={{ background: 'var(--gradient-primary)' }}
+            >
+              <span className="text-white text-[11px] font-bold">NG</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12.5px] font-semibold text-foreground truncate leading-tight">NEXT GITAL</p>
+              <p className="text-[10.5px] text-slate-500 dark:text-slate-400">Admin · En ligne</p>
+            </div>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+          </div>
+        )}
         <NavLink
-          to="/parametres"
-          className={cn('sidebar-item', location.pathname === '/parametres' && 'active', collapsed && 'justify-center px-0')}
+          to={`${base}/parametres`}
+          className={cn('sidebar-item', location.pathname === `${base}/parametres` && 'active', collapsed && 'justify-center px-0')}
           title={collapsed ? 'Paramètres' : undefined}
         >
-          <Settings className={cn(
-            'sidebar-icon-el flex-shrink-0',
-            collapsed ? 'w-5 h-5' : 'w-4 h-4',
-          )} />
+          <Settings className={cn('sidebar-icon-el flex-shrink-0', collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
           {!collapsed && <span>Paramètres</span>}
+          {!collapsed && (
+            <span className="ml-auto flex items-center gap-0.5">
+              <Command className="w-2.5 h-2.5 text-slate-400" />
+              <span className="kbd">,</span>
+            </span>
+          )}
         </NavLink>
       </div>
     </aside>

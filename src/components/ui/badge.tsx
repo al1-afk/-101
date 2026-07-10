@@ -3,57 +3,63 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 /**
- * Badge system — spec exact colors:
- * Light:  semantic pastel backgrounds with colored text + matching border
- * Dark:   semi-transparent tinted equivalents
- *
- * Base shape: 20px pill, 12px/500 text, 1px border, 4px 10px padding
+ * Premium badge — pill, 20px height, subtle tinted backgrounds.
+ * All variants use rgba tints (not saturated pastels) for a Linear feel.
  */
 const badgeVariants = cva(
-  'inline-flex items-center gap-1 rounded-full border font-medium transition-colors whitespace-nowrap',
+  'inline-flex items-center gap-1 rounded-full border font-medium transition-colors whitespace-nowrap tracking-[-0.005em]',
   {
     variants: {
       variant: {
-        // ── Paid / Revenue / Positive ──────────────────────────────────
+        // Positive / paid
         success: [
-          'bg-[#EAF3DE] border-[#97C459] text-[#27500A]',
-          'dark:bg-emerald-950/50 dark:border-emerald-700/40 dark:text-emerald-300',
+          'bg-emerald-500/10 border-emerald-500/25 text-emerald-700',
+          'dark:text-emerald-300 dark:border-emerald-500/30',
         ],
-        // ── Pending / Warning / Waiting ────────────────────────────────
+        // Waiting / warning
         warning: [
-          'bg-[#FAEEDA] border-[#FAC775] text-[#633806]',
-          'dark:bg-amber-950/50 dark:border-amber-700/40 dark:text-amber-300',
+          'bg-amber-500/10 border-amber-500/25 text-amber-700',
+          'dark:text-amber-300 dark:border-amber-500/30',
         ],
-        // ── Unpaid / Danger / Overdue ──────────────────────────────────
+        // Danger / overdue
         destructive: [
-          'bg-[#FCEBEB] border-[#F09595] text-[#A32D2D]',
-          'dark:bg-red-950/50 dark:border-red-700/40 dark:text-red-300',
+          'bg-red-500/10 border-red-500/25 text-red-600',
+          'dark:text-red-300 dark:border-red-500/30',
         ],
-        // ── Info / Pipeline / Neutral metric ──────────────────────────
+        // Info / neutral action — electric blue
         default: [
-          'bg-[#E6F1FB] border-[#85B7EB] text-[#0C447C]',
-          'dark:bg-blue-950/50 dark:border-blue-700/40 dark:text-blue-300',
+          'bg-electric-500/10 border-electric-500/25 text-electric-700',
+          'dark:text-electric-300 dark:border-electric-500/30',
         ],
-        // ── Cancelled / Archived ──────────────────────────────────────
+        // Cyan accent
+        cyan: [
+          'bg-cyan-500/10 border-cyan-500/25 text-cyan-700',
+          'dark:text-cyan-300 dark:border-cyan-500/30',
+        ],
+        // Muted / archived
         secondary: [
-          'bg-[#F1EFE8] border-[#B4B2A9] text-[#5F5E5A]',
-          'dark:bg-slate-800/60 dark:border-slate-600/50 dark:text-slate-400',
+          'bg-slate-500/10 border-slate-500/20 text-slate-600',
+          'dark:text-slate-400 dark:border-white/[0.08]',
         ],
-        // ── AI / Premium ───────────────────────────────────────────────
+        // AI / premium
         purple: [
-          'bg-[#EEEDFE] border-[#A79FF4] text-[#3C3489]',
-          'dark:bg-purple-950/50 dark:border-purple-700/40 dark:text-purple-300',
+          'bg-violet-500/10 border-violet-500/25 text-violet-700',
+          'dark:text-violet-300 dark:border-violet-500/30',
         ],
-        // ── Outline (border only) ─────────────────────────────────────
+        // Outline
         outline: [
-          'bg-transparent border-[#B4B2A9] text-[#5F5E5A]',
-          'dark:border-slate-600 dark:text-slate-400',
+          'bg-transparent border-slate-400/30 text-slate-600',
+          'dark:text-slate-400 dark:border-slate-500/30',
+        ],
+        // Gradient primary
+        gradient: [
+          'bg-gradient-primary text-white border-transparent shadow-glow-blue',
         ],
       },
       size: {
-        default: 'px-2.5 py-0.5 text-xs',
+        default: 'px-2.5 py-0.5 text-[11px]',
         sm:      'px-2 py-px text-[10px]',
-        lg:      'px-3 py-1 text-sm',
+        lg:      'px-3 py-1 text-[12.5px]',
       },
     },
     defaultVariants: { variant: 'default', size: 'default' },
@@ -66,10 +72,7 @@ export interface BadgeProps
 
 function Badge({ className, variant, size, ...props }: BadgeProps) {
   return (
-    <div
-      className={cn(badgeVariants({ variant, size }), className)}
-      {...props}
-    />
+    <div className={cn(badgeVariants({ variant, size }), className)} {...props} />
   )
 }
 
