@@ -35,6 +35,7 @@ import {
   useProjectTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask, useDeleteTeamMemberTask,
   type TaskStatus, type TaskPriority, type TeamMemberTask,
 } from '@/hooks/useTeamMemberTasks'
+import { useStagiaires, type Stagiaire } from '@/hooks/useStagiaires'
 import BlockEditor from '@/components/BlockEditor'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { serializeTaskDesc } from '@/lib/taskNotes'
@@ -511,15 +512,29 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
   const addAssignee    = useAddProjetAssignee()
   const removeAssignee = useRemoveProjetAssignee()
   const updateAssignee = useUpdateProjetAssignee()
+  const { data: stagiaires = [] } = useStagiaires()
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search,     setSearch]     = useState('')
 
-  const available = members.filter(m => !assignees.some(a => a.team_member_id === m.id))
-  const filtered  = search ? available.filter(m => `${m.prenom} ${m.nom} ${m.email ?? ''}`.toLowerCase().includes(search.toLowerCase())) : available
+  const activeStagiaires = stagiaires.filter(s => s.statut === 'accepte' || s.statut === 'en_cours')
+
+  const available            = members.filter(m => !assignees.some(a => a.team_member_id === m.id))
+  const availableStagiaires  = activeStagiaires.filter(s => !assignees.some(a => a.stagiaire_id === s.id))
+  const q = search.trim().toLowerCase()
+  const filteredMembers    = q ? available.filter(m => `${m.prenom} ${m.nom} ${m.email ?? ''}`.toLowerCase().includes(q)) : available
+  const filteredStagiaires = q ? availableStagiaires.filter(s => `${s.nom_complet} ${s.email ?? ''}`.toLowerCase().includes(q)) : availableStagiaires
+  const pickerEmpty        = available.length === 0 && availableStagiaires.length === 0
 
   /* Per-member progress : count tasks done vs total for each assignee */
   const memberStats = (memberId: string) => {
     const my = tasks.filter(t => t.team_member_id === memberId)
+    const done = my.filter(t => t.status === 'done').length
+    const pct = my.length > 0 ? Math.round((done / my.length) * 100) : 0
+    const elapsed = my.reduce((s, t) => s + (t.elapsed_seconds ?? 0), 0)
+    return { total: my.length, done, pct, elapsed }
+  }
+  const stagiaireStats = (stagiaireId: string) => {
+    const my = tasks.filter(t => t.assigned_stagiaire_id === stagiaireId)
     const done = my.filter(t => t.status === 'done').length
     const pct = my.length > 0 ? Math.round((done / my.length) * 100) : 0
     const elapsed = my.reduce((s, t) => s + (t.elapsed_seconds ?? 0), 0)
@@ -533,7 +548,7 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
           <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Équipe assignée</p>
           <p className="text-[11px] text-muted-foreground mt-0.5">Affecte les membres au projet et désigne un lead. La progression s'affiche dès qu'ils ont des tâches.</p>
         </div>
-        <Button size="sm" onClick={() => setPickerOpen(true)} disabled={available.length === 0}>
+        <Button size="sm" onClick={() => setPickerOpen(true)} disabled={pickerEmpty}>
           <Plus className="w-3.5 h-3.5" /> Assigner
         </Button>
       </div>
@@ -547,20 +562,35 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
       ) : (
         <div className="space-y-2">
           {assignees.map(a => {
-            const m = members.find(x => x.id === a.team_member_id)
-            const st = memberStats(a.team_member_id)
+            const m = a.team_member_id ? members.find(x => x.id === a.team_member_id) : null
+            const s = a.stagiaire_id  ? stagiaires.find(x => x.id === a.stagiaire_id)  : null
+            const st = a.team_member_id
+              ? memberStats(a.team_member_id)
+              : a.stagiaire_id
+                ? stagiaireStats(a.stagiaire_id)
+                : { total: 0, done: 0, pct: 0, elapsed: 0 }
+            const displayName = m ? memberName(m) : s?.nom_complet ?? '?'
+            const displaySub  = m ? (m.poste || m.email || '—') : (s?.formation || s?.email || '—')
+            const initials    = m ? getInitials(`${m.prenom} ${m.nom}`) : s ? getInitials(s.nom_complet) : '?'
             return (
-              <div key={a.id} className="p-3 rounded-xl border border-border bg-muted/20 space-y-2">
+              <div key={a.id} className={cn(
+                'p-3 rounded-xl border space-y-2',
+                s ? 'border-violet-200 dark:border-violet-800/40 bg-violet-50/40 dark:bg-violet-950/10' : 'border-border bg-muted/20',
+              )}>
                 <div className="flex items-center gap-3">
-                  <div className="avatar-initials w-9 h-9 flex-shrink-0">
-                    <span className="font-bold text-xs">{m ? getInitials(`${m.prenom} ${m.nom}`) : '?'}</span>
+                  <div className={cn(
+                    'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0',
+                    s ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300' : 'avatar-initials',
+                  )}>
+                    <span className="font-bold text-xs">{initials}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <p className="font-semibold text-foreground truncate">{memberName(m)}</p>
+                      <p className="font-semibold text-foreground truncate">{displayName}</p>
+                      {s && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">🎓 Stagiaire</span>}
                       {a.role === 'lead' && <Crown className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{m?.poste || m?.email || '—'}</p>
+                    <p className="text-xs text-muted-foreground truncate">{displaySub}</p>
                   </div>
                   <Select value={a.role} onValueChange={v => updateAssignee.mutate({ id: a.id, role: v as ProjetAssigneeRole })}>
                     <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -618,36 +648,66 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
         </div>
       )}
 
-      {/* Member picker dialog */}
+      {/* Member picker dialog — membres + stagiaires */}
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-500" /> Assigner un membre</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-500" /> Assigner au projet</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <Input placeholder="Rechercher…" value={search} onChange={e => setSearch(e.target.value)} />
-            <div className="max-h-72 overflow-y-auto space-y-1">
-              {filtered.length === 0 ? (
+            <div className="max-h-80 overflow-y-auto space-y-2">
+              {filteredMembers.length === 0 && filteredStagiaires.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-4">
-                  {available.length === 0 ? 'Tous les membres sont déjà assignés' : 'Aucun membre trouvé'}
+                  {pickerEmpty ? 'Tous sont déjà assignés' : 'Aucun résultat'}
                 </p>
-              ) : filtered.map(m => (
-                <button key={m.id}
-                  onClick={() => {
-                    addAssignee.mutate({ projet_id: projet.id, team_member_id: m.id, role: assignees.length === 0 ? 'lead' : 'member' })
-                    setPickerOpen(false); setSearch('')
-                  }}
-                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors text-left">
-                  <div className="avatar-initials w-8 h-8 flex-shrink-0">
-                    <span className="font-bold text-[10px]">{getInitials(`${m.prenom} ${m.nom}`)}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{memberName(m)}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">{m.poste || m.email || '—'}</p>
-                  </div>
-                  {assignees.length === 0 && <span title="Sera Lead"><Crown className="w-3.5 h-3.5 text-amber-500" /></span>}
-                </button>
-              ))}
+              ) : (
+                <>
+                  {filteredMembers.length > 0 && (
+                    <div>
+                      <p className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Membres de l'équipe</p>
+                      {filteredMembers.map(m => (
+                        <button key={m.id}
+                          onClick={() => {
+                            addAssignee.mutate({ projet_id: projet.id, team_member_id: m.id, role: assignees.length === 0 ? 'lead' : 'member' })
+                            setPickerOpen(false); setSearch('')
+                          }}
+                          className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors text-left">
+                          <div className="avatar-initials w-8 h-8 flex-shrink-0">
+                            <span className="font-bold text-[10px]">{getInitials(`${m.prenom} ${m.nom}`)}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{memberName(m)}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{m.poste || m.email || '—'}</p>
+                          </div>
+                          {assignees.length === 0 && <span title="Sera Lead"><Crown className="w-3.5 h-3.5 text-amber-500" /></span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {filteredStagiaires.length > 0 && (
+                    <div>
+                      <p className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">🎓 Stagiaires actifs</p>
+                      {filteredStagiaires.map(s => (
+                        <button key={s.id}
+                          onClick={() => {
+                            addAssignee.mutate({ projet_id: projet.id, stagiaire_id: s.id, role: 'member' })
+                            setPickerOpen(false); setSearch('')
+                          }}
+                          className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-violet-50/60 dark:hover:bg-violet-950/20 transition-colors text-left">
+                          <div className="w-8 h-8 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 flex items-center justify-center flex-shrink-0">
+                            <span className="font-bold text-[10px]">{getInitials(s.nom_complet)}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{s.nom_complet}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{s.formation || s.email || '—'}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </DialogContent>
@@ -668,6 +728,14 @@ function TasksTab({
   const qc     = useQueryClient()
   const auth   = useAuth()
   const { data: customs = [] } = useCustomTemplates()
+  const { data: stagiaires = [] } = useStagiaires()
+  /* Stagiaires actifs assignables : si le projet a des assignees stagiaires,
+     on restreint à ceux-là ; sinon on propose tous les actifs. */
+  const activeStagiaires = stagiaires.filter(s => s.statut === 'accepte' || s.statut === 'en_cours')
+  const projectStagiaireIds = new Set(assignees.map(a => a.stagiaire_id).filter(Boolean) as string[])
+  const pickableStagiaires = projectStagiaireIds.size > 0
+    ? activeStagiaires.filter(s => projectStagiaireIds.has(s.id))
+    : activeStagiaires
   const [showTaskForm,    setShowTaskForm]    = useState(false)
   const [showRequestForm, setShowRequestForm] = useState(false)
   const [showTemplateDialog, setShowTemplateDialog] = useState(false)
@@ -771,13 +839,17 @@ function TasksTab({
     return Array.from(m.entries())
   }, [regular, auth.userId])
 
-  /** Convert a dropdown value ('none' | 'admin' | <member_uuid>) into the
-      pair of FK fields. Sentinel 'admin' assigns the task to the current
-      admin user (assigned_user_id) and clears team_member_id. */
-  const assigneeFields = (v: string): { team_member_id: string | null; assigned_user_id: string | null } => {
-    if (v === 'admin') return { team_member_id: null, assigned_user_id: auth.userId ?? null }
-    if (v === 'none')  return { team_member_id: null, assigned_user_id: null }
-    return { team_member_id: v, assigned_user_id: null }
+  /** Convert a dropdown value ('none' | 'admin' | 'stag:<uuid>' | <member_uuid>)
+      into the trio of FK fields. Un seul des trois ids est renseigné à la fois. */
+  const assigneeFields = (v: string): {
+    team_member_id:        string | null
+    assigned_user_id:      string | null
+    assigned_stagiaire_id: string | null
+  } => {
+    if (v === 'admin')          return { team_member_id: null, assigned_user_id: auth.userId ?? null, assigned_stagiaire_id: null }
+    if (v === 'none')           return { team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: null }
+    if (v.startsWith('stag:'))  return { team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: v.slice(5) }
+    return { team_member_id: v, assigned_user_id: null, assigned_stagiaire_id: null }
   }
 
   const submitTask = (e: React.FormEvent) => {
@@ -871,6 +943,9 @@ function TasksTab({
                   <SelectItem value="none">Non assigné</SelectItem>
                   <SelectItem value="admin">🛡️ Moi (Admin)</SelectItem>
                   {pickable.map(m => <SelectItem key={m.id} value={m.id}>{memberName(m)}</SelectItem>)}
+                  {pickableStagiaires.length > 0 && pickableStagiaires.map(s => (
+                    <SelectItem key={`stag:${s.id}`} value={`stag:${s.id}`}>🎓 {s.nom_complet}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={taskForm.priority} onValueChange={v => setTaskForm(p => ({ ...p, priority: v as TaskPriority }))}>
@@ -948,7 +1023,7 @@ function TasksTab({
                   </div>
                   <div className="space-y-1">
                     {items.map(t => (
-                      <TaskRow key={t.id} task={t} members={members} pickable={pickable}
+                      <TaskRow key={t.id} task={t} members={members} pickable={pickable} stagiaires={stagiaires} pickableStagiaires={pickableStagiaires}
                         onChange={patch => update.mutate({ id: t.id, ...patch })}
                         onRemove={() => remove.mutate(t.id)}
                         onOpen={() => setOpenTaskId(t.id)}
@@ -988,6 +1063,9 @@ function TasksTab({
                   <SelectItem value="none">Non assigné</SelectItem>
                   <SelectItem value="admin">🛡️ Moi (Admin)</SelectItem>
                   {pickable.map(m => <SelectItem key={m.id} value={m.id}>{memberName(m)}</SelectItem>)}
+                  {pickableStagiaires.map(s => (
+                    <SelectItem key={`stag:${s.id}`} value={`stag:${s.id}`}>🎓 {s.nom_complet}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={reqForm.priority} onValueChange={v => setReqForm(p => ({ ...p, priority: v as TaskPriority }))}>
@@ -1016,7 +1094,7 @@ function TasksTab({
         ) : (
           <div className="space-y-1.5">
             {requests.map(t => (
-              <TaskRow key={t.id} task={t} members={members} pickable={pickable} isRequest
+              <TaskRow key={t.id} task={t} members={members} pickable={pickable} stagiaires={stagiaires} pickableStagiaires={pickableStagiaires} isRequest
                 onChange={patch => update.mutate({ id: t.id, ...patch })}
                 onRemove={() => remove.mutate(t.id)}
                 onOpen={() => setOpenTaskId(t.id)}
@@ -1139,18 +1217,21 @@ function TemplatePickerDialog({
 }
 
 function TaskRow({
-  task, members, pickable, isRequest, onChange, onRemove, onOpen,
+  task, members, pickable, stagiaires, pickableStagiaires, isRequest, onChange, onRemove, onOpen,
 }: {
-  task:      TeamMemberTask
-  members:   TeamMember[]
-  pickable:  TeamMember[]
-  isRequest?:boolean
-  onChange:  (patch: Partial<TeamMemberTask>) => void
-  onRemove:  () => void
-  onOpen?:   () => void
+  task:              TeamMemberTask
+  members:           TeamMember[]
+  pickable:          TeamMember[]
+  stagiaires:        Stagiaire[]
+  pickableStagiaires:Stagiaire[]
+  isRequest?:        boolean
+  onChange:          (patch: Partial<TeamMemberTask>) => void
+  onRemove:          () => void
+  onOpen?:           () => void
 }) {
   const auth = useAuth()
   const m = task.team_member_id ? members.find(x => x.id === task.team_member_id) : null
+  const stagiaireAssigned = task.assigned_stagiaire_id ? stagiaires.find(x => x.id === task.assigned_stagiaire_id) : null
   const isAdminAssigned = !!task.assigned_user_id
   const cfg = TASK_STATUS_CFG[task.status]
 
@@ -1242,31 +1323,47 @@ function TaskRow({
               <div className="w-4 h-4 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center flex-shrink-0">
                 <span className="text-[8px]">🛡️</span>
               </div>
+            ) : stagiaireAssigned ? (
+              <div className="w-4 h-4 rounded-full bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center flex-shrink-0">
+                <span className="text-[8px]">🎓</span>
+              </div>
             ) : (
               <div className="w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0">
                 <span className="text-[8px]">👤</span>
               </div>
             )}
             <Select
-              value={isAdminAssigned ? 'admin' : (task.team_member_id ?? 'none')}
+              value={
+                isAdminAssigned          ? 'admin'
+                : stagiaireAssigned      ? `stag:${stagiaireAssigned.id}`
+                : (task.team_member_id ?? 'none')
+              }
               onValueChange={v => {
                 if (v === 'none') return
-                if (v === 'admin') onChange({ team_member_id: null, assigned_user_id: auth.userId ?? null } as any)
-                else onChange({ team_member_id: v, assigned_user_id: null } as any)
+                if (v === 'admin')             onChange({ team_member_id: null, assigned_user_id: auth.userId ?? null, assigned_stagiaire_id: null } as any)
+                else if (v.startsWith('stag:'))onChange({ team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: v.slice(5) } as any)
+                else                            onChange({ team_member_id: v,   assigned_user_id: null, assigned_stagiaire_id: null } as any)
               }}
             >
               <SelectTrigger className={cn(
                 'h-6 px-1.5 text-[11px] border-transparent shadow-none w-auto min-w-0 gap-1 hover:bg-muted/50 focus:bg-muted/50',
-                !task.team_member_id && !isAdminAssigned && 'text-amber-600 dark:text-amber-400 font-medium',
-                isAdminAssigned && 'text-blue-600 dark:text-blue-400 font-medium',
+                !task.team_member_id && !isAdminAssigned && !stagiaireAssigned && 'text-amber-600 dark:text-amber-400 font-medium',
+                isAdminAssigned      && 'text-blue-600 dark:text-blue-400 font-medium',
+                stagiaireAssigned    && 'text-violet-600 dark:text-violet-400 font-medium',
               )}>
                 <span className="truncate max-w-[120px]">
-                  {isAdminAssigned ? 'Moi (Admin)' : task.team_member_id ? memberName(m ?? undefined) : 'Non assigné'}
+                  {isAdminAssigned          ? 'Moi (Admin)'
+                    : stagiaireAssigned     ? `🎓 ${stagiaireAssigned.nom_complet}`
+                    : task.team_member_id   ? memberName(m ?? undefined)
+                    : 'Non assigné'}
                 </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="admin">🛡️ Moi (Admin)</SelectItem>
                 {pickable.map(x => <SelectItem key={x.id} value={x.id}>{memberName(x)}</SelectItem>)}
+                {pickableStagiaires.map(s => (
+                  <SelectItem key={`stag:${s.id}`} value={`stag:${s.id}`}>🎓 {s.nom_complet}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

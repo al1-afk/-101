@@ -13,6 +13,9 @@ export interface TeamMemberTask {
   /** Tâche assignée à un admin (users.id) plutôt qu'à un membre de l'équipe.
       Mutuellement exclusif avec team_member_id en pratique. */
   assigned_user_id:  string | null
+  /** Tâche assignée à un stagiaire (stagiaires.id).
+      Mutuellement exclusif avec team_member_id et assigned_user_id. */
+  assigned_stagiaire_id: string | null
   project_id:        string | null
   title:             string
   description:       string | null

@@ -9,7 +9,10 @@ export interface ProjetAssignee {
   id:              string
   tenant_id:       string
   projet_id:       string
-  team_member_id:  string
+  /** Exclusif avec stagiaire_id — l'un des deux est renseigné. */
+  team_member_id:  string | null
+  /** Exclusif avec team_member_id — assignation d'un stagiaire au projet. */
+  stagiaire_id:    string | null
   role:            ProjetAssigneeRole
   notes:           string | null
   /** Si false : le membre n'a PAS accès aux Infos & Accès du projet
@@ -42,7 +45,10 @@ export function useAssigneesOf(projetId: string | undefined) {
 export function useAddProjetAssignee() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: { projet_id: string; team_member_id: string; role?: ProjetAssigneeRole; notes?: string }) =>
+    mutationFn: (data:
+      | { projet_id: string; team_member_id: string; stagiaire_id?: never; role?: ProjetAssigneeRole; notes?: string }
+      | { projet_id: string; stagiaire_id:   string; team_member_id?: never; role?: ProjetAssigneeRole; notes?: string }
+    ) =>
       projetAssigneesApi.create({ role: 'member', ...data }) as Promise<ProjetAssignee>,
     onSuccess: async (created: ProjetAssignee) => {
       qc.setQueryData<ProjetAssignee[]>(tk(), (prev) => prev ? [created, ...prev] : [created])

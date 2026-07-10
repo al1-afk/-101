@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import {
   Plus, Search, Edit2, Trash2, Loader2, GraduationCap, FileSignature,
   FileCheck2, FileText, Mail, Phone, MapPin, IdCard, School, Calendar,
-  ChevronDown, User, UserRound, Eye, Download, Settings2,
+  ChevronDown, User, UserRound, Eye, Download, Settings2, Play, CheckCircle2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -155,6 +155,7 @@ export function StagiairesTab() {
               index={i}
               onEdit={() => { setEditing(s); setShowForm(true) }}
               onDelete={() => handleDelete(s)}
+              onChangeStatut={(statut) => update.mutate({ id: s.id, statut } as any)}
             />
           ))}
         </div>
@@ -181,12 +182,13 @@ export function StagiairesTab() {
 /* ─────────────────────────────────────────────────────────────────── */
 
 function StagiaireCard({
-  stagiaire: s, index, onEdit, onDelete,
+  stagiaire: s, index, onEdit, onDelete, onChangeStatut,
 }: {
-  stagiaire: Stagiaire
-  index:     number
-  onEdit:    () => void
-  onDelete:  () => void
+  stagiaire:       Stagiaire
+  index:           number
+  onEdit:          () => void
+  onDelete:        () => void
+  onChangeStatut:  (statut: StagiaireStatut) => void
 }) {
   const cfg = STATUT_CONFIG[s.statut]
   const isFini = s.statut === 'termine' || new Date(s.date_fin) < new Date()
@@ -272,6 +274,33 @@ function StagiaireCard({
                 <span className="text-[10px] text-muted-foreground">Corriger les infos avant de régénérer</span>
               </div>
             </DropdownMenuItem>
+            {s.statut !== 'en_cours' && s.statut !== 'termine' && (
+              <DropdownMenuItem onClick={() => onChangeStatut('en_cours')}>
+                <Play className="w-4 h-4 text-emerald-500" />
+                <div className="flex flex-col">
+                  <span className="text-sm">Activer le stage</span>
+                  <span className="text-[10px] text-muted-foreground">Passer le statut à « En cours »</span>
+                </div>
+              </DropdownMenuItem>
+            )}
+            {s.statut !== 'termine' && (
+              <DropdownMenuItem onClick={() => onChangeStatut('termine')}>
+                <CheckCircle2 className="w-4 h-4 text-slate-500" />
+                <div className="flex flex-col">
+                  <span className="text-sm">Terminer le stage</span>
+                  <span className="text-[10px] text-muted-foreground">Marquer comme terminé</span>
+                </div>
+              </DropdownMenuItem>
+            )}
+            {s.statut === 'termine' && (
+              <DropdownMenuItem onClick={() => onChangeStatut('en_cours')}>
+                <Play className="w-4 h-4 text-emerald-500" />
+                <div className="flex flex-col">
+                  <span className="text-sm">Réactiver le stage</span>
+                  <span className="text-[10px] text-muted-foreground">Repasser à « En cours »</span>
+                </div>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DocSubMenu
               icon={<FileText className="w-4 h-4 text-blue-500" />}
