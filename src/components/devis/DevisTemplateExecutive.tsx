@@ -53,9 +53,15 @@ const DevisTemplateExecutive = forwardRef<HTMLDivElement, Props>(({ devis: d, cl
         }}
       >
         <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[26px] font-extrabold leading-none">{CO.name}</p>
-            <p className="text-[10.5px] opacity-80 mt-1">{CO.sub}</p>
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo-nextgital.png"
+              alt={CO.name}
+              className="h-[60px] w-auto object-contain"
+              style={{ filter: 'brightness(0) invert(1)' }}
+              crossOrigin="anonymous"
+            />
+            <p className="text-[10.5px] opacity-80">{CO.sub}</p>
           </div>
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-widest opacity-80">Proposition</p>

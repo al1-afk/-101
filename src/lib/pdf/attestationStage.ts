@@ -5,17 +5,18 @@ import {
   civilite, formatDateFR, dateAujourdHui, safeFilename,
 } from './pdfHelpers'
 import {
-  drawHeader, drawTitle, drawFooter, writeParagraph, COLORS, MARGIN, PAGE_W,
+  drawHeader, drawTitle, drawFooter, writeParagraph, loadEntrepriseLogo, COLORS, MARGIN, PAGE_W,
 } from './stagiairePdfCommon'
 
 /**
  * Document 3 — Attestation de stage (fin de stage).
  * Délivrée à la fin du stage pour attester de sa réalisation.
  */
-export function generateAttestationStage(s: Stagiaire): void {
+export async function generateAttestationStage(s: Stagiaire, mode: 'download' | 'preview' = 'download'): Promise<void> {
   const doc = new jsPDF('p', 'mm', 'a4')
+  const logo = await loadEntrepriseLogo()
 
-  drawHeader(doc)
+  drawHeader(doc, logo)
   drawTitle(doc, 'ATTESTATION DE STAGE', 50)
 
   let y = 75
@@ -83,5 +84,10 @@ export function generateAttestationStage(s: Stagiaire): void {
   doc.text(`Gérant – ${ENTREPRISE.raisonSociale}`, PAGE_W - MARGIN - 60, y)
 
   drawFooter(doc)
-  doc.save(`Attestation_Stage_${safeFilename(s.nom_complet)}.pdf`)
+  const filename = `Attestation_Stage_${safeFilename(s.nom_complet)}.pdf`
+  if (mode === 'preview') {
+    window.open(doc.output('bloburl') as unknown as string, '_blank')
+  } else {
+    doc.save(filename)
+  }
 }

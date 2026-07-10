@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import {
   Plus, Search, Edit2, Trash2, Loader2, GraduationCap, FileSignature,
   FileCheck2, FileText, Mail, Phone, MapPin, IdCard, School, Calendar,
-  ChevronDown, User, UserRound,
+  ChevronDown, User, UserRound, Eye, Download, Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,7 @@ import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/Autocorre
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from '@/components/ui/dropdown-menu'
 import { cn, formatDate } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
@@ -19,7 +19,7 @@ import {
   type Stagiaire, type StagiaireInput, type StagiaireGenre, type StagiaireStatut,
 } from '@/hooks/useStagiaires'
 import { generateAttestationAcceptation } from '@/lib/pdf/attestationAcceptation'
-import { generateConventionStage } from '@/lib/pdf/conventionStage'
+import { generateConventionStage, CONVENTION_ARTICLES } from '@/lib/pdf/conventionStage'
 import { generateAttestationStage } from '@/lib/pdf/attestationStage'
 
 const STATUT_CONFIG: Record<StagiaireStatut, { label: string; color: string; bg: string; dot: string }> = {
@@ -191,12 +191,18 @@ function StagiaireCard({
   const cfg = STATUT_CONFIG[s.statut]
   const isFini = s.statut === 'termine' || new Date(s.date_fin) < new Date()
 
-  const downloadPdf = (kind: 'acceptation' | 'convention' | 'attestation') => {
+  const [customConventionOpen, setCustomConventionOpen] = useState(false)
+
+  const runPdf = async (
+    kind:     'acceptation' | 'convention' | 'attestation',
+    mode:     'download' | 'preview',
+    included?: string[],
+  ) => {
     try {
-      if (kind === 'acceptation')      generateAttestationAcceptation(s)
-      else if (kind === 'convention')  generateConventionStage(s)
-      else                             generateAttestationStage(s)
-      toast.success('Document généré')
+      if (kind === 'acceptation')      await generateAttestationAcceptation(s, mode)
+      else if (kind === 'convention')  await generateConventionStage(s, mode, included)
+      else                             await generateAttestationStage(s, mode)
+      toast.success(mode === 'preview' ? 'Aperçu ouvert' : 'Document téléchargé')
     } catch (e: any) {
       toast.error(e?.message ?? 'Erreur lors de la génération')
     }
@@ -259,37 +265,196 @@ function StagiaireCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuItem onClick={() => downloadPdf('acceptation')}>
-              <FileText className="w-4 h-4 text-blue-500" />
+            <DropdownMenuItem onClick={onEdit}>
+              <Edit2 className="w-4 h-4 text-slate-500" />
               <div className="flex flex-col">
-                <span className="text-sm">Attestation d'acceptation</span>
-                <span className="text-[10px] text-muted-foreground">Avant le début du stage</span>
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => downloadPdf('convention')}>
-              <FileSignature className="w-4 h-4 text-emerald-500" />
-              <div className="flex flex-col">
-                <span className="text-sm">Convention de stage</span>
-                <span className="text-[10px] text-muted-foreground">Contrat signé entre parties</span>
+                <span className="text-sm">Modifier le stagiaire</span>
+                <span className="text-[10px] text-muted-foreground">Corriger les infos avant de régénérer</span>
               </div>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => downloadPdf('attestation')}
-              disabled={!isFini}
-            >
-              <FileCheck2 className={cn('w-4 h-4', isFini ? 'text-amber-500' : 'text-muted-foreground')} />
-              <div className="flex flex-col">
-                <span className="text-sm">Attestation de stage</span>
-                <span className="text-[10px] text-muted-foreground">
-                  {isFini ? 'Fin de stage' : 'Disponible quand le stage est terminé'}
-                </span>
-              </div>
-            </DropdownMenuItem>
+            <DocSubMenu
+              icon={<FileText className="w-4 h-4 text-blue-500" />}
+              label="Attestation d'acceptation"
+              hint="Avant le début du stage"
+              onPreview={() => runPdf('acceptation', 'preview')}
+              onDownload={() => runPdf('acceptation', 'download')}
+            />
+            <DocSubMenu
+              icon={<FileSignature className="w-4 h-4 text-emerald-500" />}
+              label="Convention de stage"
+              hint="Contrat signé entre parties"
+              onPreview={() => runPdf('convention', 'preview')}
+              onDownload={() => runPdf('convention', 'download')}
+              extra={(
+                <DropdownMenuItem onClick={() => setCustomConventionOpen(true)}>
+                  <Settings2 className="w-4 h-4 text-blue-500" />
+                  <div className="flex flex-col">
+                    <span className="text-sm">Personnaliser les articles…</span>
+                    <span className="text-[10px] text-muted-foreground">Choisir les clauses à inclure</span>
+                  </div>
+                </DropdownMenuItem>
+              )}
+            />
+            <DropdownMenuSeparator />
+            <DocSubMenu
+              icon={<FileCheck2 className="w-4 h-4 text-amber-500" />}
+              label="Attestation de stage"
+              hint={isFini ? 'Fin de stage' : 'Générer (aperçu / anticipé)'}
+              onPreview={() => runPdf('attestation', 'preview')}
+              onDownload={() => runPdf('attestation', 'download')}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <CustomConventionDialog
+        open={customConventionOpen}
+        onOpenChange={setCustomConventionOpen}
+        onGenerate={(mode, ids) => runPdf('convention', mode, ids)}
+      />
     </motion.div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
+
+function CustomConventionDialog({
+  open, onOpenChange, onGenerate,
+}: {
+  open:          boolean
+  onOpenChange:  (open: boolean) => void
+  onGenerate:    (mode: 'download' | 'preview', includedIds: string[]) => void
+}) {
+  const optional = CONVENTION_ARTICLES.filter(a => a.optional)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(optional.map(a => a.id)))
+
+  const toggle = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const all = () => setSelected(new Set(optional.map(a => a.id)))
+  const none = () => setSelected(new Set())
+
+  const submit = (mode: 'download' | 'preview') => {
+    onGenerate(mode, Array.from(selected))
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Personnaliser la convention</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Décochez les articles à ne pas inclure. La numérotation s'ajuste automatiquement.
+        </p>
+        <div className="flex items-center gap-2 mt-1">
+          <Button size="sm" variant="secondary" onClick={all} className="h-7 text-xs">Tout cocher</Button>
+          <Button size="sm" variant="secondary" onClick={none} className="h-7 text-xs">Tout décocher</Button>
+          <span className="text-[11px] text-muted-foreground ml-auto">
+            {selected.size + CONVENTION_ARTICLES.filter(a => !a.optional).length} / {CONVENTION_ARTICLES.length} articles
+          </span>
+        </div>
+        <div className="max-h-[52vh] overflow-y-auto space-y-1.5 mt-2 pr-1">
+          {CONVENTION_ARTICLES.map(a => {
+            const disabled = !a.optional
+            const checked  = disabled || selected.has(a.id)
+            return (
+              <label
+                key={a.id}
+                className={cn(
+                  'flex items-start gap-3 p-2.5 rounded-lg border border-border cursor-pointer transition-colors',
+                  disabled ? 'bg-muted/30 cursor-not-allowed' : 'hover:bg-muted/40',
+                  checked && !disabled && 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => !disabled && toggle(a.id)}
+                  className="mt-0.5 h-4 w-4 accent-blue-600"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    Article {a.num} — {a.title}
+                    {disabled && <span className="ml-2 text-[10px] font-medium text-muted-foreground">(obligatoire)</span>}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground line-clamp-2">
+                    {a.getParagraphs({ genre: 'homme' } as any).find(p => p && !p.startsWith('•')) ?? ''}
+                  </p>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>Annuler</Button>
+          <Button variant="secondary" size="sm" onClick={() => submit('preview')}>
+            <Eye className="w-4 h-4" /> Aperçu
+          </Button>
+          <Button size="sm" onClick={() => submit('download')}>
+            <Download className="w-4 h-4" /> Télécharger
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
+
+function DocSubMenu({
+  icon, label, hint, onPreview, onDownload, extra,
+}: {
+  icon:       React.ReactNode
+  label:      string
+  hint:       string
+  onPreview:  () => void
+  onDownload: () => void
+  extra?:     React.ReactNode
+}) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="gap-2">
+        {icon}
+        <div className="flex flex-col flex-1">
+          <span className="text-sm">{label}</span>
+          <span className="text-[10px] text-muted-foreground">{hint}</span>
+        </div>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent className="w-56">
+          <DropdownMenuItem onClick={onPreview}>
+            <Eye className="w-4 h-4 text-blue-500" />
+            <div className="flex flex-col">
+              <span className="text-sm">Aperçu complet</span>
+              <span className="text-[10px] text-muted-foreground">Ouvrir dans un onglet</span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onDownload}>
+            <Download className="w-4 h-4 text-emerald-500" />
+            <div className="flex flex-col">
+              <span className="text-sm">Télécharger</span>
+              <span className="text-[10px] text-muted-foreground">Fichier PDF</span>
+            </div>
+          </DropdownMenuItem>
+          {extra && (
+            <>
+              <DropdownMenuSeparator />
+              {extra}
+            </>
+          )}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
   )
 }
 

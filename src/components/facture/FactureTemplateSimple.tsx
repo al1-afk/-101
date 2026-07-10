@@ -152,9 +152,14 @@ const FactureTemplateSimple = forwardRef<HTMLDivElement, FactureTemplateSimplePr
       >
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="flex items-start justify-between mb-10">
-          <div>
-            <p className="text-[26px] font-extrabold text-[#0a1a3c] leading-none">{CO.name}</p>
-            <p className="text-[10.5px] text-[#0a1a3c] underline mt-0.5">{CO.sub}</p>
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo-nextgital.png"
+              alt={CO.name}
+              className="h-[64px] w-auto object-contain"
+              crossOrigin="anonymous"
+            />
+            <p className="text-[10.5px] text-[#0a1a3c] underline">{CO.sub}</p>
           </div>
           <div className="text-right">
             <p className="text-[22px] font-extrabold text-[#0a1a3c] leading-none">

@@ -15,6 +15,7 @@ import {
   Type, ListOrdered, List as ListIcon, CheckSquare, MessageSquare, Code as CodeIcon,
   AlertCircle, Minus, Image as ImageIcon, Quote, Table as TableIcon,
   Layers, Upload, FileText, Video as VideoIcon, Link as LinkIcon, X,
+  Repeat2,
 } from 'lucide-react'
 import type { SopBlock, SopBlockType } from '@/hooks/useSops'
 import { Input } from '@/components/ui/input'
@@ -79,6 +80,48 @@ function makeBlock(type: SopBlockType): SopBlock {
   }
 }
 
+/** Convertit un bloc existant vers un autre type en essayant de préserver le contenu. */
+function convertBlock(block: SopBlock, target: SopBlockType): SopBlock {
+  if (block.type === target) return block
+
+  const LIST_TYPES: SopBlockType[] = ['list', 'numbered', 'checklist', 'steps']
+  const TEXT_TYPES: SopBlockType[] = ['heading', 'heading2', 'heading3', 'paragraph', 'quote', 'template', 'code']
+
+  const fromItems = block.items ?? []
+  const fromText  = block.text  ?? ''
+
+  // Structures non convertibles → repartir sur un bloc neuf
+  if (target === 'divider' || target === 'image' || target === 'video' || target === 'table') {
+    return makeBlock(target)
+  }
+
+  // Callout : conserver texte s'il existe
+  if (target === 'callout') {
+    const text = LIST_TYPES.includes(block.type) ? fromItems.join('\n') : fromText
+    return { type: 'callout', variant: block.variant ?? 'tip', title: block.title ?? '', text }
+  }
+
+  // Vers une liste
+  if (LIST_TYPES.includes(target)) {
+    let items: string[] = []
+    if (LIST_TYPES.includes(block.type)) items = fromItems
+    else if (fromText.trim()) items = fromText.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    if (items.length === 0) items = ['']
+    return { type: target, items }
+  }
+
+  // Vers un bloc texte
+  if (TEXT_TYPES.includes(target)) {
+    let text = ''
+    if (LIST_TYPES.includes(block.type)) text = fromItems.join('\n')
+    else if (block.type === 'callout')   text = [block.title, block.text].filter(Boolean).join(' — ')
+    else                                  text = fromText
+    return { type: target, text }
+  }
+
+  return makeBlock(target)
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    MAIN
 ═══════════════════════════════════════════════════════════════════ */
@@ -117,6 +160,8 @@ export default function BlockEditor({ value, onChange, placeholder = 'Commencez 
   }
   const updateBlock = (idx: number, patch: Partial<SopBlock>) =>
     onChange(value.map((b, i) => i === idx ? { ...b, ...patch } : b))
+  const changeBlockType = (idx: number, target: SopBlockType) =>
+    onChange(value.map((b, i) => i === idx ? convertBlock(b, target) : b))
   const removeBlock = (idx: number) => onChange(value.filter((_, i) => i !== idx))
   const moveBlock = (idx: number, dir: 'up' | 'down') => {
     const j = dir === 'up' ? idx - 1 : idx + 1
@@ -184,6 +229,7 @@ export default function BlockEditor({ value, onChange, placeholder = 'Commencez 
               index={i}
               total={value.length}
               onUpdate={patch => updateBlock(i, patch)}
+              onChangeType={t => changeBlockType(i, t)}
               onUpdateItem={(j, v) => updateItem(i, j, v)}
               onAddItem={() => addItem(i)}
               onRemoveItem={j => removeItem(i, j)}
@@ -225,13 +271,14 @@ export default function BlockEditor({ value, onChange, placeholder = 'Commencez 
 ═══════════════════════════════════════════════════════════════════ */
 function InlineBlock({
   block, index, total,
-  onUpdate, onUpdateItem, onAddItem, onRemoveItem,
+  onUpdate, onChangeType, onUpdateItem, onAddItem, onRemoveItem,
   onMoveUp, onMoveDown, onRemove, onDuplicate, onSlashBelow,
 }: {
   block:        SopBlock
   index:        number
   total:        number
   onUpdate:     (patch: Partial<SopBlock>) => void
+  onChangeType: (target: SopBlockType) => void
   onUpdateItem: (idx: number, value: string) => void
   onAddItem:    () => void
   onRemoveItem: (idx: number) => void
@@ -242,6 +289,7 @@ function InlineBlock({
   onSlashBelow: () => void
 }) {
   const isSimpleList = block.type === 'list' || block.type === 'numbered' || block.type === 'checklist' || block.type === 'steps'
+  const [convertOpen, setConvertOpen] = useState(false)
 
   /* Slash trigger when typing / on empty text input */
   const onKey = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -254,7 +302,7 @@ function InlineBlock({
   return (
     <div className="group/blk relative rounded-lg hover:bg-muted/20 transition-colors">
       {/* Hover toolbar (left) */}
-      <div className="absolute -left-12 top-1 flex items-center gap-0.5 opacity-0 group-hover/blk:opacity-100 transition-opacity">
+      <div className="absolute -left-[104px] top-1 flex items-center gap-0.5 opacity-0 group-hover/blk:opacity-100 focus-within:opacity-100 transition-opacity">
         <button onClick={onMoveUp}   disabled={index === 0}          className="p-1 rounded text-muted-foreground hover:bg-muted disabled:opacity-20" title="Monter">
           <ChevronUp className="w-3.5 h-3.5" />
         </button>
@@ -264,6 +312,25 @@ function InlineBlock({
         <button onClick={onSlashBelow} className="p-1 rounded text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Insérer un bloc en dessous">
           <Plus className="w-3.5 h-3.5" />
         </button>
+        <div className="relative">
+          <button
+            onClick={() => setConvertOpen(o => !o)}
+            className={cn(
+              'p-1 rounded text-muted-foreground hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/30',
+              convertOpen && 'bg-blue-50 text-blue-600 dark:bg-blue-950/30',
+            )}
+            title="Convertir en…"
+          >
+            <Repeat2 className="w-3.5 h-3.5" />
+          </button>
+          {convertOpen && (
+            <ConvertMenu
+              currentType={block.type}
+              onPick={t => { onChangeType(t); setConvertOpen(false) }}
+              onClose={() => setConvertOpen(false)}
+            />
+          )}
+        </div>
         <button onClick={onDuplicate} className="p-1 rounded text-muted-foreground hover:bg-muted" title="Dupliquer">
           <GripVertical className="w-3.5 h-3.5" />
         </button>
@@ -514,5 +581,61 @@ function SlashPalette({
         </div>
       </div>
     </motion.div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CONVERT MENU (per block – "Turn into")
+═══════════════════════════════════════════════════════════════════ */
+function ConvertMenu({
+  currentType, onPick, onClose,
+}: {
+  currentType: SopBlockType
+  onPick:      (t: SopBlockType) => void
+  onClose:     () => void
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.12 }}
+        className="absolute z-50 left-full ml-1 top-0 w-56 max-h-[320px] overflow-y-auto rounded-lg border border-border bg-background shadow-xl py-1"
+      >
+        <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-b border-border">
+          Convertir en…
+        </p>
+        {(['text', 'list', 'media', 'advanced'] as const).map(group => {
+          const items = BLOCK_TYPES.filter(bt => bt.group === group)
+          return (
+            <div key={group}>
+              <p className="px-3 pt-1.5 pb-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/70">{GROUP_LABELS[group]}</p>
+              {items.map(it => {
+                const Icon = it.icon
+                const active = it.type === currentType
+                return (
+                  <button
+                    key={it.type}
+                    onClick={() => onPick(it.type)}
+                    disabled={active}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors',
+                      active
+                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/30 cursor-default'
+                        : 'hover:bg-muted/50 text-foreground',
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="flex-1 truncate">{it.label}</span>
+                    {active && <span className="text-[10px] text-blue-600">actuel</span>}
+                  </button>
+                )
+              })}
+            </div>
+          )
+        })}
+      </motion.div>
+    </>
   )
 }

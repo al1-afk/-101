@@ -1,6 +1,26 @@
 import jsPDF from 'jspdf'
 import { ENTREPRISE } from '@/lib/entreprise'
 
+/**
+ * Charge le logo NEXT GITAL une seule fois et le met en cache sous forme de
+ * data URL réutilisable pour jsPDF.
+ */
+let logoPromise: Promise<string | null> | null = null
+export function loadEntrepriseLogo(): Promise<string | null> {
+  if (!logoPromise) {
+    logoPromise = fetch('/logo-nextgital.png')
+      .then(r => r.ok ? r.blob() : Promise.reject(new Error('logo introuvable')))
+      .then(blob => new Promise<string>((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload  = () => resolve(String(fr.result || ''))
+        fr.onerror = () => reject(fr.error)
+        fr.readAsDataURL(blob)
+      }))
+      .catch(() => null)
+  }
+  return logoPromise
+}
+
 /** Couleurs partagées. */
 export const COLORS = {
   primary:    [30, 58, 138]  as [number, number, number],  // bleu profond
@@ -15,26 +35,39 @@ export const MARGIN = 20
 export const PAGE_W = 210
 export const PAGE_H = 297
 
-/** En-tête NEXT GITAL — bandeau bleu avec raison sociale, activité, adresse. */
-export function drawHeader(doc: jsPDF): void {
-  // Bandeau
-  doc.setFillColor(...COLORS.primary)
-  doc.rect(0, 0, PAGE_W, 32, 'F')
+/** En-tête NEXT GITAL — version imprimable (sans aplat couleur) : logo + texte sombre + filet fin. */
+export function drawHeader(doc: jsPDF, logoDataUrl?: string | null): void {
+  // Logo à droite (sans pastille — fond blanc naturel)
+  if (logoDataUrl) {
+    const size = 22
+    const x = PAGE_W - MARGIN - size
+    const y = 5
+    try {
+      doc.addImage(logoDataUrl, 'PNG', x, y, size, size)
+    } catch { /* logo optionnel */ }
+  }
 
   // Raison sociale
-  doc.setTextColor(255, 255, 255)
+  doc.setTextColor(...COLORS.dark)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(18)
   doc.text(ENTREPRISE.raisonSociale, MARGIN, 14)
 
   // Activité
+  doc.setTextColor(...COLORS.text)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
   doc.text(ENTREPRISE.activite, MARGIN, 21)
 
   // Adresse
+  doc.setTextColor(...COLORS.muted)
   doc.setFontSize(8)
   doc.text(ENTREPRISE.adresse, MARGIN, 27)
+
+  // Filet fin de séparation (économique à l'impression)
+  doc.setDrawColor(...COLORS.accent)
+  doc.setLineWidth(0.5)
+  doc.line(MARGIN, 32, PAGE_W - MARGIN, 32)
 }
 
 /** Titre centré, sous le bandeau. */

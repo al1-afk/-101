@@ -6,30 +6,39 @@ import {
   formatDateFR, dateAujourdHui, dureeEnMois, safeFilename,
 } from './pdfHelpers'
 import {
-  drawHeader, drawFooter, COLORS, MARGIN, PAGE_W, PAGE_H,
+  drawHeader, drawFooter, loadEntrepriseLogo, COLORS, MARGIN, PAGE_W, PAGE_H,
 } from './stagiairePdfCommon'
 
 /**
- * Document 2 — Convention de stage.
- * Document principal signé entre les parties (entreprise + stagiaire).
+ * Catalogue des articles de la convention. Chaque entrée est identifiée par
+ * un id stable et sait produire ses paragraphes à partir des infos stagiaire.
+ * Utilisé à la fois pour la génération PDF et pour la boîte de personnalisation.
  */
-export function generateConventionStage(s: Stagiaire): void {
-  const doc = new jsPDF('p', 'mm', 'a4')
+export interface ConventionArticle {
+  id:              string
+  num:             string
+  title:           string
+  optional:        boolean  // true = décochable ; false = obligatoire
+  getParagraphs:  (s: Stagiaire) => string[]
+}
 
-  let y = renderPage1Header(doc)
-  y = renderEntrepriseBloc(doc, y)
-  y = renderStagiaireBloc(doc, s, y)
-  y = renderArticle(doc, '1', 'ÉTUDES ET FORMATION', [
-    `Nature : ${s.formation}`,
-    `Durée du stage : ${dureeEnMois(s.date_debut, s.date_fin)} mois (du ${formatDateFR(s.date_debut)} au ${formatDateFR(s.date_fin)})`,
-  ], y)
-
-  y = renderArticle(doc, '2', 'OBJECTIFS DU STAGE', [
-    "Le stage a pour objectif de permettre au stagiaire de mettre en pratique les connaissances théoriques acquises lors de sa formation, conformément aux exigences pédagogiques.",
-  ], y)
-
-  y = renderArticle(doc, '3', 'CONDITIONS DU STAGE',
-    [
+export const CONVENTION_ARTICLES: ConventionArticle[] = [
+  {
+    id: 'etudes', num: '1', title: 'ÉTUDES ET FORMATION', optional: false,
+    getParagraphs: s => [
+      `Nature : ${s.formation}`,
+      `Durée du stage : ${dureeEnMois(s.date_debut, s.date_fin)} mois (du ${formatDateFR(s.date_debut)} au ${formatDateFR(s.date_fin)})`,
+    ],
+  },
+  {
+    id: 'objectifs', num: '2', title: 'OBJECTIFS DU STAGE', optional: true,
+    getParagraphs: () => [
+      "Le stage a pour objectif de permettre au stagiaire de mettre en pratique les connaissances théoriques acquises lors de sa formation, conformément aux exigences pédagogiques.",
+    ],
+  },
+  {
+    id: 'conditions', num: '3', title: 'CONDITIONS DU STAGE', optional: true,
+    getParagraphs: () => [
       "Le stagiaire s'engage à :",
       "• Respecter le règlement intérieur de l'entreprise.",
       "• Maintenir un environnement de travail 100 % professionnel.",
@@ -45,43 +54,78 @@ export function generateConventionStage(s: Stagiaire): void {
       "• Assurer un encadrement approprié.",
       '',
       "Le stagiaire conserve son statut d'étudiant pendant toute la durée du stage et reste sous la responsabilité de son établissement d'enseignement.",
-    ], y)
+    ],
+  },
+  {
+    id: 'secret', num: '4', title: 'SECRET PROFESSIONNEL', optional: true,
+    getParagraphs: () => [
+      "Conformément au Code Pénal marocain, le stagiaire est tenu au secret professionnel absolu et s'engage à ne divulguer aucune information à des tiers sans autorisation écrite de l'entreprise.",
+    ],
+  },
+  {
+    id: 'gratification', num: '5', title: 'GRATIFICATION ET MOYENS MIS À DISPOSITION', optional: true,
+    getParagraphs: () => [
+      "L'entreprise mettra à disposition du stagiaire les outils et ressources nécessaires à la bonne réalisation de ses missions.",
+      "Elle veillera également à lui fournir un encadrement de qualité, garantissant une immersion professionnelle enrichissante et conforme aux objectifs pédagogiques du stage.",
+    ],
+  },
+  {
+    id: 'assurance', num: '6', title: 'ASSURANCE DU STAGE', optional: true,
+    getParagraphs: s => [
+      `${articleStagiaire(s.genre)} confirme ${quilQuelle(s.genre)} est ${couvertAccord(s.genre)} par une assurance de responsabilité civile couvrant l'ensemble des risques liés à ses activités durant le stage, que cette couverture soit fournie par son établissement de formation ou par un organisme assureur privé.`,
+      `${pronomSujet(s.genre)} déclare également bénéficier d'une police d'assurance contractée auprès d'un assureur, valable pendant toute la durée du stage, incluant la responsabilité civile pour les dommages pouvant survenir dans le cadre de l'exercice de ses missions en tant que stagiaire.`,
+    ],
+  },
+  {
+    id: 'evaluation', num: '7', title: 'ÉVALUATION DU STAGE', optional: true,
+    getParagraphs: () => [
+      "À l'issue du stage :",
+      "• Le stagiaire doit fournir un rapport de stage à son établissement.",
+      "• Une copie sera remise à l'entreprise.",
+      "• L'entreprise délivrera une attestation de stage.",
+    ],
+  },
+  {
+    id: 'nature', num: '8', title: 'NATURE JURIDIQUE DU STAGE', optional: true,
+    getParagraphs: () => [
+      "Le stage ne constitue en aucun cas un contrat de travail. Il n'entraîne aucune relation de subordination juridique permanente entre les parties.",
+    ],
+  },
+  {
+    id: 'propriete', num: '9', title: 'PROPRIÉTÉ INTELLECTUELLE', optional: true,
+    getParagraphs: () => [
+      "Les productions réalisées durant le stage (documents, designs, contenus, etc.) demeurent la propriété exclusive de l'entreprise, sauf accord contraire écrit.",
+    ],
+  },
+]
 
-  // Si on est trop bas, page break
-  if (y > PAGE_H - 60) { doc.addPage(); y = 25 }
+/**
+ * Document 2 — Convention de stage.
+ * Document principal signé entre les parties (entreprise + stagiaire).
+ * @param includedArticleIds Optionnel : liste blanche d'ids d'articles à inclure.
+ *                            Si non fourni, tous les articles sont inclus.
+ */
+export async function generateConventionStage(
+  s: Stagiaire,
+  mode: 'download' | 'preview' = 'download',
+  includedArticleIds?: string[],
+): Promise<void> {
+  const doc = new jsPDF('p', 'mm', 'a4')
+  const logo = await loadEntrepriseLogo()
 
-  y = renderArticle(doc, '4', 'SECRET PROFESSIONNEL', [
-    "Conformément au Code Pénal marocain, le stagiaire est tenu au secret professionnel absolu et s'engage à ne divulguer aucune information à des tiers sans autorisation écrite de l'entreprise.",
-  ], y)
+  // Filtrer et renuméroter les articles retenus
+  const selected = CONVENTION_ARTICLES.filter(a =>
+    !a.optional || !includedArticleIds || includedArticleIds.includes(a.id),
+  )
 
-  y = renderArticle(doc, '5', 'GRATIFICATION ET MOYENS MIS À DISPOSITION', [
-    "L'entreprise mettra à disposition du stagiaire les outils et ressources nécessaires à la bonne réalisation de ses missions.",
-    "Elle veillera également à lui fournir un encadrement de qualité, garantissant une immersion professionnelle enrichissante et conforme aux objectifs pédagogiques du stage.",
-  ], y)
+  let y = renderPage1Header(doc, logo)
+  y = renderEntrepriseBloc(doc, y)
+  y = renderStagiaireBloc(doc, s, y)
 
-  if (y > PAGE_H - 60) { doc.addPage(); y = 25 }
-
-  y = renderArticle(doc, '6', 'ASSURANCE DU STAGE', [
-    `${articleStagiaire(s.genre)} confirme ${quilQuelle(s.genre)} est ${couvertAccord(s.genre)} par une assurance de responsabilité civile couvrant l'ensemble des risques liés à ses activités durant le stage, que cette couverture soit fournie par son établissement de formation ou par un organisme assureur privé.`,
-    `${pronomSujet(s.genre)} déclare également bénéficier d'une police d'assurance contractée auprès d'un assureur, valable pendant toute la durée du stage, incluant la responsabilité civile pour les dommages pouvant survenir dans le cadre de l'exercice de ses missions en tant que stagiaire.`,
-  ], y)
-
-  y = renderArticle(doc, '7', 'ÉVALUATION DU STAGE', [
-    "À l'issue du stage :",
-    "• Le stagiaire doit fournir un rapport de stage à son établissement.",
-    "• Une copie sera remise à l'entreprise.",
-    "• L'entreprise délivrera une attestation de stage.",
-  ], y)
-
-  if (y > PAGE_H - 60) { doc.addPage(); y = 25 }
-
-  y = renderArticle(doc, '8', 'NATURE JURIDIQUE DU STAGE', [
-    "Le stage ne constitue en aucun cas un contrat de travail. Il n'entraîne aucune relation de subordination juridique permanente entre les parties.",
-  ], y)
-
-  y = renderArticle(doc, '9', 'PROPRIÉTÉ INTELLECTUELLE', [
-    "Les productions réalisées durant le stage (documents, designs, contenus, etc.) demeurent la propriété exclusive de l'entreprise, sauf accord contraire écrit.",
-  ], y)
+  selected.forEach((a, idx) => {
+    if (y > PAGE_H - 60) { doc.addPage(); y = 25 }
+    y = renderArticle(doc, String(idx + 1), a.title, a.getParagraphs(s), y)
+  })
 
   // Signatures
   if (y > PAGE_H - 55) { doc.addPage(); y = 30 }
@@ -127,13 +171,18 @@ export function generateConventionStage(s: Stagiaire): void {
     drawFooter(doc)
   }
 
-  doc.save(`Convention_Stage_${safeFilename(s.nom_complet)}.pdf`)
+  const filename = `Convention_Stage_${safeFilename(s.nom_complet)}.pdf`
+  if (mode === 'preview') {
+    window.open(doc.output('bloburl') as unknown as string, '_blank')
+  } else {
+    doc.save(filename)
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────── */
 
-function renderPage1Header(doc: jsPDF): number {
-  drawHeader(doc)
+function renderPage1Header(doc: jsPDF, logo?: string | null): number {
+  drawHeader(doc, logo)
   // Titre centré
   doc.setTextColor(...COLORS.dark)
   doc.setFont('helvetica', 'bold')
@@ -162,7 +211,7 @@ function renderEntrepriseBloc(doc: jsPDF, y: number): number {
 function renderStagiaireBloc(doc: jsPDF, s: Stagiaire, y: number): number {
   drawSectionTitle(doc, 'STAGIAIRE', y)
   y += 8
-  const naissance = [formatDateFR(s.date_naissance), s.lieu_naissance].filter(Boolean).join(' à ') || '—'
+  const naissance = [formatDateFR(s.date_naissance), s.lieu_naissance].filter(Boolean).join(' ') || '—'
   const rows: [string, string][] = [
     ['Nom et prénom',                  s.nom_complet],
     ['Numéro de carte nationale',      s.cin],
