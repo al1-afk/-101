@@ -21,6 +21,7 @@ import {
 import { generateAttestationAcceptation } from '@/lib/pdf/attestationAcceptation'
 import { generateConventionStage, CONVENTION_ARTICLES } from '@/lib/pdf/conventionStage'
 import { generateAttestationStage } from '@/lib/pdf/attestationStage'
+import AIButton from '@/components/ui/AIButton'
 
 const STATUT_CONFIG: Record<StagiaireStatut, { label: string; color: string; bg: string; dot: string }> = {
   accepte:  { label: 'Accepté',  color: 'text-blue-600 dark:text-blue-400',       bg: 'bg-blue-50 dark:bg-blue-500/10',       dot: 'bg-blue-500'    },
@@ -594,7 +595,9 @@ function StagiaireForm({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Notes (interne)" full>
+        <Field label="Notes (interne)" full action={
+          <AIButton value={form.notes ?? ''} onChange={v => update('notes', v)} />
+        }>
           <AutocorrectTextarea
             value={form.notes ?? ''}
             onChange={e => update('notes', e.target.value)}
@@ -624,10 +627,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Field({ label, children, full = false }: { label: string; children: React.ReactNode; full?: boolean }) {
+function Field({ label, children, full = false, action }: { label: string; children: React.ReactNode; full?: boolean; action?: React.ReactNode }) {
   return (
     <div className={cn('space-y-1.5', full && 'col-span-2')}>
-      <label className="form-label">{label}</label>
+      <div className="flex items-center justify-between">
+        <label className="form-label">{label}</label>
+        {action}
+      </div>
       {children}
     </div>
   )

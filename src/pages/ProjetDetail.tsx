@@ -37,6 +37,7 @@ import {
 } from '@/hooks/useTeamMemberTasks'
 import { useStagiaires, type Stagiaire } from '@/hooks/useStagiaires'
 import BlockEditor from '@/components/BlockEditor'
+import AIButton from '@/components/ui/AIButton'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { serializeTaskDesc } from '@/lib/taskNotes'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
@@ -917,7 +918,15 @@ function TasksTab({
 
         {showTaskForm && (
           <form onSubmit={submitTask} onPaste={handleTaskPaste} className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
-            <AutocorrectInput autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche… (Cmd+V pour coller une image)" />
+            <div className="flex items-start gap-2">
+              <AutocorrectInput autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche… (Cmd+V pour coller une image)" className="flex-1" />
+              <AIButton
+                value={taskForm.title}
+                onChange={v => setTaskForm(p => ({ ...p, title: v }))}
+                kinds={['correct', 'rewrite', 'generate']}
+                generationKind="tache"
+              />
+            </div>
             {taskImages.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {taskImages.map((src, i) => (

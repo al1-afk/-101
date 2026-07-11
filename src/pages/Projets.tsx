@@ -28,6 +28,7 @@ import { useCustomTemplates, rowToTemplate } from '@/hooks/useProjetTemplates'
 import TemplateEditorDialog from '@/components/projet/TemplateEditorDialog'
 import AdminTasksPanel from '@/components/projet/AdminTasksPanel'
 import { Settings } from 'lucide-react'
+import AIButton from '@/components/ui/AIButton'
 
 const STATUT_CONFIG: Record<ProjetStatut, { label: string; variant: 'default'|'success'|'warning'|'secondary'|'destructive'; icon: React.ElementType }> = {
   planifie: { label: 'Planifié',  variant: 'default',     icon: Calendar      },
@@ -646,7 +647,15 @@ export default function Projets() {
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
-                <label className="form-label">Description</label>
+                <div className="flex items-center justify-between">
+                  <label className="form-label">Description</label>
+                  <AIButton
+                    value={form.description ?? ''}
+                    onChange={v => setForm(p => ({ ...p, description: v }))}
+                    kinds={['correct', 'rewrite', 'generate']}
+                    generationKind="projet"
+                  />
+                </div>
                 <AutocorrectTextarea
                   value={form.description ?? ''}
                   onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
@@ -737,7 +746,13 @@ export default function Projets() {
               )}
 
               <div className="space-y-1.5 sm:col-span-2">
-                <label className="form-label">Notes internes</label>
+                <div className="flex items-center justify-between">
+                  <label className="form-label">Notes internes</label>
+                  <AIButton
+                    value={form.notes ?? ''}
+                    onChange={v => setForm(p => ({ ...p, notes: v }))}
+                  />
+                </div>
                 <AutocorrectTextarea
                   value={form.notes ?? ''}
                   onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}

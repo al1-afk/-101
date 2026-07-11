@@ -13,6 +13,7 @@ import tenantRoutes   from './routes/tenants'
 import stockRoutes    from './routes/stock'
 import vehiclesRoutes from './routes/vehicles'
 import financeAiRoutes from './routes/financeAi'
+import aiRoutes from './routes/ai'
 import publicLeadsRoutes from './routes/publicLeads'
 import teamRoutes      from './routes/team'
 import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib/expiryReminderScheduler'
@@ -97,6 +98,7 @@ app.use('/api/tenants',  tenantRoutes)
 app.use('/api/stock',    stockRoutes)
 app.use('/api/vehicles', vehiclesRoutes)
 app.use('/api/finance-ai', financeAiRoutes)
+app.use('/api/ai',        aiRoutes)
 app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/team',      teamRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
