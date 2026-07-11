@@ -18,7 +18,7 @@ export interface CustomProjetTemplate {
   label:       string
   emoji:       string | null
   description: string | null
-  groups:      { category: string; tasks: { title: string; priority?: string }[] }[]
+  groups:      { category: string; tasks: { title: string; priority?: string; prompt?: string; recurrence?: unknown }[] }[]
   created_at:  string
   updated_at:  string
 }

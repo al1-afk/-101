@@ -82,6 +82,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { label: 'CRM / Prospects', href: '/prospects', icon: UserCheck, badge: 'IA', module: 'prospects' },
       { label: 'Clients',         href: '/clients',   icon: Users, module: 'clients' },
       { label: 'Projets',         href: '/projets',   icon: FolderKanban, module: 'projets' },
+      { label: 'Templates',       href: '/templates', icon: Sparkles, badge: 'New', module: 'projets' },
       { label: 'Tâches',          href: '/taches',    icon: CheckSquare, module: 'taches' },
       { label: 'Calendrier',      href: '/calendrier',icon: CalendarDays, module: 'calendrier' },
     ],

@@ -783,6 +783,38 @@ function TasksTab({
       const templates = templateKeys
         .map(k => customsAsTemplates.find(t => t.key === k) ?? PROJET_TEMPLATES.find(t => t.key === k))
         .filter(Boolean) as ProjetTemplate[]
+      /* Construit la description structurée de la tâche à partir du template.
+         Blocs riches (BlockEditor) + prompt IA en bloc code final.
+         Sous-tâches et attachments sont mis dans l'enveloppe. */
+      const buildTaskDescription = (task: import('@/lib/projetTemplates').TaskTemplate): string | null => {
+        const blocks: any[] = []
+        // Blocs riches définis dans le template
+        if (Array.isArray((task as any).blocks) && (task as any).blocks.length > 0) {
+          blocks.push(...(task as any).blocks)
+        }
+        // Prompt IA en bloc code (avec callout d'intro)
+        if (task.prompt && task.prompt.trim()) {
+          blocks.push({
+            type:    'callout',
+            variant: 'tip',
+            title:   'Prompt IA — copier/coller',
+            text:    'Guide clé-en-main. Adapte les [placeholders] au contexte du projet.',
+          })
+          blocks.push({ type: 'code', text: task.prompt.trim() })
+        }
+        const subtasks = (task.subtasks ?? [])
+          .map(t => t.trim())
+          .filter(Boolean)
+          .map(title => ({ id: Math.random().toString(36).slice(2, 10), title, done: false }))
+
+        const attachments = (((task as any).attachments as { label: string; url: string }[]) ?? [])
+          .filter(a => a && a.label && a.url)
+          .map(a => ({ id: Math.random().toString(36).slice(2, 10), label: a.label, url: a.url }))
+
+        if (blocks.length === 0 && subtasks.length === 0 && attachments.length === 0) return null
+        return serializeTaskDesc({ blocks, subtasks, attachments })
+      }
+
       for (const tpl of templates) {
         for (const group of tpl.groups) {
           for (const task of group.tasks) {
@@ -794,6 +826,8 @@ function TasksTab({
                 category:       group.category,
                 priority:       task.priority ?? 'normal',
                 status:         'todo',
+                recurrence:     task.recurrence ?? null,
+                description:    buildTaskDescription(task),
               } as any)
               count++
             } catch (e: any) { console.error('[applyTemplate]', e?.message ?? e) }
@@ -820,7 +854,11 @@ function TasksTab({
 
   /* Group regular tasks by category (templates seed this field).
      Tri intra-groupe : mes tâches admin d'abord, puis open avant done,
-     puis par due_date. Permet à l'admin de voir son propre travail en tête. */
+     puis par due_date, puis par ordre chronologique de création (ASC)
+     pour que les tâches d'un template apparaissent dans l'ordre défini
+     (du début à la fin) et pas inversé.
+     Ordre des catégories : par date de création de leur première tâche
+     (ASC) — la première catégorie créée apparaît en tête. */
   const byCategory = useMemo(() => {
     const m = new Map<string, TeamMemberTask[]>()
     for (const t of regular) {
@@ -828,6 +866,7 @@ function TasksTab({
       const arr = m.get(k) ?? []; arr.push(t); m.set(k, arr)
     }
     const STATUS_ORDER: Record<string, number> = { in_progress: 0, validation: 1, todo: 2, done: 3, cancelled: 4 }
+    const tsOf = (s: string | null) => s ? new Date(s).getTime() : Infinity
     for (const [, arr] of m) {
       arr.sort((a, b) => {
         const aMine = a.assigned_user_id === auth.userId ? 0 : 1
@@ -838,10 +877,17 @@ function TasksTab({
         if (aStatus !== bStatus) return aStatus - bStatus
         const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity
         const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity
-        return ad - bd
+        if (ad !== bd) return ad - bd
+        // Ordre chronologique de création ASC (ancien en premier)
+        return tsOf(a.created_at) - tsOf(b.created_at)
       })
     }
-    return Array.from(m.entries())
+    // Trier les catégories par la plus ancienne tâche de chacune
+    return Array.from(m.entries()).sort(([, arrA], [, arrB]) => {
+      const minA = Math.min(...arrA.map(t => tsOf(t.created_at)))
+      const minB = Math.min(...arrB.map(t => tsOf(t.created_at)))
+      return minA - minB
+    })
   }, [regular, auth.userId])
 
   /** Convert a dropdown value ('none' | 'admin' | 'stag:<uuid>' | <member_uuid>)

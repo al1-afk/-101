@@ -43,6 +43,7 @@ const ActivityLogs   = lazy(() => import('@/pages/ActivityLogs'))
 const ConseillerIA   = lazy(() => import('@/pages/ConseillerIA'))
 const Taches         = lazy(() => import('@/pages/Taches'))
 const Projets        = lazy(() => import('@/pages/Projets'))
+const Templates      = lazy(() => import('@/pages/Templates'))
 const ProjetDetail   = lazy(() => import('@/pages/ProjetDetail'))
 const Calendrier     = lazy(() => import('@/pages/Calendrier'))
 const Planificateur  = lazy(() => import('@/pages/Planificateur'))
@@ -123,6 +124,7 @@ export default function App() {
               <Route path="taches"                     element={<Taches />} />
               <Route path="projets"                    element={<Projets />} />
               <Route path="projets/:id"                element={<ProjetDetail />} />
+              <Route path="templates"                  element={<Templates />} />
               <Route path="calendrier"                 element={<Calendrier />} />
               <Route path="planificateur"              element={<Planificateur />} />
               <Route path="devis"                      element={<Devis />} />
