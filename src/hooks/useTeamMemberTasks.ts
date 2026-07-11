@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { teamMemberTasksApi } from '@/lib/api'
 import { currentTenantIdForCache } from '@/lib/authToken'
 import { toast } from 'sonner'
+import { nextDueDate, type TaskRecurrence } from '@/lib/taskRecurrence'
 
 export type TaskStatus   = 'todo' | 'in_progress' | 'validation' | 'done' | 'cancelled'
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -27,6 +28,9 @@ export interface TeamMemberTask {
   is_request:        boolean           // change request from client
   request_price:     number | null     // billable price for change request
   attachments:       string[]          // data URLs (base64) — images collées via Cmd+V
+  /** Si défini : la tâche est récurrente. À la complétion, une nouvelle
+      occurrence est créée automatiquement avec la due_date calculée. */
+  recurrence:        TaskRecurrence | null
   created_at:        string
   updated_at:        string
   completed_at:      string | null
@@ -98,6 +102,36 @@ export function useUpdateTeamMemberTask() {
       qc.setQueryData<TeamMemberTask[]>(tk(), (prev) =>
         prev ? prev.map(t => t.id === updated.id ? { ...t, ...updated } : t) : prev
       )
+
+      /* Récurrence : si la tâche est passée en 'done' et porte un motif
+         de récurrence, on crée immédiatement la prochaine occurrence. */
+      if (updated.status === 'done' && updated.recurrence) {
+        const base = updated.due_date ?? new Date().toISOString().slice(0, 10)
+        const nextDate = nextDueDate(updated.recurrence, base)
+        if (nextDate) {
+          try {
+            const next = await teamMemberTasksApi.create({
+              team_member_id:        updated.team_member_id,
+              assigned_user_id:      updated.assigned_user_id,
+              assigned_stagiaire_id: updated.assigned_stagiaire_id,
+              project_id:            updated.project_id,
+              title:                 updated.title,
+              description:           updated.description,
+              priority:              updated.priority,
+              status:                'todo',
+              due_date:              nextDate,
+              category:              updated.category,
+              is_request:            false,
+              recurrence:            updated.recurrence,
+            } as any) as TeamMemberTask
+            qc.setQueryData<TeamMemberTask[]>(tk(), (prev) => prev ? [next, ...prev] : [next])
+            toast.success(`🔁 Prochaine occurrence créée pour le ${nextDate}`)
+          } catch (e: any) {
+            console.error('[recurrence] failed to create next:', e?.message ?? e)
+          }
+        }
+      }
+
       await qc.invalidateQueries({ queryKey: [KEY] })
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),

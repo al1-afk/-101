@@ -38,6 +38,8 @@ import {
 import { useStagiaires, type Stagiaire } from '@/hooks/useStagiaires'
 import BlockEditor from '@/components/BlockEditor'
 import AIButton from '@/components/ui/AIButton'
+import RecurrenceDialog from '@/components/projet/RecurrenceDialog'
+import { describeRecurrence, type TaskRecurrence } from '@/lib/taskRecurrence'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { serializeTaskDesc } from '@/lib/taskNotes'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
@@ -751,6 +753,8 @@ function TasksTab({
   const [taskImages, setTaskImages] = useState<string[]>([])
   const [taskBlocks, setTaskBlocks] = useState<SopBlock[]>([])
   const [showTaskDescription, setShowTaskDescription] = useState(false)
+  const [taskRecurrence, setTaskRecurrence] = useState<TaskRecurrence | null>(null)
+  const [recurrenceDialogOpen, setRecurrenceDialogOpen] = useState(false)
   const [reqForm,  setReqForm]  = useState({ title: '', team_member_id: 'none', priority: 'high' as TaskPriority, due_date: todayISO, price: '' })
 
   const handleTaskPaste = async (e: React.ClipboardEvent) => {
@@ -866,6 +870,7 @@ function TasksTab({
       category:       taskForm.category.trim() || null,
       attachments:    taskImages,
       description:    description || null,
+      recurrence:     taskRecurrence,
     } as any, {
       onSuccess: () => {
         setTaskForm({ title: '', team_member_id: 'none', priority: 'normal', due_date: '', category: '' })
@@ -873,6 +878,7 @@ function TasksTab({
         setTaskBlocks([])
         setShowTaskDescription(false)
         setShowTaskForm(false)
+        setTaskRecurrence(null)
       },
     })
   }
@@ -966,6 +972,34 @@ function TasksTab({
                 </SelectContent>
               </Select>
               <Input type="date" value={taskForm.due_date} onChange={e => setTaskForm(p => ({ ...p, due_date: e.target.value }))} className="h-9" />
+            </div>
+            {/* Bouton de récurrence */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRecurrenceDialogOpen(true)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors border',
+                  taskRecurrence
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                    : 'border-border hover:bg-muted/50 text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <span>🔁</span>
+                {taskRecurrence
+                  ? describeRecurrence(taskRecurrence)
+                  : 'Ne se répète pas'}
+              </button>
+              {taskRecurrence && (
+                <button
+                  type="button"
+                  onClick={() => setTaskRecurrence(null)}
+                  className="text-[11px] text-muted-foreground hover:text-rose-500"
+                  title="Retirer la récurrence"
+                >
+                  Retirer
+                </button>
+              )}
             </div>
             {showTaskDescription ? (
               <div className="rounded-lg border border-border bg-background p-3 space-y-2">
@@ -1119,6 +1153,14 @@ function TasksTab({
         onClose={() => setShowTemplateDialog(false)}
         onApply={applyTemplates}
         loading={seeding}
+      />
+
+      {/* Recurrence config dialog */}
+      <RecurrenceDialog
+        open={recurrenceDialogOpen}
+        onOpenChange={setRecurrenceDialogOpen}
+        value={taskRecurrence}
+        onSave={setTaskRecurrence}
       />
 
       {/* Task detail dialog */}
@@ -1313,6 +1355,14 @@ function TaskRow({
           {isRequest && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
               📌 Demande
+            </span>
+          )}
+          {task.recurrence && (
+            <span
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+              title={`Récurrence : ${describeRecurrence(task.recurrence)}`}
+            >
+              🔁 {describeRecurrence(task.recurrence)}
             </span>
           )}
           {task.is_request && task.request_price != null && (
