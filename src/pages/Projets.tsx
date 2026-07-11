@@ -16,7 +16,7 @@ import {
   useProjets, useCreateProjet, useUpdateProjet, useDeleteProjet,
   type Projet, type ProjetStatut, type ProjetPriorite,
 } from '@/hooks/useProjets'
-import { useClients } from '@/hooks/useClients'
+import { useClients, useCreateClient } from '@/hooks/useClients'
 import { PROJET_TEMPLATES, type ProjetTemplate } from '@/lib/projetTemplates'
 import { teamMemberTasksApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
@@ -63,8 +63,11 @@ const EMPTY: Partial<Projet> = {
 /* ── Searchable client combobox ───────────────────────────────── */
 function ClientPicker({ value, onChange }: { value: string | null; onChange: (id: string | null, nom: string) => void }) {
   const { data: clients = [] } = useClients()
+  const createClient = useCreateClient()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [quickForm, setQuickForm] = useState({ nom: '', entreprise: '', telephone: '', email: '' })
   const wrapRef = useRef<HTMLDivElement>(null)
 
   const selected = clients.find(c => c.id === value)
@@ -91,6 +94,28 @@ function ClientPicker({ value, onChange }: { value: string | null; onChange: (id
   }, [clients, query])
 
   const display = open ? query : (selected?.nom ?? '')
+
+  const openQuickCreate = () => {
+    const q = query.trim()
+    setQuickForm({ nom: q, entreprise: '', telephone: '', email: '' })
+    setOpen(false)
+    setQuickOpen(true)
+  }
+
+  const submitQuickCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!quickForm.nom.trim()) return
+    const created = await createClient.mutateAsync({
+      nom:        quickForm.nom.trim(),
+      entreprise: quickForm.entreprise.trim() || null,
+      telephone:  quickForm.telephone.trim() || null,
+      email:      quickForm.email.trim()     || null,
+      adresse: null, ville: null, pays: null, notes: null,
+    } as any)
+    onChange(created.id, created.nom)
+    setQuickOpen(false)
+    setQuery('')
+  }
 
   return (
     <div ref={wrapRef} className="relative">
@@ -120,8 +145,57 @@ function ClientPicker({ value, onChange }: { value: string | null; onChange: (id
               {c.entreprise ? <span className="text-muted-foreground"> · {c.entreprise}</span> : null}
             </button>
           ))}
+          {/* Créer un nouveau client */}
+          <button
+            type="button"
+            onMouseDown={e => { e.preventDefault(); openQuickCreate() }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 border-t border-border"
+          >
+            <Plus className="w-4 h-4" />
+            {query.trim()
+              ? <>Créer le client « <span className="font-semibold">{query.trim()}</span> »</>
+              : 'Créer un nouveau client…'}
+          </button>
         </div>
       )}
+
+      {/* Quick-create dialog */}
+      <Dialog open={quickOpen} onOpenChange={setQuickOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Plus className="w-4 h-4 text-blue-500" /> Nouveau client</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={submitQuickCreate} className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Nom / Contact *</label>
+              <Input autoFocus value={quickForm.nom} onChange={e => setQuickForm(p => ({ ...p, nom: e.target.value }))} placeholder="Ex: Ahmed Bennani" required />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Entreprise</label>
+              <Input value={quickForm.entreprise} onChange={e => setQuickForm(p => ({ ...p, entreprise: e.target.value }))} placeholder="Ex: TUNING CAR SARL" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Téléphone</label>
+                <Input value={quickForm.telephone} onChange={e => setQuickForm(p => ({ ...p, telephone: e.target.value }))} placeholder="06…" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Email</label>
+                <Input type="email" value={quickForm.email} onChange={e => setQuickForm(p => ({ ...p, email: e.target.value }))} placeholder="client@ex.com" />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Tu pourras compléter les autres infos plus tard depuis <b>Clients</b>.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setQuickOpen(false)}>Annuler</Button>
+              <Button type="submit" size="sm" disabled={createClient.isPending || !quickForm.nom.trim()}>
+                {createClient.isPending ? 'Création…' : 'Créer et sélectionner'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
