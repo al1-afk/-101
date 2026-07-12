@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { lazyWithRetry as lazy } from '@/lib/lazyWithRetry'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import AppLayout      from '@/components/layout/AppLayout'
