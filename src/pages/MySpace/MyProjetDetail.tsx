@@ -16,9 +16,10 @@ import PasswordField from '@/components/PasswordField'
 import ProjetChat from '@/components/projet/ProjetChat'
 import { useMember } from '@/hooks/useMember'
 import { parseProjet, CREDENTIAL_PRESETS } from '@/lib/projetNotes'
+import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, BookOpen } from 'lucide-react'
 
 const STATUT_CFG: Record<string, { label: string; cls: string }> = {
   planifie: { label: 'Planifié',  cls: 'bg-blue-500/10 text-blue-700 dark:text-blue-400' },
@@ -230,6 +231,18 @@ export default function MyProjetDetail() {
                 {m.job_title && <span className="text-xs text-slate-500 ml-auto">{m.job_title}</span>}
               </div>
             ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Documentation projet (lecture seule) ── */}
+      {shareInfos && parsed.blocks.length > 0 && (
+        <Section title="Documentation projet" icon={BookOpen} color="violet">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-2 mb-2">
+            Brief, spécifications, livrables — aperçu formaté.
+          </p>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-5">
+            <SopBlocksRenderer blocks={parsed.blocks} />
           </div>
         </Section>
       )}

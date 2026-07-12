@@ -9,6 +9,7 @@ export type StagiaireStatut = 'accepte' | 'en_cours' | 'termine' | 'annule'
 export interface Stagiaire {
   id:             string
   tenant_id:      string
+  member_id:      string | null
   nom_complet:    string
   genre:          StagiaireGenre
   cin:            string

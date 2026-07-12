@@ -8,6 +8,7 @@ export type SopBlockType =
   | 'paragraph' | 'list' | 'numbered' | 'checklist' | 'steps'
   | 'callout' | 'template' | 'code' | 'divider'
   | 'image' | 'table' | 'quote' | 'video'
+  | 'before-after' | 'project-ref'
 
 /* Marks pour formatage inline (paragraphes, headings, items de liste).
    Stockées dans block.marks et appliquées au rendu via parseRichText.
@@ -42,6 +43,30 @@ export interface SopStepItem {
   assignee?: string                               // member id
 }
 
+/** Comparaison Avant / Après — 2 images côte à côte pour montrer le résultat attendu. */
+export interface SopBeforeAfterMeta {
+  before:      { url: string; caption?: string }
+  after:       { url: string; caption?: string }
+  labelBefore?:string                              // par défaut « Avant »
+  labelAfter?: string                              // par défaut « Après »
+}
+
+/** Référence à une donnée déjà présente dans la fiche projet.
+ *  Le viewer lit la valeur automatiquement ; si elle manque il affiche
+ *  « ⚠ Information manquante » + bouton « Compléter les informations »
+ *  qui deep-link vers la section du projet correspondante. */
+export type SopProjectField =
+  | 'client.name' | 'client.email' | 'client.phone' | 'client.company'
+  | 'project.name' | 'project.description' | 'project.budget' | 'project.responsable'
+  | 'project.date_debut' | 'project.date_fin_prevue'
+  | 'domain' | 'vps' | 'hosting'
+
+export interface SopProjectRefMeta {
+  field:      SopProjectField
+  label?:     string                              // libellé humain (défaut = auto selon field)
+  section?:   'overview' | 'infos' | 'team' | 'docs' | 'infra'  // pour deep-link
+}
+
 export interface SopBlock {
   type:    SopBlockType
   text?:   string
@@ -52,6 +77,8 @@ export interface SopBlock {
   image?:  SopImageMeta
   table?:  SopTableMeta
   video?:  SopVideoMeta
+  beforeAfter?: SopBeforeAfterMeta
+  projectRef?:  SopProjectRefMeta
 }
 
 export interface Sop {

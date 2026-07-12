@@ -22,7 +22,8 @@ import { cn } from '@/lib/utils'
 import BlockEditor from '@/components/BlockEditor'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import type { SopBlock } from '@/hooks/useSops'
-import { Link as LinkIcon, Eye, PencilLine } from 'lucide-react'
+import { Link as LinkIcon, Eye, PencilLine, Library } from 'lucide-react'
+import { PROMPT_LIBRARY, CATEGORY_LABELS, type LibraryPrompt } from '@/lib/promptLibrary'
 
 type Priority = 'low' | 'normal' | 'high' | 'urgent'
 const PRIO_OPTIONS: { value: Priority; label: string }[] = [
@@ -196,6 +197,8 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null)
   /* Vue vs Édition par tâche — set des clés en mode vue. */
   const [viewMode, setViewMode] = useState<Set<string>>(new Set())
+  /* Bibliothèque de prompts — clé de la tâche pour laquelle elle est ouverte. */
+  const [libraryFor, setLibraryFor] = useState<string | null>(null)
   const promptKey = (g: number, t: number) => `${g}:${t}`
   const isViewMode = (k: string) => viewMode.has(k)
   const toggleViewMode = (k: string) => {
@@ -615,9 +618,18 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                                   <label className="text-[10px] uppercase tracking-widest font-bold text-blue-700 dark:text-blue-300">
                                     ✨ Prompt IA (copier/coller)
                                   </label>
-                                  {hasPrompt && (
-                                    <button type="button" onClick={() => updateTask(gIdx, tIdx, { prompt: '' })} className="text-[10px] text-rose-600 hover:underline">Vider</button>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setLibraryFor(k)}
+                                      className="inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline font-semibold"
+                                    >
+                                      <Library className="w-3 h-3" /> Bibliothèque
+                                    </button>
+                                    {hasPrompt && (
+                                      <button type="button" onClick={() => updateTask(gIdx, tIdx, { prompt: '' })} className="text-[10px] text-rose-600 hover:underline">Vider</button>
+                                    )}
+                                  </div>
                                 </div>
                                 <textarea
                                   value={t.prompt ?? ''}
@@ -656,6 +668,134 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
             </div>
           </div>
         )}
+      </DialogContent>
+
+      {/* Sous-dialog : Bibliothèque de prompts */}
+      <PromptLibraryPicker
+        open={libraryFor !== null}
+        onClose={() => setLibraryFor(null)}
+        onPick={(prompt) => {
+          if (!libraryFor) return
+          const [gStr, tStr] = libraryFor.split(':')
+          updateTask(Number(gStr), Number(tStr), { prompt: prompt.content })
+          setLibraryFor(null)
+        }}
+      />
+    </Dialog>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BIBLIOTHÈQUE DE PROMPTS — dialog secondaire
+═══════════════════════════════════════════════════════════════════ */
+function PromptLibraryPicker({
+  open, onClose, onPick,
+}: {
+  open:    boolean
+  onClose: () => void
+  onPick:  (prompt: LibraryPrompt) => void
+}) {
+  const [search, setSearch] = useState('')
+  const [preview, setPreview] = useState<LibraryPrompt | null>(null)
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return PROMPT_LIBRARY
+    return PROMPT_LIBRARY.filter(p =>
+      p.title.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q) ||
+      CATEGORY_LABELS[p.category].label.toLowerCase().includes(q),
+    )
+  }, [search])
+
+  const byCategory = useMemo(() => {
+    const m = new Map<LibraryPrompt['category'], LibraryPrompt[]>()
+    for (const p of filtered) {
+      const arr = m.get(p.category) ?? []
+      arr.push(p)
+      m.set(p.category, arr)
+    }
+    return Array.from(m.entries())
+  }, [filtered])
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Library className="w-4 h-4 text-blue-500" /> Bibliothèque de prompts IA
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-shrink-0 space-y-2">
+          <Input
+            placeholder="Rechercher (SOP, product, dev, seo…)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div className="flex gap-3 flex-1 overflow-hidden">
+          {/* Liste */}
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            {byCategory.length === 0 && (
+              <p className="text-center text-xs text-muted-foreground py-10">Aucun prompt trouvé.</p>
+            )}
+            {byCategory.map(([cat, items]) => (
+              <div key={cat}>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                  {CATEGORY_LABELS[cat].emoji} {CATEGORY_LABELS[cat].label}
+                </p>
+                <div className="space-y-1.5">
+                  {items.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPreview(p)}
+                      className={cn(
+                        'w-full text-left rounded-lg border p-2.5 transition-colors',
+                        preview?.id === p.id
+                          ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/30'
+                          : 'border-border hover:border-blue-300 hover:bg-muted/40',
+                      )}
+                    >
+                      <p className="text-sm font-semibold flex items-center gap-1.5">
+                        <span>{p.emoji}</span>{p.title}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{p.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Preview */}
+          <div className="w-2/5 flex-shrink-0 border-l border-border pl-3 overflow-y-auto">
+            {preview ? (
+              <div className="space-y-2">
+                <p className="text-sm font-bold flex items-center gap-1.5">
+                  <span>{preview.emoji}</span>{preview.title}
+                </p>
+                <p className="text-[11px] text-muted-foreground">{preview.description}</p>
+                <div className="rounded-md border border-border bg-muted/30 p-2.5 max-h-[45vh] overflow-y-auto">
+                  <pre className="whitespace-pre-wrap text-[11px] font-mono">{preview.content}</pre>
+                </div>
+                <Button size="sm" className="w-full" onClick={() => onPick(preview)}>
+                  Utiliser ce prompt
+                </Button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground italic text-center py-10">
+                Sélectionne un prompt à gauche pour prévisualiser.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-shrink-0 flex items-center justify-end pt-2 border-t border-border">
+          <Button variant="secondary" size="sm" onClick={onClose}>Fermer</Button>
+        </div>
       </DialogContent>
     </Dialog>
   )

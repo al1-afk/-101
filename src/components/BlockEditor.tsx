@@ -195,15 +195,75 @@ export default function BlockEditor({ value, onChange, placeholder = 'Commencez 
 
   const openSlashAt = (idx: number) => { setInsertAt(idx); setSlashQuery(''); setSlashOpen(true) }
 
+  /* --- Ajout de fichiers depuis clipboard ou drag & drop --- */
+  const filesToBlocks = async (files: File[] | FileList): Promise<SopBlock[]> => {
+    const arr = Array.from(files)
+    const blocks: SopBlock[] = []
+    for (const f of arr) {
+      if (f.size > MAX_IMAGE_MB * 1024 * 1024 * 3) {
+        toast.error(`« ${f.name} » trop lourd (max ${MAX_IMAGE_MB * 3} Mo)`)
+        continue
+      }
+      const url = await new Promise<string>((res, rej) => {
+        const r = new FileReader()
+        r.onload  = () => res(String(r.result))
+        r.onerror = () => rej(r.error)
+        r.readAsDataURL(f)
+      })
+      if (f.type.startsWith('image/')) {
+        blocks.push({ type: 'image', image: { url, caption: f.name } })
+      } else if (f.type.startsWith('video/')) {
+        blocks.push({ type: 'video', video: { url, caption: f.name } })
+      } else if (f.type === 'application/pdf') {
+        blocks.push({ type: 'paragraph', text: `📎 [${f.name}](${url})` })
+      }
+    }
+    return blocks
+  }
+
   /* Notion-style rich paste : intercepte le collage multi-lignes n'importe où
      dans l'éditeur, parse en blocs (titres, checklists, listes, tableaux…) et
      les insère à la suite. Un collage mono-ligne reste géré nativement par
-     l'input focus, on ne préempte rien. */
-  const handleRichPaste = (e: React.ClipboardEvent) => {
+     l'input focus, on ne préempte rien. Gère aussi les fichiers (images/PDF/vidéo). */
+  const handleRichPaste = async (e: React.ClipboardEvent) => {
     const target = e.target as HTMLElement
-    // Ne pas voler le collage dans les champs "table" ou dans un champ de saisie de tableau/callout etc. qui a du sens en mono-ligne.
     if (target.tagName === 'SELECT') return
-    const raw = e.clipboardData?.getData('text/plain') ?? ''
+
+    // 1) Fichiers dans le presse-papier (capture d'écran, images copiées…)
+    //    Chrome/Safari/Firefox exposent les fichiers de deux façons ;
+    //    on combine les deux pour maximiser la détection.
+    const dt = e.clipboardData
+    if (dt) {
+      const files: File[] = []
+      // (a) clipboardData.files — API la plus fiable pour les captures d'écran
+      if (dt.files && dt.files.length > 0) {
+        for (let i = 0; i < dt.files.length; i++) files.push(dt.files[i])
+      }
+      // (b) clipboardData.items — fallback (parfois seule à contenir les images)
+      if (dt.items) {
+        for (let i = 0; i < dt.items.length; i++) {
+          const it = dt.items[i]
+          if (it.kind === 'file' && (it.type.startsWith('image/') || it.type.startsWith('video/') || it.type === 'application/pdf')) {
+            const f = it.getAsFile()
+            if (f && !files.some(x => x.name === f.name && x.size === f.size)) files.push(f)
+          }
+        }
+      }
+      const mediaFiles = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/') || f.type === 'application/pdf')
+      if (mediaFiles.length > 0) {
+        e.preventDefault()
+        e.stopPropagation()
+        const newBlocks = await filesToBlocks(mediaFiles)
+        if (newBlocks.length > 0) {
+          onChange([...value, ...newBlocks])
+          toast.success(`${newBlocks.length} fichier${newBlocks.length > 1 ? 's' : ''} inséré${newBlocks.length > 1 ? 's' : ''}`)
+        }
+        return
+      }
+    }
+
+    // 2) Texte multi-lignes
+    const raw = dt?.getData('text/plain') ?? ''
     if (!shouldParseAsRichPaste(raw)) return
     const parsed = parseRichPaste(raw)
     if (parsed.length === 0) return
@@ -213,8 +273,28 @@ export default function BlockEditor({ value, onChange, placeholder = 'Commencez 
     toast.success(`${parsed.length} bloc${parsed.length > 1 ? 's' : ''} ajouté${parsed.length > 1 ? 's' : ''} depuis le presse-papier`)
   }
 
+  const [isDragging, setIsDragging] = useState(false)
+  const handleDragOver  = (e: React.DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setIsDragging(true) } }
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false) }
+  const handleDrop      = async (e: React.DragEvent) => {
+    if (!e.dataTransfer?.files?.length) return
+    e.preventDefault()
+    setIsDragging(false)
+    const newBlocks = await filesToBlocks(e.dataTransfer.files)
+    if (newBlocks.length > 0) {
+      onChange([...value, ...newBlocks])
+      toast.success(`${newBlocks.length} fichier${newBlocks.length > 1 ? 's' : ''} déposé${newBlocks.length > 1 ? 's' : ''}`)
+    }
+  }
+
   return (
-    <div className="space-y-2" onPaste={handleRichPaste}>
+    <div
+      className={cn('space-y-2 rounded-lg transition-all', isDragging && 'ring-2 ring-blue-400 bg-blue-50/30 dark:bg-blue-950/20')}
+      onPaste={handleRichPaste}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <AnimatePresence>
         {value.map((blk, i) => (
           <motion.div
@@ -424,15 +504,32 @@ function ImageBlock({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Pa
     reader.readAsDataURL(file)
   }
 
+  const [imgError, setImgError] = useState(false)
+
   return (
     <div className="space-y-1.5">
       {meta.url ? (
-        <img src={meta.url} alt={meta.caption || ''} className="max-w-full rounded-lg border border-border" />
+        imgError ? (
+          <div className="rounded-lg border border-rose-300 bg-rose-50 dark:bg-rose-950/30 p-3 text-xs text-rose-700 dark:text-rose-300">
+            ⚠ Impossible d'afficher l'image. L'URL est invalide ou l'image est corrompue.
+            <button onClick={() => { onUpdate({ image: { ...meta, url: '' } }); setImgError(false) }}
+              className="ml-2 underline hover:no-underline">Remplacer</button>
+          </div>
+        ) : (
+          <img
+            src={meta.url}
+            alt={meta.caption || ''}
+            className="max-w-full rounded-lg border border-border block"
+            onError={() => setImgError(true)}
+          />
+        )
       ) : (
         <button onClick={() => fileRef.current?.click()}
           className="w-full flex flex-col items-center justify-center gap-1.5 p-4 rounded-lg border-2 border-dashed border-border hover:border-blue-400 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 transition-all">
           <Upload className="w-5 h-5 text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">Cliquez pour téléverser une image (max {MAX_IMAGE_MB} Mo)</p>
+          <p className="text-xs text-muted-foreground">
+            Cliquez ou colle (⌘V) une image · max {MAX_IMAGE_MB} Mo
+          </p>
         </button>
       )}
       <input type="file" ref={fileRef} hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" onChange={e => onFile(e.target.files?.[0])} />

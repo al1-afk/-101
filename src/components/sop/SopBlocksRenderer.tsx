@@ -8,6 +8,8 @@ import { Check, Copy, Info, Lightbulb, AlertTriangle, XCircle, CheckCircle2 } fr
 import { cn } from '@/lib/utils'
 import { parseRichText } from './parseRichText'
 import { detectVideo } from './videoEmbed'
+import BeforeAfterBlock from '@/components/projet/BeforeAfterBlock'
+import type { SopBeforeAfterMeta, SopProjectRefMeta } from '@/hooks/useSops'
 
 interface SopBlock {
   type:    string
@@ -19,6 +21,8 @@ interface SopBlock {
   image?:  { url: string; caption?: string; size?: string; align?: string }
   table?:  { headers: string[]; rows: string[][] }
   video?:  { url: string; caption?: string; size?: string; align?: string }
+  beforeAfter?: SopBeforeAfterMeta
+  projectRef?:  SopProjectRefMeta
 }
 
 const CALLOUT_STYLES: Record<string, { bg: string; border: string; icon: React.ElementType; iconColor: string }> = {
@@ -239,6 +243,16 @@ function BlockOne({ block, idx, checked, onCheck }: {
         </figure>
       )
     }
+    case 'before-after':
+      return block.beforeAfter ? <BeforeAfterBlock meta={block.beforeAfter} /> : null
+    case 'project-ref':
+      // Hors contexte projet on affiche juste le libellé attendu
+      return block.projectRef ? (
+        <div className="my-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
+          <span className="font-mono">{'{{' + block.projectRef.field + '}}'}</span>
+          <span className="text-[10px] uppercase tracking-widest">auto-fill projet</span>
+        </div>
+      ) : null
     default:
       return block.text ? <p className="text-sm text-slate-600 dark:text-slate-400">{block.text}</p> : null
   }

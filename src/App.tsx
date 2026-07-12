@@ -26,7 +26,9 @@ const Depenses       = lazy(() => import('@/pages/Depenses'))
 const Finances       = lazy(() => import('@/pages/Finances'))
 const FinanceIA      = lazy(() => import('@/pages/FinanceIA'))
 const Abonnements    = lazy(() => import('@/pages/Abonnements'))
-const Equipe         = lazy(() => import('@/pages/Equipe'))
+const Equipe             = lazy(() => import('@/pages/Equipe'))
+const EquipeMemberDetail = lazy(() => import('@/pages/EquipeMemberDetail'))
+const StagiaireDetail    = lazy(() => import('@/pages/StagiaireDetail'))
 const Fournisseurs   = lazy(() => import('@/pages/Fournisseurs'))
 const Contacts       = lazy(() => import('@/pages/Contacts'))
 const Domaines       = lazy(() => import('@/pages/Domaines'))
@@ -150,6 +152,8 @@ export default function App() {
               <Route path="abonnements-clients"        element={<AbonnementsClients />} />
               <Route path="integrations"               element={<Integrations />} />
               <Route path="equipe"                     element={<Equipe />} />
+              <Route path="equipe/:id"                 element={<EquipeMemberDetail />} />
+              <Route path="stagiaire/:id"              element={<StagiaireDetail />} />
               <Route path="fournisseurs"               element={<Fournisseurs />} />
               <Route path="contacts"                   element={<Contacts />} />
               <Route path="domaines"                   element={<Domaines />} />

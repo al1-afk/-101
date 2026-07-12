@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   Plus, Search, Edit2, Trash2, Loader2, GraduationCap, FileSignature,
@@ -31,6 +32,7 @@ const STATUT_CONFIG: Record<StagiaireStatut, { label: string; color: string; bg:
 }
 
 const EMPTY_FORM: StagiaireInput = {
+  member_id:     null,
   nom_complet:   '',
   genre:         'homme',
   cin:           '',
@@ -191,6 +193,8 @@ function StagiaireCard({
   onDelete:        () => void
   onChangeStatut:  (statut: StagiaireStatut) => void
 }) {
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const detailHref = tenantSlug ? `/${tenantSlug}/stagiaire/${s.id}` : `/stagiaire/${s.id}`
   const cfg = STATUT_CONFIG[s.statut]
   const isFini = s.statut === 'termine' || new Date(s.date_fin) < new Date()
 
@@ -219,25 +223,29 @@ function StagiaireCard({
       className="card-premium p-5 hover:border-blue-500/30 transition-all duration-300 group"
     >
       <div className="flex items-start gap-3">
-        <div className={cn(
-          'w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0',
-          s.genre === 'femme' ? 'bg-pink-100 dark:bg-pink-500/20' : 'bg-blue-100 dark:bg-blue-500/20',
-        )}>
-          {s.genre === 'femme'
-            ? <UserRound className="w-5 h-5 text-pink-600 dark:text-pink-400" />
-            : <User      className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-foreground text-sm truncate">{s.nom_complet}</h3>
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-            <IdCard className="w-3 h-3" /> {s.cin}
-          </p>
-        </div>
+        <Link to={detailHref} className="flex items-start gap-3 flex-1 min-w-0 group/name" title="Voir l'historique du stagiaire">
+          <div className={cn(
+            'w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0',
+            s.genre === 'femme' ? 'bg-pink-100 dark:bg-pink-500/20' : 'bg-blue-100 dark:bg-blue-500/20',
+          )}>
+            {s.genre === 'femme'
+              ? <UserRound className="w-5 h-5 text-pink-600 dark:text-pink-400" />
+              : <User      className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-foreground text-sm truncate group-hover/name:text-blue-600 dark:group-hover/name:text-blue-400 transition-colors">
+              {s.nom_complet}
+            </h3>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+              <IdCard className="w-3 h-3" /> {s.cin}
+            </p>
+          </div>
+        </Link>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={onEdit}>
+          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={onEdit} title="Modifier">
             <Edit2 className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="w-7 h-7 text-red-400" onClick={onDelete}>
+          <Button variant="ghost" size="icon" className="w-7 h-7 text-red-400" onClick={onDelete} title="Supprimer">
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
         </div>
@@ -499,6 +507,7 @@ function StagiaireForm({
   saving:    boolean
 }) {
   const [form, setForm] = useState<StagiaireInput>(() => initial ? {
+    member_id:     initial.member_id ?? null,
     nom_complet:   initial.nom_complet,
     genre:         initial.genre,
     cin:           initial.cin,

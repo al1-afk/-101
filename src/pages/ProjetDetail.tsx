@@ -7,7 +7,7 @@ import {
   Calendar, Clock, CircleDot, Check, MoreHorizontal,
   Crown, User as UserIcon, LayoutGrid, List as ListIcon,
   Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
-  MessageSquare, Settings, Globe, Server, CalendarCheck,
+  MessageSquare, Settings, Globe, Server, CalendarCheck, UserPlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -25,7 +25,7 @@ import { PROJET_TEMPLATES, type ProjetTemplate } from '@/lib/projetTemplates'
 import { useCustomTemplates, rowToTemplate } from '@/hooks/useProjetTemplates'
 import TemplateEditorDialog from '@/components/projet/TemplateEditorDialog'
 import { teamMemberTasksApi } from '@/lib/api'
-import { useClients } from '@/hooks/useClients'
+import { useClients, type Client } from '@/hooks/useClients'
 import { useTeam, type TeamMember } from '@/hooks/useTeam'
 import {
   useAssigneesOf, useAddProjetAssignee, useRemoveProjetAssignee, useUpdateProjetAssignee,
@@ -42,6 +42,8 @@ import RecurrenceDialog from '@/components/projet/RecurrenceDialog'
 import { describeRecurrence, type TaskRecurrence } from '@/lib/taskRecurrence'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { serializeTaskDesc } from '@/lib/taskNotes'
+import { generateSopPromptForTask } from '@/lib/promptLibrary'
+import { findSopForTask, autoGenerateSopBlocks } from '@/lib/sopContent'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
 import ProjetChat, { type ProjetMessage } from '@/components/projet/ProjetChat'
@@ -136,6 +138,25 @@ export default function ProjetDetail() {
 
   const [tab, setTab] = useState<Tab>('tasks')
   const [delConfirm, setDelConfirm] = useState(false)
+
+  /* Deep-link depuis les SOP : ProjectDataRef émet 'sop:goto-section'
+     quand l'utilisateur clique « Compléter les informations ». */
+  useEffect(() => {
+    const onGoto = (e: Event) => {
+      const detail = (e as CustomEvent<{ section: string }>).detail
+      const map: Record<string, Tab> = {
+        overview: 'overview',
+        infos:    'infos',
+        team:     'team',
+        docs:     'docs',
+        infra:    'infos',
+      }
+      const next = map[detail?.section]
+      if (next) setTab(next)
+    }
+    window.addEventListener('sop:goto-section', onGoto)
+    return () => window.removeEventListener('sop:goto-section', onGoto)
+  }, [])
 
   if (!projet) {
     return (
@@ -301,7 +322,7 @@ export default function ProjetDetail() {
         <TeamTab projet={projet} assignees={assignees} members={members} tasks={tasks} />
       )}
       {tab === 'tasks' && (
-        <TasksTab projet={projet} tasks={tasks} assignees={assignees} members={members} />
+        <TasksTab projet={projet} tasks={tasks} assignees={assignees} members={members} client={client} />
       )}
       {tab === 'chat' && (
         <ProjetChat
@@ -723,8 +744,8 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
    TASKS TAB — categories + validation flow + change requests + timer
 ═══════════════════════════════════════════════════════════════════ */
 function TasksTab({
-  projet, tasks, assignees, members,
-}: { projet: Projet; tasks: TeamMemberTask[]; assignees: ProjetAssignee[]; members: TeamMember[] }) {
+  projet, tasks, assignees, members, client,
+}: { projet: Projet; tasks: TeamMemberTask[]; assignees: ProjetAssignee[]; members: TeamMember[]; client?: Client }) {
   const create = useCreateTeamMemberTask()
   const update = useUpdateTeamMemberTask()
   const remove = useDeleteTeamMemberTask()
@@ -785,22 +806,39 @@ function TasksTab({
         .filter(Boolean) as ProjetTemplate[]
       /* Construit la description structurée de la tâche à partir du template.
          Blocs riches (BlockEditor) + prompt IA en bloc code final.
-         Sous-tâches et attachments sont mis dans l'enveloppe. */
-      const buildTaskDescription = (task: import('@/lib/projetTemplates').TaskTemplate): string | null => {
+         Sous-tâches et attachments sont mis dans l'enveloppe.
+         Si le template ne définit pas de prompt, un SOP Master est généré
+         automatiquement avec le titre de la tâche injecté. */
+      const buildTaskDescription = (
+        task:     import('@/lib/projetTemplates').TaskTemplate,
+        category: string,
+      ): string | null => {
         const blocks: any[] = []
-        // Blocs riches définis dans le template
+        // 1. Blocs riches définis dans le template (priorité max)
         if (Array.isArray((task as any).blocks) && (task as any).blocks.length > 0) {
           blocks.push(...(task as any).blocks)
+        } else {
+          // 2. Sinon, tenter un SOP pré-rédigé de la bibliothèque interne
+          const preWritten = findSopForTask(task.title)
+          if (preWritten) {
+            blocks.push(...preWritten)
+          } else {
+            // 3. Sinon, générer une trame SOP automatique (format Dokploy Premium)
+            blocks.push(...autoGenerateSopBlocks(task.title, category))
+          }
         }
-        // Prompt IA en bloc code (avec callout d'intro)
-        if (task.prompt && task.prompt.trim()) {
+        // Prompt IA : celui du template, sinon SOP Master auto-généré
+        const finalPrompt = (task.prompt && task.prompt.trim())
+          ? task.prompt.trim()
+          : generateSopPromptForTask(task.title, category)
+        if (finalPrompt) {
           blocks.push({
             type:    'callout',
             variant: 'tip',
             title:   'Prompt IA — copier/coller',
             text:    'Guide clé-en-main. Adapte les [placeholders] au contexte du projet.',
           })
-          blocks.push({ type: 'code', text: task.prompt.trim() })
+          blocks.push({ type: 'code', text: finalPrompt })
         }
         const subtasks = (task.subtasks ?? [])
           .map(t => t.trim())
@@ -827,7 +865,7 @@ function TasksTab({
                 priority:       task.priority ?? 'normal',
                 status:         'todo',
                 recurrence:     task.recurrence ?? null,
-                description:    buildTaskDescription(task),
+                description:    buildTaskDescription(task, group.category),
               } as any)
               count++
             } catch (e: any) { console.error('[applyTemplate]', e?.message ?? e) }
@@ -1100,6 +1138,21 @@ function TasksTab({
             {byCategory.map(([cat, items]) => {
               const done = items.filter(t => t.status === 'done').length
               const pct  = Math.round((done / items.length) * 100)
+
+              /* Assigner en masse toutes les tâches de la catégorie */
+              const bulkAssign = (v: string) => {
+                const fields = assigneeFields(v)
+                const label =
+                  v === 'none'  ? 'désassignées'
+                  : v === 'admin' ? 'assignées à toi'
+                  : v.startsWith('stag:')
+                    ? `assignées à ${stagiaires.find(s => s.id === v.slice(5))?.nom_complet ?? 'ce stagiaire'}`
+                    : `assignées à ${memberName(pickable.find(m => m.id === v)!)}`
+                Promise.all(items.map(t => update.mutateAsync({ id: t.id, ...fields } as any)))
+                  .then(() => toast.success(`${items.length} tâche${items.length > 1 ? 's' : ''} ${label}`))
+                  .catch(() => toast.error("Erreur lors de l'assignation groupée"))
+              }
+
               return (
                 <div key={cat} className="space-y-1.5">
                   <div className="flex items-center gap-3 pb-1.5 border-b border-border">
@@ -1109,6 +1162,56 @@ function TasksTab({
                       <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500" style={{ width: `${pct}%` }} />
                     </div>
                     <span className="text-[11px] font-mono text-muted-foreground">{pct}%</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-muted-foreground hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+                          title={`Assigner toutes les tâches "${cat}" à…`}
+                        >
+                          <UserPlus className="w-3 h-3" />
+                          Assigner
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+                        <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          Assigner les {items.length} tâches à…
+                        </div>
+                        <DropdownMenuItem onClick={() => bulkAssign('admin')}>
+                          🛡️ Moi (Admin)
+                        </DropdownMenuItem>
+                        {pickable.length > 0 && (
+                          <>
+                            <div className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border mt-1">
+                              Membres
+                            </div>
+                            {pickable.map(m => (
+                              <DropdownMenuItem key={m.id} onClick={() => bulkAssign(m.id)}>
+                                👤 {memberName(m)}
+                                {m.poste && <span className="text-[10px] text-muted-foreground ml-1">· {m.poste}</span>}
+                              </DropdownMenuItem>
+                            ))}
+                          </>
+                        )}
+                        {pickableStagiaires.length > 0 && (
+                          <>
+                            <div className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-t border-border mt-1">
+                              Stagiaires
+                            </div>
+                            {pickableStagiaires.map(s => (
+                              <DropdownMenuItem key={`stag:${s.id}`} onClick={() => bulkAssign(`stag:${s.id}`)}>
+                                🎓 {s.nom_complet}
+                              </DropdownMenuItem>
+                            ))}
+                          </>
+                        )}
+                        <div className="border-t border-border mt-1 pt-1">
+                          <DropdownMenuItem onClick={() => bulkAssign('none')} className="text-muted-foreground">
+                            <X className="w-3.5 h-3.5 mr-1" /> Tout désassigner
+                          </DropdownMenuItem>
+                        </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                   <div className="space-y-1">
                     {items.map(t => (
@@ -1221,6 +1324,8 @@ function TasksTab({
           }}
           currentUserName={auth.name ?? auth.email ?? 'Admin'}
           isAdmin={true}
+          projet={projet}
+          client={client}
           onSave={async (patch) => {
             await update.mutateAsync({ id: openTask.id, ...patch } as any)
           }}

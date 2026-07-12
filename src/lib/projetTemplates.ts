@@ -740,6 +740,123 @@ avec Claude Code. Voici le contexte permanent à garder en tête :
       },
     ],
   },
+
+  /* ═════════ SOP / DOCUMENTATION D'ENTREPRISE ═════════ */
+  {
+    key:         'sop',
+    label:       'Création de SOP',
+    emoji:       '📚',
+    description: 'Workflow complet pour documenter une procédure — Test du nouvel employé (18 tâches)',
+    groups: [
+      {
+        category: '1️⃣ Cadrage',
+        tasks: [
+          {
+            title: 'Identifier précisément la tâche à documenter',
+            priority: 'urgent',
+            prompt: `Agis comme un consultant SOP senior. Aide-moi à cadrer précisément la tâche à documenter.
+
+Réponds aux questions suivantes de façon concise :
+1. Quelle est la tâche exacte (verbe d'action + objet + contexte) ?
+2. Qui l'exécute habituellement (rôle/poste) ?
+3. À quelle fréquence est-elle réalisée ?
+4. Quel est le livrable final ?
+5. Pourquoi doit-on la documenter maintenant (turnover, scalabilité, qualité, formation) ?
+6. Qui est l'audience cible du SOP (nouveaux, juniors, experts, prestataires) ?
+
+Puis reformule la tâche en 1 phrase claire prête à figurer en titre du SOP.`,
+          },
+          {
+            title: 'Interviewer l\'expert qui réalise la tâche',
+            priority: 'high',
+            prompt: `Agis comme un consultant en excellence opérationnelle qui prépare une interview d'expert.
+
+Contexte : nous documentons la tâche « [TITRE DE LA TÂCHE] ».
+Notre expert : [NOM, RÔLE].
+
+Prépare un guide d'entretien de 45 minutes avec :
+1. Icebreaker (2 min) — mettre en confiance
+2. Vue d'ensemble (5 min) — pourquoi cette tâche, quel impact business
+3. Démonstration pas-à-pas (25 min) — l'expert exécute pendant qu'on filme/prend des notes
+4. Zones grises (8 min) — cas particuliers, erreurs fréquentes du terrain
+5. Optimisations (5 min) — ce qu'il ferait autrement s'il recommençait
+
+Liste 20 questions ouvertes, hiérarchisées, sans jargon, qui font ressortir le savoir tacite.`,
+          },
+          {
+            title: 'Recueillir screenshots, vidéos et exemples réels',
+            priority: 'high',
+            prompt: `Agis comme un rédacteur de documentation technique.
+
+Liste-moi tous les éléments visuels indispensables à capturer pour documenter « [TITRE DE LA TÂCHE] » :
+- Screenshots (chaque écran clé, avec annotations : flèches, encadrés)
+- Vidéos courtes (30-60s pour les manipulations complexes)
+- Exemples de fichiers d'entrée et de sortie
+- Emails ou messages types
+- Erreurs rencontrées et leur affichage exact
+
+Format : tableau avec Élément | Où le trouver | Format attendu | Priorité.`,
+          },
+        ],
+      },
+      {
+        category: '2️⃣ Rédaction des 14 sections',
+        tasks: [
+          { title: 'Section 1 — Objectif (raison d\'être + livrable + critères de réussite)',       priority: 'high' },
+          { title: 'Section 2 — Prérequis (accès, comptes, outils, droits)',                        priority: 'high' },
+          { title: 'Section 3 — Outils utilisés (fonction + configuration + bonnes pratiques)',     priority: 'high' },
+          { title: 'Section 4 — Processus complet (étapes numérotées, chaque clic)',                priority: 'urgent' },
+          { title: 'Section 5 — Contrôle qualité (checklist exhaustive)',                           priority: 'high' },
+          { title: 'Section 6 — Gestion des erreurs (problème / cause / solution / prévention)',    priority: 'high' },
+          { title: 'Section 7 — Optimisation (quoi automatiser, déléguer, confier à l\'IA)',        priority: 'normal' },
+          { title: 'Section 8 — Prompts IA prêts (Claude / ChatGPT / Gemini / Cursor)',             priority: 'high' },
+          { title: 'Section 9 — Livrables (fichiers, nommage, emplacement, résolution)',            priority: 'high' },
+          { title: 'Section 10 — Vérification finale (checklist avant livraison)',                  priority: 'high' },
+          { title: 'Section 11 — Temps estimé (débutant / intermédiaire / expert)',                 priority: 'normal' },
+          { title: 'Section 12 — Niveau de priorité (🔴🟠🟢 + justification)',                       priority: 'normal' },
+          { title: 'Section 13 — Bonnes pratiques (réflexes de 30+ ans de terrain)',                priority: 'normal' },
+          { title: 'Section 14 — Conseils d\'expert (méthodes des meilleures agences)',             priority: 'normal' },
+        ],
+      },
+      {
+        category: '3️⃣ Test du nouvel employé',
+        tasks: [
+          {
+            title: 'Faire exécuter le SOP par un « nouvel employé fictif »',
+            priority: 'urgent',
+            prompt: `Agis comme un contrôleur qualité SOP.
+
+On te fournit un SOP + une personne (junior ou externe) qui ne connaît RIEN de l'entreprise.
+Ta mission : observer cette personne pendant qu'elle exécute la tâche en suivant uniquement le SOP.
+
+Pour chaque étape, note :
+- ✅ Étape claire, exécutée sans hésitation
+- ⚠️ Étape ambiguë (a hésité, a mis > 30s à comprendre)
+- ❌ Étape bloquante (a dû demander de l'aide ou improviser)
+
+À la fin, dresse :
+1. Score global : (étapes ✅ / total)
+2. Liste des étapes ⚠️ et ❌ avec verbatim de la question posée par le testeur
+3. 5 recommandations concrètes pour améliorer
+
+Verdict : le SOP passe le « Test du nouvel employé » si et seulement si zéro étape bloquante ❌.`,
+          },
+          { title: 'Consigner les blocages et incompréhensions',                        priority: 'high'   },
+          { title: 'Réécrire les sections problématiques',                              priority: 'urgent' },
+          { title: 'Refaire le test jusqu\'à zéro blocage',                             priority: 'urgent' },
+        ],
+      },
+      {
+        category: '4️⃣ Validation & Publication',
+        tasks: [
+          { title: 'Relecture par le responsable métier',                               priority: 'high'   },
+          { title: 'Ajout du SOP à la base de connaissances (Notion / ERP / Drive)',    priority: 'high'   },
+          { title: 'Formation express de l\'équipe (30 min max)',                       priority: 'normal' },
+          { title: 'Planifier une revue du SOP dans 3 mois (mise à jour)',              priority: 'normal' },
+        ],
+      },
+    ],
+  },
 ]
 
 export function findTemplate(key: string): ProjetTemplate | undefined {
