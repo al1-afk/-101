@@ -158,6 +158,16 @@ export default function ProjetDetail() {
     return () => window.removeEventListener('sop:goto-section', onGoto)
   }, [])
 
+  /* Auto-progression from tasks (read-only display, optional override) */
+  const taskProgression = useMemo(() => {
+    if (tasks.length === 0) return null
+    const done = tasks.filter(t => t.status === 'done').length
+    return Math.round((done / tasks.length) * 100)
+  }, [tasks])
+
+  /* Domain & hosting expirations live inside projet.notes envelope */
+  const envelope = useMemo(() => parseProjet(projet?.notes ?? null), [projet?.notes])
+
   if (!projet) {
     return (
       <div className="flex flex-col items-center justify-center py-32 gap-4">
@@ -172,16 +182,6 @@ export default function ProjetDetail() {
 
   const client    = clients.find(c => c.id === projet.client_id)
   const statutCfg = STATUT_CFG[projet.statut]
-
-  /* Auto-progression from tasks (read-only display, optional override) */
-  const taskProgression = useMemo(() => {
-    if (tasks.length === 0) return null
-    const done = tasks.filter(t => t.status === 'done').length
-    return Math.round((done / tasks.length) * 100)
-  }, [tasks])
-
-  /* Domain & hosting expirations live inside projet.notes envelope */
-  const envelope = useMemo(() => parseProjet(projet.notes), [projet.notes])
 
   const updateEnvelope = (patch: { domainExpiration?: string | null; hostingExpiration?: string | null }) => {
     const next = serializeProjet({ ...envelope, ...patch })
