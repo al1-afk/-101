@@ -38,6 +38,8 @@ export default function Auth() {
     return <Navigate to={`/${slug}`} replace />
   }
 
+  const isRateLimit = (msg?: string) => !!msg && /limite de requêtes/i.test(msg)
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null); setLoading(true)
@@ -45,7 +47,7 @@ export default function Auth() {
       const res: any = await signIn(email, password)
       if (res?.needsVerification) { setStage('verify'); setResendIn(30) }
     } catch (err: any) {
-      setError(err.message || 'Identifiants incorrects')
+      if (!isRateLimit(err?.message)) setError(err.message || 'Identifiants incorrects')
     } finally { setLoading(false) }
   }
 
@@ -55,7 +57,7 @@ export default function Auth() {
     try {
       await verifyLogin(email, code.trim())
     } catch (err: any) {
-      setError(err.message || 'Code incorrect')
+      if (!isRateLimit(err?.message)) setError(err.message || 'Code incorrect')
     } finally { setLoading(false) }
   }
 
@@ -66,7 +68,7 @@ export default function Auth() {
       await resendLoginCode(email)
       setResendIn(30)
     } catch (err: any) {
-      setError(err.message || 'Erreur lors du renvoi')
+      if (!isRateLimit(err?.message)) setError(err.message || 'Erreur lors du renvoi')
     } finally { setResending(false) }
   }
 
@@ -673,8 +675,8 @@ function ResetPasswordModal({
                       type={showPwd ? 'text' : 'password'}
                       value={newPassword}
                       onChange={(e) => setNewPwd(e.target.value)}
-                      placeholder="Min. 8 caractères"
-                      minLength={8}
+                      placeholder="Min. 10 caractères (lettres + chiffres)"
+                      minLength={10}
                       className="pl-10 pr-10 h-11"
                       required
                     />

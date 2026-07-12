@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
-import crypto from 'crypto'
 import { query, queryOne } from '../db/pool'
 import {
   signAccessToken, signRefreshToken, verifyRefreshToken,
@@ -9,14 +8,10 @@ import {
 import { authLimiter, passwordLimiter } from '../middleware/security'
 import { sendEmail, loginCodeEmail, passwordResetEmail } from '../lib/email'
 import { teamInvitationEmail } from '../lib/email-team'
+import { randomToken, hashToken, tokenPrefix } from '../lib/tokenSecurity'
+import { logger } from '../lib/logger'
 
 const router = Router()
-
-/* ── Helpers ─────────────────────────────────────────────────── */
-
-function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex')
-}
 
 async function issueTokenPair(
   res: Response,
@@ -56,8 +51,11 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
   if (!email || !password || !tenantSlug || !tenantName) {
     return res.status(400).json({ error: 'Tous les champs sont requis' })
   }
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Mot de passe: minimum 8 caractères' })
+  if (typeof password !== 'string' || password.length < 10) {
+    return res.status(400).json({ error: 'Mot de passe: minimum 10 caractères' })
+  }
+  if (!/[0-9]/.test(password) || !/[A-Za-z]/.test(password)) {
+    return res.status(400).json({ error: 'Mot de passe: doit contenir au moins un chiffre et une lettre' })
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Email invalide' })
@@ -97,7 +95,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
     res.status(201).json({ token: accessToken, tenantSlug: s, tenantId: tenant!.id })
   } catch (err: any) {
-    console.error('[register]', err.message)
+    logger.error('[register]', err.message)
     res.status(500).json({ error: 'Erreur lors de l\'inscription' })
   }
 })
@@ -184,7 +182,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
         const tpl = loginCodeEmail(code)
         await sendEmail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text })
       } catch (e: any) {
-        console.error('[login:first-verify-email]', e?.message ?? e)
+        logger.error('[login:first-verify-email]', e?.message ?? e)
       }
       return res.json({ needsVerification: true, email })
     }
@@ -198,7 +196,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
 
     res.json({ token: accessToken, tenantSlug: s, tenantId: memberRow.tenant_id, role: memberRow.role })
   } catch (err: any) {
-    console.error('[login]', err.message)
+    logger.error('[login]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -270,7 +268,7 @@ router.post('/verify-login', authLimiter, async (req: Request, res: Response) =>
 
     res.json({ token: accessToken, tenantSlug: s, tenantId: memberRow.tenant_id, role: memberRow.role })
   } catch (err: any) {
-    console.error('[verify-login]', err.message)
+    logger.error('[verify-login]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -314,12 +312,12 @@ router.post('/resend-login-code', authLimiter, async (req: Request, res: Respons
       const tpl = loginCodeEmail(code)
       await sendEmail({ to: email, ...tpl })
     } catch (e: any) {
-      console.error('[resend-login-code:email]', e?.message ?? e)
+      logger.error('[resend-login-code:email]', e?.message ?? e)
     }
 
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[resend-login-code]', err.message)
+    logger.error('[resend-login-code]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -350,14 +348,20 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
         [email]
       )
       if (member) {
-        const inviteToken = crypto.randomBytes(32).toString('hex')
+        const inviteToken     = randomToken()
+        const inviteTokenHash = hashToken(inviteToken)
         await query(
           `UPDATE public.team_members
-              SET invitation_token = $1, invitation_sent_at = NOW(),
-                  invitation_expires_at = NOW() + INTERVAL '7 days',
+              SET invitation_token = NULL,
+                  invitation_token_hash = $1,
+                  invitation_purpose = 'invite',
+                  invitation_used_at = NULL,
+                  invitation_created_ip = $3::inet,
+                  invitation_sent_at = NOW(),
+                  invitation_expires_at = NOW() + INTERVAL '48 hours',
                   account_status = 'invited', updated_at = NOW()
             WHERE id = $2`,
-          [inviteToken, member.id]
+          [inviteTokenHash, member.id, req.ip ?? '0.0.0.0']
         )
         const originHeader = req.headers.origin
         const inviteBase = typeof originHeader === 'string' && originHeader.length > 0
@@ -377,8 +381,9 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
             sopCategories: [],
           })
           await sendEmail({ to: member.email, ...tpl })
+          logger.debug('[forgot-password] reinvited team_member', { id: member.id, token_prefix: tokenPrefix(inviteToken) })
         } catch (e: any) {
-          console.error('[forgot-password:reinvite]', e?.message ?? e)
+          logger.error('[forgot-password:reinvite]', e?.message ?? e)
         }
       }
       /* Always respond success to avoid email enumeration */
@@ -405,12 +410,12 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
       const tpl = passwordResetEmail(code)
       await sendEmail({ to: email, ...tpl })
     } catch (e: any) {
-      console.error('[forgot-password:email]', e?.message ?? e)
+      logger.error('[forgot-password:email]', e?.message ?? e)
     }
 
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[forgot-password]', err.message)
+    logger.error('[forgot-password]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -421,8 +426,11 @@ router.post('/reset-password', authLimiter, async (req: Request, res: Response) 
   if (!email || !code || !newPassword) {
     return res.status(400).json({ error: 'Tous les champs sont requis' })
   }
-  if (newPassword.length < 8) {
-    return res.status(400).json({ error: 'Mot de passe: minimum 8 caractères' })
+  if (typeof newPassword !== 'string' || newPassword.length < 10) {
+    return res.status(400).json({ error: 'Mot de passe: minimum 10 caractères' })
+  }
+  if (!/[0-9]/.test(newPassword) || !/[A-Za-z]/.test(newPassword)) {
+    return res.status(400).json({ error: 'Mot de passe: doit contenir au moins un chiffre et une lettre' })
   }
 
   try {
@@ -466,7 +474,7 @@ router.post('/reset-password', authLimiter, async (req: Request, res: Response) 
 
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[reset-password]', err.message)
+    logger.error('[reset-password]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -523,7 +531,7 @@ router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
 
     res.json({ token: accessToken })
   } catch (err: any) {
-    console.error('[refresh]', err.message)
+    logger.error('[refresh]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -548,8 +556,11 @@ router.post('/change-password', requireAuth, passwordLimiter, async (req: Reques
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ error: 'Les deux mots de passe sont requis' })
   }
-  if (newPassword.length < 8) {
-    return res.status(400).json({ error: 'Minimum 8 caractères requis' })
+  if (typeof newPassword !== 'string' || newPassword.length < 10) {
+    return res.status(400).json({ error: 'Minimum 10 caractères requis' })
+  }
+  if (!/[0-9]/.test(newPassword) || !/[A-Za-z]/.test(newPassword)) {
+    return res.status(400).json({ error: 'Doit contenir au moins un chiffre et une lettre' })
   }
 
   try {
@@ -573,7 +584,7 @@ router.post('/change-password', requireAuth, passwordLimiter, async (req: Reques
 
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[change-password]', err.message)
+    logger.error('[change-password]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })

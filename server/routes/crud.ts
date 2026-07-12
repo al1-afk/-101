@@ -3,6 +3,7 @@ import { tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { safeColumn } from '../middleware/security'
 import { tableRbac } from '../middleware/rbac'
+import { logger } from '../lib/logger'
 import {
   notifyNewProspect, notifyTaskValidation, notifyNewPaiement, notifyDevisAccepte,
 } from '../lib/notificationEmails'
@@ -147,15 +148,14 @@ router.post('/:table', async (req: Request, res: Response) => {
       const tid = req.user!.tenantId
       console.log(`[crud:notif-hook] POST /api/${table} → row.id=${row.id} tid=${tid}`)
       if (table === 'prospects') {
-        notifyNewProspect(tid, row).catch(e => console.error('[notif:prospect] async err:', e?.message))
+        notifyNewProspect(tid, row).catch(e => logger.error('[notif:prospect] async err:', e?.message))
       } else if (table === 'paiements') {
-        notifyNewPaiement(tid, row).catch(e => console.error('[notif:paiement] async err:', e?.message))
+        notifyNewPaiement(tid, row).catch(e => logger.error('[notif:paiement] async err:', e?.message))
       }
     }
   } catch (err: any) {
-    console.error(`[POST /api/${table}]`, err?.code, err?.message, err?.detail, { keys })
-    if (isProd) return res.status(500).json({ error: 'Erreur serveur' })
-    res.status(500).json({ error: `DB ${err?.code ?? ''}: ${err?.message ?? 'Erreur serveur'}`, detail: err?.detail })
+    logger.error(`[POST /api/${table}]`, err?.code, err?.message, err?.detail, { keys })
+    res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 
@@ -192,9 +192,8 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
       void notifyDevisAccepte(tid, row)
     }
   } catch (err: any) {
-    console.error(`[PATCH /api/${table}/${id}]`, err?.code, err?.message, err?.detail, { keys })
-    if (isProd) return res.status(500).json({ error: 'Erreur serveur' })
-    res.status(500).json({ error: `DB ${err?.code ?? ''}: ${err?.message ?? 'Erreur serveur'}`, detail: err?.detail })
+    logger.error(`[PATCH /api/${table}/${id}]`, err?.code, err?.message, err?.detail, { keys })
+    res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 

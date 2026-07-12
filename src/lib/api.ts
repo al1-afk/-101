@@ -213,18 +213,27 @@ export interface TeamInviteInput {
   tasks?:         TeamTaskInput[]
 }
 
+export interface InviteIssuedResponse {
+  id?:          string
+  success?:     true
+  status?:      string
+  expires_at:   string
+  /** Aperçu du token pour audit (ex. "08e0…e970") — jamais le lien complet. */
+  masked_token: string
+}
+
 export const teamMgmtApi = {
   list:    () => api.get<TeamMemberRow[]>('/api/team/members'),
   get:     (id: string) => api.get<any>(`/api/team/members/${id}`),
-  invite:  (data: TeamInviteInput) => api.post<{ id: string; invitation_url: string }>('/api/team/invite', data),
+  invite:  (data: TeamInviteInput) => api.post<InviteIssuedResponse>('/api/team/invite', data),
   update:  (id: string, data: Partial<TeamInviteInput>) =>
     api.patch<{ success: true }>(`/api/team/members/${id}`, data),
   setAccess: (id: string, access: TeamMemberAccess[]) =>
     request<{ success: true }>('PUT', `/api/team/members/${id}/access`, { access }),
   suspend: (id: string) => api.post<{ success: true }>(`/api/team/members/${id}/suspend`, {}),
   activate:(id: string) => api.post<{ success: true }>(`/api/team/members/${id}/activate`, {}),
-  resend:  (id: string) => api.post<{ success: true; invitation_url: string }>(`/api/team/members/${id}/resend`, {}),
-  resetPwd:(id: string) => api.post<{ success: true; reset_url: string }>(`/api/team/members/${id}/reset-password`, {}),
+  resend:  (id: string) => api.post<InviteIssuedResponse>(`/api/team/members/${id}/resend`, {}),
+  resetPwd:(id: string) => api.post<InviteIssuedResponse>(`/api/team/members/${id}/reset-password`, {}),
   archive: (id: string) => api.delete<{ success: true }>(`/api/team/members/${id}`),
   listArchived:    () => api.get<TeamMemberRow[]>('/api/team/members?archived=true'),
   restore:         (id: string) => api.post<{ success: true }>(`/api/team/members/${id}/restore`, {}),
@@ -238,6 +247,12 @@ export const teamMgmtApi = {
 
   activity:     (memberId: string, limit = 100) =>
     api.get<any[]>(`/api/team/members/${memberId}/activity?limit=${limit}`),
+
+  finance:      (memberId: string) => api.get<{ payroll: any[]; advances: any[]; payments: any[] }>(
+                  `/api/team/members/${memberId}/finance`),
+  leaves:       (memberId: string) => api.get<any[]>(`/api/team/members/${memberId}/leaves`),
+  projects:     (memberId: string) => api.get<any[]>(`/api/team/members/${memberId}/projects`),
+  performance:  (memberId: string) => api.get<any[]>(`/api/team/members/${memberId}/performance`),
 }
 
 /* ── Team-member (employee/trainer) auth ─────────────────────── */

@@ -8,6 +8,7 @@ import { forwardRef } from 'react'
 import type { Facture } from '@/hooks/useFactures'
 import type { Client }  from '@/hooks/useClients'
 import FactureTemplateSimple from './FactureTemplateSimple'
+import { sanitizeRichHtml } from '@/lib/safeHtml'
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type Currency  = 'MAD' | 'EUR' | 'USD' | 'GBP'
@@ -117,7 +118,7 @@ function BlockContent({ blocks }: { blocks: DescriptionBlock[] }) {
           <div
             key={i}
             className="text-[10px] text-[#374151] leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-0.5 [&_strong]:font-semibold [&_strong]:text-[#0a1a3c] [&_em]:italic [&_u]:underline [&_s]:line-through"
-            dangerouslySetInnerHTML={{ __html: b.content }}
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(b.content) }}
           />
         )
         const text = stripHtml(b.content)

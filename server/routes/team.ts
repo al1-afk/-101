@@ -24,13 +24,14 @@
  */
 import { Router, Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
-import crypto from 'crypto'
 import { query, queryOne, tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth, signAccessToken, signRefreshToken } from '../middleware/auth'
 import { NextFunction } from 'express'
-import { authLimiter } from '../middleware/security'
+import { authLimiter, inviteLimiter } from '../middleware/security'
 import { sendEmail } from '../lib/email'
 import { teamInvitationEmail, teamPasswordResetEmail } from '../lib/email-team'
+import { randomToken, hashToken, maskToken, tokenPrefix } from '../lib/tokenSecurity'
+import { logger } from '../lib/logger'
 
 const router = Router()
 
@@ -67,7 +68,46 @@ async function logActivity(
       [tenantId, teamMemberId, actionType, JSON.stringify(details), ip ?? null, ua ?? null],
     )
   } catch (e: any) {
-    console.error('[team:activity]', e.message)
+    logger.error('[team:activity]', e.message)
+  }
+}
+
+/* Insert a row in security_audit_log. Never store a raw token, only a
+ * short prefix that can help admins correlate events. */
+async function recordSecurityAudit(
+  tenantId: string,
+  opts: {
+    actorUserId?: string | null
+    targetType:   string
+    targetId?:    string | null
+    action:       string
+    tokenPrefix?: string
+    ip?:          string
+    ua?:          string
+    metadata?:    Record<string, unknown>
+  },
+) {
+  try {
+    await tenantQuery(
+      tenantId,
+      `INSERT INTO public.security_audit_log
+         (tenant_id, actor_user_id, target_type, target_id, action,
+          token_prefix, ip_address, user_agent, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8, $9::jsonb)`,
+      [
+        tenantId,
+        opts.actorUserId ?? null,
+        opts.targetType,
+        opts.targetId ?? null,
+        opts.action,
+        opts.tokenPrefix ?? null,
+        opts.ip ?? null,
+        opts.ua ?? null,
+        JSON.stringify(opts.metadata ?? {}),
+      ],
+    )
+  } catch (e: any) {
+    logger.error('[security-audit]', e.message)
   }
 }
 
@@ -81,9 +121,10 @@ async function logActivity(
  */
 router.get('/invite/:token', async (req: Request, res: Response) => {
   const { token } = req.params
-  if (!token || token.length < 20) {
+  if (!token || !/^[a-f0-9]{40,128}$/i.test(token)) {
     return res.status(404).json({ error: 'Lien invalide' })
   }
+  const tokenHash = hashToken(token)
   try {
     const row = await queryOne<{
       id: string; tenant_id: string; first_name: string | null; last_name: string | null;
@@ -94,8 +135,9 @@ router.get('/invite/:token', async (req: Request, res: Response) => {
               m.job_title, m.invitation_expires_at, m.account_status, t.name AS tenant_name
          FROM public.team_members m
          JOIN public.tenants t ON t.id = m.tenant_id
-        WHERE m.invitation_token = $1`,
-      [token],
+        WHERE m.invitation_token_hash = $1
+          AND m.invitation_used_at IS NULL`,
+      [tokenHash],
     )
     if (!row) return res.status(404).json({ error: 'Lien invalide ou déjà utilisé' })
 
@@ -115,7 +157,7 @@ router.get('/invite/:token', async (req: Request, res: Response) => {
       expires_at:  row.invitation_expires_at,
     })
   } catch (err: any) {
-    console.error('[team:invite-get]', err.message)
+    logger.error('[team:invite-get]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -128,29 +170,36 @@ router.get('/invite/:token', async (req: Request, res: Response) => {
 router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Response) => {
   const { token } = req.params
   const { password } = req.body
-  if (!token) return res.status(400).json({ error: 'Token requis' })
-  if (!password || typeof password !== 'string' || password.length < 8) {
-    return res.status(400).json({ error: 'Mot de passe : minimum 8 caractères' })
+  if (!token || !/^[a-f0-9]{40,128}$/i.test(token)) {
+    return res.status(400).json({ error: 'Token invalide' })
   }
-  if (!/[0-9]/.test(password)) {
-    return res.status(400).json({ error: 'Mot de passe : doit contenir au moins un chiffre' })
+  if (!password || typeof password !== 'string' || password.length < 10) {
+    return res.status(400).json({ error: 'Mot de passe : minimum 10 caractères' })
+  }
+  if (!/[0-9]/.test(password) || !/[A-Za-z]/.test(password)) {
+    return res.status(400).json({ error: 'Mot de passe : doit contenir au moins un chiffre et une lettre' })
   }
 
   try {
+    const tokenHash = hashToken(token)
+    /* Verify + atomically consume the token in a single UPDATE.
+       If invitation_used_at is already set, the RETURNING row is empty
+       → we reject any replay. */
     const member = await queryOne<{
       id: string; tenant_id: string; email: string; prenom: string; nom: string;
       invitation_expires_at: string | null; account_status: string;
     }>(
-      `SELECT id, tenant_id, email, prenom, nom, invitation_expires_at, account_status
-         FROM public.team_members WHERE invitation_token = $1`,
-      [token],
+      `UPDATE public.team_members
+          SET invitation_used_at = NOW()
+        WHERE invitation_token_hash = $1
+          AND invitation_used_at IS NULL
+          AND (invitation_expires_at IS NULL OR invitation_expires_at > NOW())
+        RETURNING id, tenant_id, email, prenom, nom, invitation_expires_at, account_status`,
+      [tokenHash],
     )
-    if (!member) return res.status(404).json({ error: 'Lien invalide ou déjà utilisé' })
+    if (!member) return res.status(404).json({ error: 'Lien invalide, expiré ou déjà utilisé' })
     if (member.account_status === 'active') {
       return res.status(410).json({ error: 'Invitation déjà acceptée' })
-    }
-    if (member.invitation_expires_at && new Date(member.invitation_expires_at) < new Date()) {
-      return res.status(410).json({ error: 'Lien expiré' })
     }
 
     const hash = await bcrypt.hash(password, 12)
@@ -180,7 +229,9 @@ router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Resp
               account_status = 'active',
               invitation_accepted_at = NOW(),
               invitation_token = NULL,
+              invitation_token_hash = NULL,
               invitation_expires_at = NULL,
+              invitation_purpose = NULL,
               last_login_at = NOW(),
               updated_at = NOW()
         WHERE id = $2`,
@@ -218,7 +269,7 @@ router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Resp
       },
     })
   } catch (err: any) {
-    console.error('[team:invite-accept]', err.message)
+    logger.error('[team:invite-accept]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -309,7 +360,7 @@ router.post('/auth/login', authLimiter, async (req: Request, res: Response) => {
       },
     })
   } catch (err: any) {
-    console.error('[team:login]', err.message)
+    logger.error('[team:login]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -344,7 +395,7 @@ router.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
     )
     res.json({ ...member, access: access.map(a => ({ category: a.sop_category, level: a.access_level })) })
   } catch (err: any) {
-    console.error('[team:me]', err.message)
+    logger.error('[team:me]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -396,7 +447,7 @@ async function requireTenantManager(req: Request, res: Response, next: NextFunct
 const requireAdminMgr = [requireAuth, requireTenantManager]
 
 /* POST /api/team/invite — create member + send invitation email */
-router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) => {
+router.post('/invite', inviteLimiter, ...requireAdminMgr, async (req: Request, res: Response) => {
   const {
     first_name, last_name, email, phone, member_type, job_title,
     description, sop_categories, tasks,
@@ -423,7 +474,8 @@ router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) =
       return res.status(409).json({ error: 'Un membre avec cet email existe déjà' })
     }
 
-    const token = crypto.randomBytes(32).toString('hex')
+    const token = randomToken()
+    const tokenHash = hashToken(token)
 
     const member = existing
       ? await tenantQueryOne<{ id: string }>(
@@ -431,24 +483,36 @@ router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) =
           `UPDATE public.team_members SET
              prenom = $2, nom = $3, telephone = $4, poste = $5, job_title = $5,
              member_type = $6, account_status = 'invited',
-             invitation_token = $7, invitation_sent_at = NOW(),
-             invitation_expires_at = NOW() + INTERVAL '7 days',
+             invitation_token = NULL,
+             invitation_token_hash = $7,
+             invitation_purpose = 'invite',
+             invitation_created_by = $10,
+             invitation_created_ip = $11::inet,
+             invitation_used_at = NULL,
+             invitation_sent_at = NOW(),
+             invitation_expires_at = NOW() + INTERVAL '48 hours',
              statut = 'actif', updated_at = NOW()
            WHERE id = $1
            RETURNING id`,
-          [existing.id, first_name, last_name, phone ?? null, job_title ?? null, memberType, token],
+          [existing.id, first_name, last_name, phone ?? null, job_title ?? null, memberType, tokenHash,
+           /* $8, $9 unused historically */ null, null,
+           creatorId, req.ip ?? '0.0.0.0'],
         )
       : await tenantQueryOne<{ id: string }>(
           tenantId,
           `INSERT INTO public.team_members
              (tenant_id, prenom, nom, email, telephone, poste, job_title,
-              member_type, account_status, invitation_token, invitation_sent_at,
-              invitation_expires_at, created_by, statut, role)
-           VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 'invited', $8, NOW(),
-                   NOW() + INTERVAL '7 days', $9, 'actif', 'viewer')
+              member_type, account_status, invitation_token_hash, invitation_purpose,
+              invitation_sent_at, invitation_expires_at,
+              invitation_created_by, invitation_created_ip,
+              created_by, statut, role)
+           VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 'invited', $8, 'invite',
+                   NOW(), NOW() + INTERVAL '48 hours',
+                   $9, $10::inet,
+                   $9, 'actif', 'viewer')
            RETURNING id`,
           [tenantId, first_name, last_name, email, phone ?? null, job_title ?? null,
-           memberType, token, creatorId],
+           memberType, tokenHash, creatorId, req.ip ?? '0.0.0.0'],
         )
 
     if (existing) {
@@ -485,7 +549,8 @@ router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) =
       }
     }
 
-    /* Send email */
+    /* Send email — the raw token leaves the server ONLY here, one time.
+       We never return it to the caller and never log it. */
     const inviteUrl = `${frontendOrigin(req)}/invite/${token}`
     const tenant = await queryOne<{ name: string }>(`SELECT name FROM public.tenants WHERE id = $1`, [tenantId])
     const inviter = await queryOne<{ name: string }>(`SELECT name FROM public.users WHERE id = $1`, [creatorId])
@@ -500,15 +565,33 @@ router.post('/invite', ...requireAdminMgr, async (req: Request, res: Response) =
       })
       await sendEmail({ to: email, ...tpl })
     } catch (e: any) {
-      console.error('[team:invite-email]', e.message)
+      logger.error('[team:invite-email]', e.message)
     }
 
-    await logActivity(tenantId, member!.id, 'invitation_sent', { by: creatorId })
+    await logActivity(tenantId, member!.id, 'invitation_sent',
+      { by: creatorId, token_prefix: tokenPrefix(token) },
+      req.ip, req.headers['user-agent'] as string,
+    )
+    await recordSecurityAudit(tenantId, {
+      actorUserId: creatorId,
+      targetType:  'team_member',
+      targetId:    member!.id,
+      action:      'invite_issued',
+      tokenPrefix: tokenPrefix(token),
+      ip:          req.ip,
+      ua:          req.headers['user-agent'] as string,
+    })
 
-    res.status(201).json({ id: member!.id, invitation_url: inviteUrl })
+    /* SAFE RESPONSE — masked token only. Never the raw URL. */
+    res.status(201).json({
+      id:            member!.id,
+      status:        'invited',
+      expires_at:    new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      masked_token:  maskToken(token),
+    })
   } catch (err: any) {
-    console.error('[team:invite]', err.message, err.detail)
-    res.status(500).json({ error: 'Erreur serveur', detail: process.env.NODE_ENV === 'production' ? undefined : err.message })
+    logger.error('[team:invite]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 
@@ -537,7 +620,7 @@ router.get('/members', ...requireAdminMgr, async (req: Request, res: Response) =
     )
     res.json(members)
   } catch (err: any) {
-    console.error('[team:members]', err.message)
+    logger.error('[team:members]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -552,7 +635,9 @@ router.get('/members/:id', ...requireAdminMgr, async (req: Request, res: Respons
     const member = await tenantQueryOne(
       tenantId,
       `SELECT m.id, m.prenom AS first_name, m.nom AS last_name, m.email, m.telephone,
-              m.job_title, m.member_type, m.account_status, m.last_login_at,
+              m.job_title, m.poste, m.departement, m.role, m.statut,
+              m.salaire_base, m.date_embauche,
+              m.member_type, m.account_status, m.last_login_at,
               m.invitation_sent_at, m.invitation_accepted_at, m.invitation_expires_at,
               m.avatar_url, m.created_at, m.created_by
          FROM public.team_members m WHERE m.id = $1`,
@@ -560,20 +645,42 @@ router.get('/members/:id', ...requireAdminMgr, async (req: Request, res: Respons
     )
     if (!member) return res.status(404).json({ error: 'Membre introuvable' })
 
-    const [access, tasks, activity] = await Promise.all([
+    const [access, tasks, activity, timeStats, dailyHours] = await Promise.all([
       tenantQuery(tenantId,
         `SELECT sop_category, access_level, granted_at FROM public.team_member_sop_access WHERE team_member_id = $1`, [id]),
       tenantQuery(tenantId,
-        `SELECT id, title, description, priority, status, due_date, created_at, completed_at
+        `SELECT id, title, description, priority, status, due_date, created_at, completed_at, elapsed_seconds
            FROM public.team_member_tasks WHERE team_member_id = $1 ORDER BY created_at DESC LIMIT 50`, [id]),
       tenantQuery(tenantId,
         `SELECT id, action_type, action_details, created_at, ip_address
            FROM public.team_member_activity WHERE team_member_id = $1 ORDER BY created_at DESC LIMIT 100`, [id]),
+      /* Agrégats de temps travaillé (sur TOUTES les tâches, pas le LIMIT 50) */
+      tenantQueryOne(tenantId, `
+        SELECT
+          COALESCE(SUM(elapsed_seconds), 0)::bigint AS total_seconds,
+          COALESCE(SUM(elapsed_seconds) FILTER (WHERE COALESCE(completed_at, updated_at) >= CURRENT_DATE), 0)::bigint AS today_seconds,
+          COALESCE(SUM(elapsed_seconds) FILTER (WHERE COALESCE(completed_at, updated_at) >= DATE_TRUNC('week', NOW())), 0)::bigint AS week_seconds,
+          COALESCE(SUM(elapsed_seconds) FILTER (WHERE COALESCE(completed_at, updated_at) >= DATE_TRUNC('month', NOW())), 0)::bigint AS month_seconds,
+          COUNT(DISTINCT DATE(COALESCE(completed_at, updated_at))) FILTER (WHERE elapsed_seconds > 0) AS active_days
+        FROM public.team_member_tasks
+        WHERE team_member_id = $1
+      `, [id]),
+      /* 14 derniers jours d'activité — pour graphique mini-sparkline */
+      tenantQuery(tenantId, `
+        SELECT DATE(COALESCE(completed_at, updated_at)) AS day,
+               COALESCE(SUM(elapsed_seconds), 0)::bigint AS seconds
+        FROM public.team_member_tasks
+        WHERE team_member_id = $1
+          AND elapsed_seconds > 0
+          AND COALESCE(completed_at, updated_at) >= CURRENT_DATE - INTERVAL '13 days'
+        GROUP BY day
+        ORDER BY day ASC
+      `, [id]),
     ])
 
-    res.json({ ...member, access, tasks, activity })
+    res.json({ ...member, access, tasks, activity, time_stats: timeStats, daily_hours: dailyHours })
   } catch (err: any) {
-    console.error('[team:member-detail]', err.message)
+    logger.error('[team:member-detail]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -605,7 +712,7 @@ router.patch('/members/:id', ...requireAdminMgr, async (req: Request, res: Respo
     if (!row) return res.status(404).json({ error: 'Membre introuvable' })
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[team:patch]', err.message)
+    logger.error('[team:patch]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -634,7 +741,7 @@ router.put('/members/:id/access', ...requireAdminMgr, async (req: Request, res: 
     await logActivity(tenantId, id, 'access_updated', { count: validAccess.length, by: grantor })
     res.json({ success: true, access: validAccess })
   } catch (err: any) {
-    console.error('[team:put-access]', err.message)
+    logger.error('[team:put-access]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -653,7 +760,7 @@ router.post('/members/:id/suspend', ...requireAdminMgr, async (req: Request, res
     await logActivity(tenantId, id, 'suspended', { by: req.user!.userId })
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[team:suspend]', err.message)
+    logger.error('[team:suspend]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -672,13 +779,15 @@ router.post('/members/:id/activate', ...requireAdminMgr, async (req: Request, re
     await logActivity(tenantId, id, 'reactivated', { by: req.user!.userId })
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[team:activate]', err.message)
+    logger.error('[team:activate]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 
-/* POST /api/team/members/:id/resend — re-send invitation email (new token) */
-router.post('/members/:id/resend', ...requireAdminMgr, async (req: Request, res: Response) => {
+/* POST /api/team/members/:id/resend — re-send invitation email (new token).
+   Invalide tous les liens précédents et n'expose JAMAIS le token en clair
+   à l'administrateur (le lien part uniquement par email). */
+router.post('/members/:id/resend', inviteLimiter, ...requireAdminMgr, async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId
   const { id } = req.params
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
@@ -693,15 +802,22 @@ router.post('/members/:id/resend', ...requireAdminMgr, async (req: Request, res:
     )
     if (!member) return res.status(404).json({ error: 'Membre introuvable' })
 
-    const token = crypto.randomBytes(32).toString('hex')
+    const token = randomToken()
+    const tokenHash = hashToken(token)
     await tenantQuery(
       tenantId,
       `UPDATE public.team_members
-          SET invitation_token = $1, invitation_sent_at = NOW(),
-              invitation_expires_at = NOW() + INTERVAL '7 days',
+          SET invitation_token = NULL,
+              invitation_token_hash = $1,
+              invitation_purpose = 'invite',
+              invitation_used_at = NULL,
+              invitation_created_by = $3,
+              invitation_created_ip = $4::inet,
+              invitation_sent_at = NOW(),
+              invitation_expires_at = NOW() + INTERVAL '48 hours',
               account_status = 'invited', updated_at = NOW()
         WHERE id = $2`,
-      [token, id],
+      [tokenHash, id, req.user!.userId, req.ip ?? '0.0.0.0'],
     )
     const inviteUrl = `${frontendOrigin(req)}/invite/${token}`
     const tenant = await queryOne<{ name: string }>(`SELECT name FROM public.tenants WHERE id = $1`, [tenantId])
@@ -717,18 +833,36 @@ router.post('/members/:id/resend', ...requireAdminMgr, async (req: Request, res:
       })
       await sendEmail({ to: member.email, ...tpl })
     } catch (e: any) {
-      console.error('[team:resend-email]', e.message)
+      logger.error('[team:resend-email]', e.message)
     }
-    await logActivity(tenantId, id, 'invitation_resent', { by: req.user!.userId })
-    res.json({ success: true, invitation_url: inviteUrl })
+    await logActivity(tenantId, id, 'invitation_resent',
+      { by: req.user!.userId, token_prefix: tokenPrefix(token) },
+      req.ip, req.headers['user-agent'] as string,
+    )
+    await recordSecurityAudit(tenantId, {
+      actorUserId: req.user!.userId,
+      targetType:  'team_member', targetId: id,
+      action:      'invite_resent',
+      tokenPrefix: tokenPrefix(token),
+      ip:          req.ip, ua: req.headers['user-agent'] as string,
+    })
+    /* SAFE RESPONSE — no raw URL, only a masked token to help the admin
+       cross-reference audit logs. */
+    res.json({
+      success:      true,
+      status:       'invited',
+      expires_at:   new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      masked_token: maskToken(token),
+    })
   } catch (err: any) {
-    console.error('[team:resend]', err.message)
+    logger.error('[team:resend]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 
-/* POST /api/team/members/:id/reset-password — generate reset token */
-router.post('/members/:id/reset-password', ...requireAdminMgr, async (req: Request, res: Response) => {
+/* POST /api/team/members/:id/reset-password — generate reset token.
+   Expiration courte (30 min). Token stocké hashé, jamais retourné en clair. */
+router.post('/members/:id/reset-password', inviteLimiter, ...requireAdminMgr, async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId
   const { id } = req.params
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
@@ -740,34 +874,59 @@ router.post('/members/:id/reset-password', ...requireAdminMgr, async (req: Reque
     )
     if (!member) return res.status(404).json({ error: 'Membre introuvable' })
 
-    /* We reuse the invitation_token slot for a one-shot reset */
-    const token = crypto.randomBytes(32).toString('hex')
+    const token = randomToken()
+    const tokenHash = hashToken(token)
     await tenantQuery(
       tenantId,
       `UPDATE public.team_members
-          SET invitation_token = $1, invitation_sent_at = NOW(),
-              invitation_expires_at = NOW() + INTERVAL '24 hours',
+          SET invitation_token = NULL,
+              invitation_token_hash = $1,
+              invitation_purpose = 'reset',
+              invitation_used_at = NULL,
+              invitation_created_by = $3,
+              invitation_created_ip = $4::inet,
+              invitation_sent_at = NOW(),
+              invitation_expires_at = NOW() + INTERVAL '30 minutes',
               account_status = CASE WHEN account_status = 'archived' THEN account_status ELSE 'invited' END,
               updated_at = NOW()
         WHERE id = $2`,
-      [token, id],
+      [tokenHash, id, req.user!.userId, req.ip ?? '0.0.0.0'],
     )
-    /* Invalidate the old password */
+    /* Invalidate the old password + révoquer toutes les sessions */
     if (member.user_id) {
-      await query(`UPDATE public.users SET password_hash = $1 WHERE id = $2`, [
-        await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12),
+      await query(`UPDATE public.users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [
+        await bcrypt.hash(randomToken(), 12),
         member.user_id,
       ])
+      await query(
+        `UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false`,
+        [member.user_id],
+      ).catch(() => {})
     }
     const resetUrl = `${frontendOrigin(req)}/invite/${token}`
     try {
       const tpl = teamPasswordResetEmail({ firstName: member.prenom, resetUrl })
       await sendEmail({ to: member.email, ...tpl })
-    } catch (e: any) { console.error('[team:reset-email]', e.message) }
-    await logActivity(tenantId, id, 'password_reset_requested', { by: req.user!.userId })
-    res.json({ success: true, reset_url: resetUrl })
+    } catch (e: any) { logger.error('[team:reset-email]', e.message) }
+    await logActivity(tenantId, id, 'password_reset_requested',
+      { by: req.user!.userId, token_prefix: tokenPrefix(token) },
+      req.ip, req.headers['user-agent'] as string,
+    )
+    await recordSecurityAudit(tenantId, {
+      actorUserId: req.user!.userId,
+      targetType:  'team_member', targetId: id,
+      action:      'reset_issued',
+      tokenPrefix: tokenPrefix(token),
+      ip:          req.ip, ua: req.headers['user-agent'] as string,
+    })
+    /* SAFE RESPONSE — no raw URL, masked token for audit correlation only. */
+    res.json({
+      success:      true,
+      expires_at:   new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      masked_token: maskToken(token),
+    })
   } catch (err: any) {
-    console.error('[team:reset-password]', err.message)
+    logger.error('[team:reset-password]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -786,7 +945,7 @@ router.delete('/members/:id', ...requireAdminMgr, async (req: Request, res: Resp
     await logActivity(tenantId, id, 'archived', { by: req.user!.userId })
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[team:archive]', err.message)
+    logger.error('[team:archive]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -815,7 +974,7 @@ router.post('/members/:id/restore', ...requireAdminMgr, async (req: Request, res
     await logActivity(tenantId, id, 'restored', { by: req.user!.userId })
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[team:restore]', err.message)
+    logger.error('[team:restore]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -841,7 +1000,7 @@ router.delete('/members/:id/permanent', ...requireAdminMgr, async (req: Request,
     await tenantQuery(tenantId, `DELETE FROM public.team_members WHERE id = $1`, [id])
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[team:permanent-delete]', err.message)
+    logger.error('[team:permanent-delete]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -885,7 +1044,7 @@ router.post('/members/:id/tasks', ...requireAdminMgr, async (req: Request, res: 
     await logActivity(tenantId, id, 'task_assigned', { taskId: (task as any).id, title })
     res.status(201).json(task)
   } catch (err: any) {
-    console.error('[team:task-create]', err.message)
+    logger.error('[team:task-create]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -914,7 +1073,7 @@ router.patch('/tasks/:taskId', ...requireAdminMgr, async (req: Request, res: Res
     if (!row) return res.status(404).json({ error: 'Tâche introuvable' })
     res.json(row)
   } catch (err: any) {
-    console.error('[team:task-patch]', err.message)
+    logger.error('[team:task-patch]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -945,6 +1104,89 @@ router.get('/members/:id/activity', ...requireAdminMgr, async (req: Request, res
     )
     res.json(rows)
   } catch (err: any) { res.status(500).json({ error: 'Erreur serveur' }) }
+})
+
+/* GET /api/team/members/:id/finance
+   Compte comptable : fusionne payroll + advances + team_payments en un journal chronologique */
+router.get('/members/:id/finance', ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  try {
+    const [payroll, advances, payments] = await Promise.all([
+      tenantQuery(tenantId,
+        `SELECT id, month, salaire_base, primes, deductions, avances, net_a_payer,
+                statut_paiement, date_paiement, mode_paiement, note,
+                jours_travailles, jours_absents, jours_conge, created_at
+           FROM public.employee_payroll WHERE employee_id = $1 ORDER BY month DESC`, [id]),
+      tenantQuery(tenantId,
+        `SELECT id, montant, date_demande, date_remboursement, statut, note, created_at
+           FROM public.employee_advances WHERE employee_id = $1 ORDER BY date_demande DESC`, [id]),
+      tenantQuery(tenantId,
+        `SELECT id, montant, date, type, projet, notes, is_paid, created_at
+           FROM public.team_payments WHERE member_id = $1 ORDER BY date DESC`, [id]),
+    ])
+    res.json({ payroll, advances, payments })
+  } catch (err: any) {
+    logger.error('[team:finance]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* GET /api/team/members/:id/leaves — congés */
+router.get('/members/:id/leaves', ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  try {
+    const rows = await tenantQuery(tenantId,
+      `SELECT id, type_conge, date_debut, date_fin, nb_jours, statut, motif,
+              justificatif_url, approuve_par, created_at
+         FROM public.employee_leaves WHERE employee_id = $1 ORDER BY date_debut DESC`, [id])
+    res.json(rows)
+  } catch (err: any) {
+    logger.error('[team:leaves]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* GET /api/team/members/:id/projects — projets où le membre est assigné */
+router.get('/members/:id/projects', ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  try {
+    const rows = await tenantQuery(tenantId,
+      `SELECT p.id, p.nom, p.statut, p.priorite, p.date_debut, p.date_fin_prevue,
+              p.date_fin_reelle, p.budget, p.cout_reel, p.progression,
+              c.nom AS client_nom, a.role, a.assigned_at
+         FROM public.projet_assignees a
+         JOIN public.projets p ON p.id = a.projet_id
+         LEFT JOIN public.clients c ON c.id = p.client_id
+         WHERE a.team_member_id = $1
+         ORDER BY a.assigned_at DESC`, [id])
+    res.json(rows)
+  } catch (err: any) {
+    logger.error('[team:projects]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* GET /api/team/members/:id/performance — perf mensuelle */
+router.get('/members/:id/performance', ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+  try {
+    const rows = await tenantQuery(tenantId,
+      `SELECT id, mois, taches_assignees, taches_completees, taches_en_retard,
+              deals_assignes, deals_gagnes, chiffre_affaires, note_performance, commentaire
+         FROM public.employee_performance WHERE employee_id = $1 ORDER BY mois DESC`, [id])
+    res.json(rows)
+  } catch (err: any) {
+    logger.error('[team:performance]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
 })
 
 export default router

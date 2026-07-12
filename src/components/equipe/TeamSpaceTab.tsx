@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { teamMgmtApi, type TeamMemberRow, type TeamMemberAccess } from '@/lib/api'
 import { SOP_CATEGORIES } from '@/lib/sopCategories'
+import { useStagiaires, type Stagiaire } from '@/hooks/useStagiaires'
+import { useTeam, type TeamMember } from '@/hooks/useTeam'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
@@ -229,8 +231,8 @@ function MemberActions({ member, onOpen, onInvalidate }: {
   onOpen: () => void
   onInvalidate: () => void
 }) {
-  const qc = useQueryClient()
-  const [shareUrl, setShareUrl] = useState<{ kind: 'invite' | 'reset'; url: string } | null>(null)
+  const _qc = useQueryClient()
+  const [shareInfo, setShareInfo] = useState<{ kind: 'invite' | 'reset'; maskedToken: string; expiresAt: string } | null>(null)
 
   const run = async (fn: () => Promise<any>, okMsg: string) => {
     try { await fn(); toast.success(okMsg); onInvalidate() }
@@ -244,8 +246,9 @@ function MemberActions({ member, onOpen, onInvalidate }: {
   ) => {
     try {
       const res = await fn()
-      const url = res?.invitation_url ?? res?.reset_url ?? ''
-      if (url) setShareUrl({ kind, url })
+      const maskedToken = res?.masked_token
+      const expiresAt   = res?.expires_at
+      if (maskedToken && expiresAt) setShareInfo({ kind, maskedToken, expiresAt })
       toast.success(okMsg)
       onInvalidate()
     } catch (e: any) { toast.error(e?.message ?? 'Erreur') }
@@ -312,13 +315,13 @@ function MemberActions({ member, onOpen, onInvalidate }: {
       </DropdownMenuContent>
     </DropdownMenu>
 
-    {shareUrl && (
+    {shareInfo && (
       <ShareLinkDialog
-        kind={shareUrl.kind}
-        url={shareUrl.url}
-        memberName={`${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()}
+        kind={shareInfo.kind}
+        maskedToken={shareInfo.maskedToken}
+        expiresAt={shareInfo.expiresAt}
         memberEmail={member.email ?? ''}
-        onClose={() => setShareUrl(null)}
+        onClose={() => setShareInfo(null)}
       />
     )}
     </>
@@ -326,24 +329,18 @@ function MemberActions({ member, onOpen, onInvalidate }: {
 }
 
 function ShareLinkDialog({
-  kind, url, memberName, memberEmail, onClose,
+  kind, maskedToken, expiresAt, memberEmail, onClose,
 }: {
   kind:        'invite' | 'reset'
-  url:         string
-  memberName:  string
+  maskedToken: string
+  expiresAt:   string
   memberEmail: string
   onClose:     () => void
 }) {
   const isReset = kind === 'reset'
-  const copy = () => {
-    navigator.clipboard.writeText(url)
-    toast.success('Lien copié')
-  }
-  const message = isReset
-    ? `Bonjour ${memberName}, voici ton lien pour définir un nouveau mot de passe : ${url}\n\nCe lien est valable 24h.`
-    : `Bonjour ${memberName}, voici ton lien d'invitation pour rejoindre l'équipe Next Gital : ${url}\n\nCe lien est valable 7 jours.`
-  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`
-
+  const expiresLabel = new Date(expiresAt).toLocaleString('fr-FR', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  })
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
@@ -356,25 +353,21 @@ function ShareLinkDialog({
         <div className="space-y-4">
           <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
             <p className="text-sm text-emerald-800 dark:text-emerald-200">
-              Un email a été envoyé à <strong>{memberEmail}</strong>. Lien valable <strong>{isReset ? '24 heures' : '7 jours'}</strong>.
+              Un email a été envoyé à <strong>{memberEmail}</strong>. Lien valable jusqu'au <strong>{expiresLabel}</strong>.
             </p>
           </div>
-          <div>
-            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              🔗 Lien direct (à envoyer par WhatsApp si l'email n'arrive pas)
-            </label>
-            <div className="flex gap-2 mt-1.5">
-              <Input value={url} readOnly className="font-mono text-xs" />
-              <Button size="sm" onClick={copy}><Copy className="w-3.5 h-3.5" /> Copier</Button>
-            </div>
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              Empreinte token (audit)
+            </p>
+            <p className="font-mono text-sm">{maskedToken}</p>
+            <p className="text-[11px] text-muted-foreground">
+              Le lien complet ne quitte jamais le serveur (sécurité).
+              Cette empreinte permet de corréler l'action avec le journal d'audit.
+            </p>
           </div>
-          <div className="flex gap-2 pt-2 border-t border-border">
-            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-              <Button variant="secondary" className="w-full">
-                💬 Envoyer via WhatsApp
-              </Button>
-            </a>
-            <Button onClick={onClose} className="flex-1">Fermer</Button>
+          <div className="flex justify-end pt-2 border-t border-border">
+            <Button onClick={onClose}>Fermer</Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
             💡 Ce lien remplace tous les liens précédents pour ce membre.
@@ -398,7 +391,80 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
   const [jobTitle,  setJobTitle]  = useState('')
   const [access,    setAccess]    = useState<TeamMemberAccess[]>([])
   const [tasks,     setTasks]     = useState<{ title: string; priority: string; due_date: string }[]>([])
-  const [showInvitationUrl, setShowInvitationUrl] = useState<string | null>(null)
+  const [inviteSent, setInviteSent] = useState<{ maskedToken: string; expiresAt: string } | null>(null)
+
+  /* Import depuis stagiaire / salarié existants — évite la re-saisie */
+  const { data: stagiaires = [] }    = useStagiaires()
+  const { data: hrMembers  = [] }    = useTeam()
+  const { data: mgmtMembers = [] }   = useQuery({
+    queryKey: ['team-mgmt'],
+    queryFn:  () => teamMgmtApi.list(),
+    staleTime: 30_000,
+  })
+  /* Un membre déjà « activé/invité » sur la plateforme ne doit pas être re-invité */
+  const alreadyOnPlatform = useMemo(
+    () => new Set(mgmtMembers.map(m => m.email?.toLowerCase()).filter(Boolean)),
+    [mgmtMembers],
+  )
+  const importableStagiaires = useMemo(() =>
+    stagiaires
+      .filter(s => s.statut !== 'annule')
+      .filter(s => !alreadyOnPlatform.has((s.email ?? '').toLowerCase()))
+      .sort((a, b) => a.nom_complet.localeCompare(b.nom_complet, 'fr')),
+    [stagiaires, alreadyOnPlatform],
+  )
+  const importableMembers = useMemo(() =>
+    hrMembers
+      .filter(m => m.statut !== 'inactif')
+      .filter(m => !m.email || !alreadyOnPlatform.has(m.email.toLowerCase()))
+      .sort((a, b) => `${a.prenom} ${a.nom}`.localeCompare(`${b.prenom} ${b.nom}`, 'fr')),
+    [hrMembers, alreadyOnPlatform],
+  )
+  const [importOpen, setImportOpen] = useState<null | 'stagiaire' | 'member'>(null)
+  const [importSearch, setImportSearch] = useState('')
+  /* Trace la source importée pour afficher la carte récap au lieu des champs. */
+  const [importedFrom, setImportedFrom] = useState<null | {
+    kind: 'stagiaire' | 'member'; label: string; subtitle: string
+  }>(null)
+  const [editingIdentity, setEditingIdentity] = useState(false)
+
+  const applyStagiaire = (s: Stagiaire) => {
+    const parts  = s.nom_complet.trim().split(/\s+/)
+    const ln     = parts.length > 1 ? parts.pop()! : parts[0]
+    const fn     = parts.join(' ') || ln
+    setFirstName(fn)
+    setLastName(ln)
+    setEmail(s.email || '')
+    setPhone(s.telephone || '')
+    setJobTitle(s.formation || jobTitle)
+    setImportOpen(null); setImportSearch('')
+    setImportedFrom({
+      kind: 'stagiaire',
+      label: s.nom_complet,
+      subtitle: s.etablissement ? `${s.etablissement} · ${s.email || ''}` : (s.email || ''),
+    })
+    setEditingIdentity(false)
+    toast.success(`Infos importées depuis ${s.nom_complet}`)
+  }
+  const applyMember = (m: TeamMember) => {
+    setFirstName(m.prenom || '')
+    setLastName(m.nom || '')
+    setEmail(m.email || '')
+    setPhone(m.telephone || '')
+    setJobTitle(m.poste || jobTitle)
+    setImportOpen(null); setImportSearch('')
+    setImportedFrom({
+      kind: 'member',
+      label: `${m.prenom} ${m.nom}`,
+      subtitle: [m.poste, m.email].filter(Boolean).join(' · '),
+    })
+    setEditingIdentity(false)
+    toast.success(`Infos importées depuis ${m.prenom} ${m.nom}`)
+  }
+  const clearImport = () => {
+    setImportedFrom(null); setEditingIdentity(false)
+    setFirstName(''); setLastName(''); setEmail(''); setPhone('')
+  }
 
   const invite = useMutation({
     mutationFn: () => teamMgmtApi.invite({
@@ -418,7 +484,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['team-mgmt'] })
       toast.success(`${firstName} a été invité(e) — email envoyé à ${email}`)
-      setShowInvitationUrl(data.invitation_url)
+      setInviteSent({ maskedToken: data.masked_token, expiresAt: data.expires_at })
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
@@ -427,7 +493,9 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
     setFirstName(''); setLastName(''); setEmail(''); setPhone('')
     setType('employee'); setJobTitle('')
     setAccess([]); setTasks([])
-    setShowInvitationUrl(null)
+    setInviteSent(null)
+    setImportedFrom(null); setEditingIdentity(false)
+    setImportOpen(null); setImportSearch('')
   }
 
   const close = () => { reset(); onClose() }
@@ -454,18 +522,217 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </DialogTitle>
         </DialogHeader>
 
-        {showInvitationUrl ? (
-          <InvitationSuccess url={showInvitationUrl} email={email} onClose={close} />
+        {inviteSent ? (
+          <InvitationSuccess maskedToken={inviteSent.maskedToken} expiresAt={inviteSent.expiresAt} email={email} onClose={close} />
         ) : (
           <div className="space-y-5 mt-2">
-            {/* SECTION 1 — Identité */}
-            <Section title="1. Identité">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Prénom *" value={firstName} onChange={setFirstName} />
-                <Field label="Nom *" value={lastName} onChange={setLastName} />
-                <Field label="Email professionnel *" value={email} onChange={setEmail} type="email" placeholder="prenom.nom@nextgital.com" />
-                <Field label="Téléphone" value={phone} onChange={setPhone} placeholder="+212 6XX XX XX XX" />
+            {/* SECTION 0 — Importer depuis existant (évite la re-saisie) */}
+            <div className="rounded-xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/20 p-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 mb-2">
+                Importer depuis un profil existant
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setImportOpen(o => o === 'stagiaire' ? null : 'stagiaire'); setImportSearch('') }}
+                  className={cn(
+                    'flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left text-sm transition-colors',
+                    importOpen === 'stagiaire'
+                      ? 'border-blue-500 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 font-medium'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-blue-400',
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    🎓 <span>Depuis un stagiaire</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {importableStagiaires.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setImportOpen(o => o === 'member' ? null : 'member'); setImportSearch('') }}
+                  className={cn(
+                    'flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left text-sm transition-colors',
+                    importOpen === 'member'
+                      ? 'border-blue-500 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 font-medium'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-blue-400',
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    💼 <span>Depuis un salarié / membre RH</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {importableMembers.length}
+                  </span>
+                </button>
               </div>
+
+              {importOpen && (
+                <div className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
+                  <div className="p-2 border-b border-slate-200 dark:border-slate-700">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        value={importSearch}
+                        onChange={e => setImportSearch(e.target.value)}
+                        placeholder={importOpen === 'stagiaire' ? 'Rechercher un stagiaire (nom, email, CIN, école…)' : 'Rechercher un membre (nom, email, poste…)'}
+                        className="w-full h-8 pl-8 pr-2 rounded-md bg-slate-50 dark:bg-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-slate-100"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto p-1">
+                    {importOpen === 'stagiaire' ? (
+                      importableStagiaires.length === 0 ? (
+                        <p className="p-4 text-xs text-center text-slate-500 dark:text-slate-400">
+                          Aucun stagiaire disponible.
+                        </p>
+                      ) : (
+                        importableStagiaires
+                          .filter(s => {
+                            if (!importSearch.trim()) return true
+                            const q = importSearch.toLowerCase()
+                            return (
+                              s.nom_complet.toLowerCase().includes(q) ||
+                              (s.email ?? '').toLowerCase().includes(q) ||
+                              (s.cin ?? '').toLowerCase().includes(q) ||
+                              (s.etablissement ?? '').toLowerCase().includes(q)
+                            )
+                          })
+                          .slice(0, 50)
+                          .map(s => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => applyStagiaire(s)}
+                              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-left transition-colors"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                                {s.nom_complet.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{s.nom_complet}</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                  {s.email || 'sans email'} · {s.etablissement || '—'}
+                                </p>
+                              </div>
+                              <span className={cn(
+                                'text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase',
+                                s.statut === 'en_cours' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+                                s.statut === 'accepte'  && 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+                                s.statut === 'termine'  && 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+                              )}>
+                                {s.statut}
+                              </span>
+                            </button>
+                          ))
+                      )
+                    ) : (
+                      importableMembers.length === 0 ? (
+                        <p className="p-4 text-xs text-center text-slate-500 dark:text-slate-400">
+                          Aucun salarié disponible.
+                        </p>
+                      ) : (
+                        importableMembers
+                          .filter(m => {
+                            if (!importSearch.trim()) return true
+                            const q = importSearch.toLowerCase()
+                            return (
+                              `${m.prenom} ${m.nom}`.toLowerCase().includes(q) ||
+                              (m.email ?? '').toLowerCase().includes(q) ||
+                              (m.poste ?? '').toLowerCase().includes(q)
+                            )
+                          })
+                          .slice(0, 50)
+                          .map(m => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => applyMember(m)}
+                              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-left transition-colors"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                                {((m.prenom?.[0] ?? '') + (m.nom?.[0] ?? '')).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{m.prenom} {m.nom}</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                  {m.poste || '—'} · {m.email || 'sans email'}
+                                </p>
+                              </div>
+                              <span className={cn(
+                                'text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase',
+                                m.statut === 'actif' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+                                m.statut === 'conge' && 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+                              )}>
+                                {m.statut}
+                              </span>
+                            </button>
+                          ))
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
+                Les personnes déjà invitées sur la plateforme sont automatiquement exclues.
+              </p>
+            </div>
+
+            {/* SECTION 1 — Identité (compacte si profil importé) */}
+            <Section title="1. Identité">
+              {importedFrom && !editingIdentity ? (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 flex items-center gap-3">
+                  <div className={cn(
+                    'w-11 h-11 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0',
+                    importedFrom.kind === 'stagiaire'
+                      ? 'bg-gradient-to-br from-blue-500 to-violet-600'
+                      : 'bg-gradient-to-br from-emerald-500 to-teal-600',
+                  )}>
+                    {(firstName?.[0] ?? '') + (lastName?.[0] ?? '')}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {firstName} {lastName}
+                      </p>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        {importedFrom.kind === 'stagiaire' ? '🎓 stagiaire' : '💼 salarié RH'}
+                      </span>
+                    </div>
+                    <p className="text-[11.5px] text-slate-600 dark:text-slate-400 truncate">
+                      {email}{phone ? ` · ${phone}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setEditingIdentity(true)}
+                      className="text-[11px] font-medium text-blue-700 dark:text-blue-300 hover:underline px-2 py-1"
+                    >
+                      Modifier
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearImport}
+                      className="w-6 h-6 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center"
+                      title="Effacer l'import"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Prénom *" value={firstName} onChange={setFirstName} />
+                  <Field label="Nom *" value={lastName} onChange={setLastName} />
+                  <Field label="Email professionnel *" value={email} onChange={setEmail} type="email" placeholder="prenom.nom@nextgital.com" />
+                  <Field label="Téléphone" value={phone} onChange={setPhone} placeholder="+212 6XX XX XX XX" />
+                </div>
+              )}
+
               <div className="mt-3">
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2 block">Type de membre *</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -612,30 +879,31 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
   )
 }
 
-function InvitationSuccess({ url, email, onClose }: { url: string; email: string; onClose: () => void }) {
+function InvitationSuccess({ maskedToken, expiresAt, email, onClose }: {
+  maskedToken: string; expiresAt: string; email: string; onClose: () => void
+}) {
+  const expiresLabel = new Date(expiresAt).toLocaleString('fr-FR', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  })
   return (
     <div className="text-center py-4 space-y-4">
       <div className="w-14 h-14 rounded-full bg-emerald-100 dark:bg-emerald-900/30 mx-auto flex items-center justify-center">
         <Check className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
       </div>
       <div>
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Invitation envoyée !</h3>
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Invitation envoyée</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           Un email avec le lien d'activation a été envoyé à <strong>{email}</strong>.
+          Lien valable jusqu'au <strong>{expiresLabel}</strong>.
         </p>
       </div>
       <div className="bg-slate-50 dark:bg-slate-900/60 rounded-lg p-3 text-left">
-        <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">Lien d'invitation direct (valable 7 jours)</div>
-        <div className="flex items-center gap-2">
-          <code className="text-xs text-slate-700 dark:text-slate-300 break-all flex-1">{url}</code>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => { navigator.clipboard.writeText(url); toast.success('Lien copié') }}
-          >
-            <Copy className="w-3.5 h-3.5" />
-          </Button>
-        </div>
+        <div className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">Empreinte token (audit)</div>
+        <code className="font-mono text-sm text-slate-800 dark:text-slate-200">{maskedToken}</code>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
+          Le lien complet ne quitte jamais le serveur pour des raisons de sécurité.
+          Cette empreinte permet de retrouver l'invitation dans le journal d'audit.
+        </p>
       </div>
       <Button onClick={onClose} className="w-full">Fermer</Button>
     </div>

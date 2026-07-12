@@ -7,6 +7,7 @@
 import { forwardRef } from 'react'
 import type { Facture } from '@/hooks/useFactures'
 import type { Client }  from '@/hooks/useClients'
+import { sanitizeRichHtml } from '@/lib/safeHtml'
 
 type Currency  = 'MAD' | 'EUR' | 'USD' | 'GBP'
 type BlockType = 'title' | 'paragraph' | 'list'
@@ -94,7 +95,7 @@ function DescBlocks({ blocks }: { blocks: DescriptionBlock[] }) {
           <div
             key={i}
             className="text-[9.5px] text-[#333] leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-semibold"
-            dangerouslySetInnerHTML={{ __html: b.content }}
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(b.content) }}
           />
         )
         const text = stripHtml(b.content)

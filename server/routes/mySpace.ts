@@ -15,6 +15,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import bcrypt from 'bcryptjs'
 import { query, queryOne, tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
+import { logger } from '../lib/logger'
 
 const router = Router()
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -59,7 +60,7 @@ async function logActivity(
        VALUES ($1, $2, $3, $4::jsonb, $5::inet, $6)`,
       [tenantId, teamMemberId, actionType, JSON.stringify(details), ip ?? null, ua ?? null],
     )
-  } catch (e: any) { console.error('[my-space:activity]', e.message) }
+  } catch (e: any) { logger.error('[my-space:activity]', e.message) }
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -84,7 +85,7 @@ router.get('/profile', async (req: Request, res: Response) => {
     )
     res.json(profile)
   } catch (err: any) {
-    console.error('[my-space:profile]', err.message)
+    logger.error('[my-space:profile]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -109,7 +110,7 @@ router.put('/profile', async (req: Request, res: Response) => {
     )
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[my-space:profile-put]', err.message)
+    logger.error('[my-space:profile-put]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -140,7 +141,7 @@ router.put('/password', async (req: Request, res: Response) => {
     await logActivity(m.tenantId, m.id, 'password_changed', {}, req.ip, req.headers['user-agent'] as string)
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[my-space:password]', err.message)
+    logger.error('[my-space:password]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -196,7 +197,7 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       recent_activity: recentActivity,
     })
   } catch (err: any) {
-    console.error('[my-space:dashboard]', err.message)
+    logger.error('[my-space:dashboard]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -220,7 +221,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
     )
     res.json(tasks)
   } catch (err: any) {
-    console.error('[my-space:tasks]', err?.message)
+    logger.error('[my-space:tasks]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -286,7 +287,7 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
     }
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[my-space:task-patch]', err.message)
+    logger.error('[my-space:task-patch]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -320,7 +321,7 @@ router.get('/sops', async (req: Request, res: Response) => {
     )
     res.json(sops)
   } catch (err: any) {
-    console.error('[my-space:sops]', err.message)
+    logger.error('[my-space:sops]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -353,7 +354,7 @@ router.get('/sops/:id', async (req: Request, res: Response) => {
 
     res.json(sop)
   } catch (err: any) {
-    console.error('[my-space:sop-get]', err.message)
+    logger.error('[my-space:sop-get]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -389,7 +390,7 @@ router.post('/sops/activity', async (req: Request, res: Response) => {
     )
     res.json({ success: true })
   } catch (err: any) {
-    console.error('[my-space:sop-activity]', err.message)
+    logger.error('[my-space:sop-activity]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -419,7 +420,7 @@ router.get('/projets', async (req: Request, res: Response) => {
     )
     res.json(rows)
   } catch (err: any) {
-    console.error('[my-space:projets]', err?.message)
+    logger.error('[my-space:projets]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -494,7 +495,7 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
 
     res.json({ ...projet, my_role: (assigned as any).role, share_infos: shareInfos, my_tasks: myTasks, teammates })
   } catch (err: any) {
-    console.error('[my-space:projet-detail]', err?.message)
+    logger.error('[my-space:projet-detail]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -523,7 +524,7 @@ router.get('/projets/:id/messages', async (req: Request, res: Response) => {
     )
     res.json(rows)
   } catch (err: any) {
-    console.error('[my-space:projet-messages]', err?.message)
+    logger.error('[my-space:projet-messages]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -562,7 +563,7 @@ router.post('/projets/:id/messages', async (req: Request, res: Response) => {
     )
     res.status(201).json(row)
   } catch (err: any) {
-    console.error('[my-space:post-message]', err?.message)
+    logger.error('[my-space:post-message]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })

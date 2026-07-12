@@ -2,6 +2,7 @@
  * Helpers partagés entre les 4 templates de devis (default, simple, offer, executive).
  * Types, parseur des notes JSON, formatteurs monnaie/date, constantes société.
  */
+import { sanitizeRichHtml } from '@/lib/safeHtml'
 
 export type Currency  = 'MAD' | 'EUR' | 'USD' | 'GBP'
 export type BlockType = 'title' | 'paragraph' | 'list'
@@ -99,7 +100,7 @@ export function DescBlocks({ blocks, compact = false }: { blocks: DescriptionBlo
             key={i}
             style={{ fontSize: sz, color: '#333', lineHeight: 1.45 }}
             className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-semibold"
-            dangerouslySetInnerHTML={{ __html: b.content }}
+            dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(b.content) }}
           />
         )
         const text = stripHtml(b.content)

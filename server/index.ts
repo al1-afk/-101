@@ -3,7 +3,8 @@ import cors    from 'cors'
 import dotenv  from 'dotenv'
 import cookieParser from 'cookie-parser'
 import { pool } from './db/pool'
-import { apiLimiter, sanitizeBody, errorHandler } from './middleware/security'
+import { apiLimiter, sanitizeBody, errorHandler, requestId } from './middleware/security'
+import { logger } from './lib/logger'
 import helmet from 'helmet'
 
 import authRoutes     from './routes/auth'
@@ -28,9 +29,46 @@ const PORT = process.env.SERVER_PORT || 4000
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map(o => o.trim())
+  .filter(Boolean)
 
 /* ── Security headers ───────────────────────────────────────── */
 const isProd = process.env.NODE_ENV === 'production'
+
+/* ── Refuse to boot with weak/known-default secrets in production ─
+   Un secret placeholder en prod = compromis dès la première release.
+   On échoue-vite plutôt que de fournir une fausse sécurité. */
+function validateProdSecrets() {
+  if (!isProd) return
+  const errs: string[] = []
+  const KNOWN_PLACEHOLDERS = [
+    'change-me', 'changeme', 'placeholder', 'local-dev', 'dev-fallback',
+    'secret', 'password',
+  ]
+  const requiredSecrets: Array<[string, number]> = [
+    ['JWT_SECRET',         32],
+    ['JWT_REFRESH_SECRET', 32],
+  ]
+  for (const [key, minLen] of requiredSecrets) {
+    const v = process.env[key] ?? ''
+    if (v.length < minLen) errs.push(`${key} manquant ou trop court (>= ${minLen} chars)`)
+    if (KNOWN_PLACEHOLDERS.some(p => v.toLowerCase().includes(p))) {
+      errs.push(`${key} contient un placeholder connu — rotation obligatoire`)
+    }
+  }
+  /* En prod, ces variables NE DOIVENT PAS être présentes sous forme VITE_
+   * (VITE_ = bundle client). */
+  const forbiddenViteBackendSecrets = ['VITE_JWT_SECRET', 'VITE_RESEND_API_KEY', 'VITE_OPENAI_API_KEY', 'VITE_PG_PASSWORD']
+  for (const key of forbiddenViteBackendSecrets) {
+    if (process.env[key]) errs.push(`${key} présent dans l'env — secret backend exposé au frontend`)
+  }
+  if (errs.length) {
+    console.error('\n🛑 FATAL — configuration production invalide :\n' + errs.map(e => '  - ' + e).join('\n') + '\n')
+    process.exit(1)
+  }
+}
+validateProdSecrets()
+
+app.disable('x-powered-by')
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -38,12 +76,14 @@ app.use(helmet({
       defaultSrc:     ["'self'"],
       scriptSrc:      ["'self'"],
       styleSrc:       ["'self'", "'unsafe-inline'"],
-      imgSrc:         ["'self'", 'data:', 'blob:'],
-      fontSrc:        ["'self'", 'https://fonts.gstatic.com'],
-      connectSrc:     ["'self'"],
+      imgSrc:         ["'self'", 'data:', 'blob:', 'https:'],
+      fontSrc:        ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      connectSrc:     ["'self'", 'https://api.resend.com', 'https://api.openai.com'],
       frameSrc:       ["'none'"],
+      frameAncestors: ["'none'"],
       objectSrc:      ["'none'"],
       baseUri:        ["'self'"],
+      formAction:     ["'self'"],
       upgradeInsecureRequests: isProd ? [] : null,
     },
   },
@@ -51,10 +91,21 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginOpenerPolicy:   { policy: 'same-origin-allow-popups' },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }))
+
+/* Permissions-Policy explicite — désactive par défaut les APIs sensibles */
+app.use((_req, res, next) => {
+  res.setHeader(
+    'Permissions-Policy',
+    'accelerometer=(), autoplay=(), camera=(), clipboard-read=(self), clipboard-write=(self), display-capture=(), fullscreen=(self), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(self), usb=(), xr-spatial-tracking=()'
+  )
+  next()
+})
 
 app.set('trust proxy', 1)
 app.use(cookieParser())
+app.use(requestId)
 
 /* ── CORS — strict origin list (localhost:* in dev, *.nextgital.tech in prod).
    /api/public/* is OPEN by design: it's the embeddable widget intake, so any

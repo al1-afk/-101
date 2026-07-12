@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -440,7 +441,11 @@ function CongesTab({ members }: { members: TeamMember[] }) {
 /* ═══════════════════════════════════════════════════════════════════
    SALAIRES TAB
 ═══════════════════════════════════════════════════════════════════ */
-function SalairesTab({ members }: { members: TeamMember[] }) {
+function SalairesTab({ members, detailBase, onEditMember }: {
+  members: TeamMember[]
+  detailBase: string
+  onEditMember?: (m: TeamMember) => void
+}) {
   const qc    = useQueryClient()
   const now   = new Date()
   const [year,  setYear]  = useState(now.getFullYear())
@@ -579,16 +584,34 @@ function SalairesTab({ members }: { members: TeamMember[] }) {
               const isEditing = editing === m.id
 
               return (
-                <tr key={m.id} className="hover:bg-muted/20 transition-colors">
+                <tr key={m.id} className="hover:bg-muted/20 transition-colors group">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-400 flex-shrink-0">
-                        {getInitials(`${m.prenom} ${m.nom}`)}
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground text-xs">{m.prenom} {m.nom}</p>
-                        {m.poste && <p className="text-[10px] text-muted-foreground">{m.poste}</p>}
-                      </div>
+                      <Link
+                        to={`${detailBase}/${m.id}`}
+                        className="flex items-center gap-2 flex-1 min-w-0 group/name"
+                        title="Voir l'historique du salarié"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-400 flex-shrink-0">
+                          {getInitials(`${m.prenom} ${m.nom}`)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground text-xs group-hover/name:text-blue-600 dark:group-hover/name:text-blue-400 truncate">
+                            {m.prenom} {m.nom}
+                          </p>
+                          {m.poste && <p className="text-[10px] text-muted-foreground truncate">{m.poste}</p>}
+                        </div>
+                      </Link>
+                      {onEditMember && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); onEditMember(m) }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex-shrink-0"
+                          title="Modifier la fiche du salarié"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-sm text-muted-foreground">
@@ -697,7 +720,7 @@ function InviteForm({ onClose }: { onClose: () => void }) {
   /* Per-SOP-category access (sop_categories field of the invite payload) */
   const [sopAccess, setSopAccess] = useState<Record<string, AccessLevel | 'none'>>({})
   const [loading, setLoading] = useState(false)
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [inviteSent, setInviteSent] = useState<{ maskedToken: string; expiresAt: string } | null>(null)
 
   const setCat = (cat: string, lvl: AccessLevel | 'none') => setSopAccess(p => ({ ...p, [cat]: lvl }))
 
@@ -724,8 +747,8 @@ function InviteForm({ onClose }: { onClose: () => void }) {
 
       qc.invalidateQueries({ queryKey: ['team_members'] })
       qc.invalidateQueries({ queryKey: ['team', 'members'] })
-      toast.success(`Invitation créée pour ${email}`)
-      setInviteUrl(res.invitation_url)
+      toast.success(`Invitation envoyée à ${email}`)
+      setInviteSent({ maskedToken: res.masked_token, expiresAt: res.expires_at })
     } catch (err: any) {
       toast.error(err?.message ?? 'Erreur lors de l\'invitation')
     } finally {
@@ -733,37 +756,32 @@ function InviteForm({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const copyUrl = () => {
-    if (!inviteUrl) return
-    navigator.clipboard.writeText(inviteUrl)
-    toast.success('Lien copié')
-  }
-
-  /* ── Step 2 : invitation créée, afficher le lien ── */
-  if (inviteUrl) {
+  /* ── Step 2 : invitation créée — on ne montre PAS le token en clair.
+     Seule empreinte (4+4) affichée pour corrélation avec le journal d'audit. */
+  if (inviteSent) {
+    const expiresLabel = new Date(inviteSent.expiresAt).toLocaleString('fr-FR', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    })
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
           <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Invitation envoyée !</p>
+            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Invitation envoyée</p>
             <p className="text-xs text-emerald-600/80 dark:text-emerald-400/80">
-              Le membre va recevoir un email avec un lien pour définir son mot de passe.
+              Un email a été envoyé à <strong>{email}</strong>. Lien valable jusqu'au {expiresLabel}.
             </p>
           </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            🔗 Lien d'invitation (pour test local sans email)
+            Empreinte token (audit)
           </p>
-          <div className="flex items-center gap-2">
-            <input type="text" readOnly value={inviteUrl}
-              className="flex-1 px-2 py-1.5 rounded border border-border bg-background text-xs font-mono" />
-            <Button size="sm" variant="secondary" onClick={copyUrl}>Copier</Button>
-          </div>
+          <p className="font-mono text-sm">{inviteSent.maskedToken}</p>
           <p className="text-[11px] text-muted-foreground">
-            Ouvre ce lien dans un onglet privé pour finaliser l'invitation.
+            Le lien complet ne quitte jamais le serveur pour des raisons de sécurité.
+            Si l'email n'arrive pas, utilisez « Renvoyer l'invitation ».
           </p>
         </div>
 
@@ -1216,6 +1234,8 @@ function MemberAccessDialog({ member, onClose }: { member: TenantMember; onClose
 ═══════════════════════════════════════════════════════════════════ */
 function TeamMembersAccessManager() {
   const qc = useQueryClient()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const detailBase = tenantSlug ? `/${tenantSlug}/equipe` : '/equipe'
   const [showArchive, setShowArchive] = useState(false)
   const { data: members = [], isLoading } = useQuery({
     queryKey: ['team', 'members'],
@@ -1239,12 +1259,12 @@ function TeamMembersAccessManager() {
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
-  const [resendUrl, setResendUrl] = useState<{ member: any; url: string } | null>(null)
+  const [resendInfo, setResendInfo] = useState<{ member: any; maskedToken: string; expiresAt: string } | null>(null)
   const resendMut = useMutation({
     mutationFn: (id: string) => teamMgmtApi.resend(id),
     onSuccess: (res, id) => {
       const member = members.find((m: any) => m.id === id)
-      setResendUrl({ member, url: res.invitation_url })
+      setResendInfo({ member, maskedToken: res.masked_token, expiresAt: res.expires_at })
       toast.success('Invitation renvoyée')
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
@@ -1326,8 +1346,10 @@ function TeamMembersAccessManager() {
                   return (
                     <tr key={m.id} className="hover:bg-muted/30">
                       <td className="px-3 py-2">
-                        <div className="font-medium text-sm">{m.first_name} {m.last_name}</div>
-                        <div className="text-xs text-muted-foreground">{m.email}</div>
+                        <Link to={`${detailBase}/${m.id}`} className="block group">
+                          <div className="font-medium text-sm group-hover:text-blue-600 transition-colors">{m.first_name} {m.last_name}</div>
+                          <div className="text-xs text-muted-foreground">{m.email}</div>
+                        </Link>
                       </td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         {TYPE_LABEL[m.member_type] ?? m.member_type}
@@ -1369,12 +1391,13 @@ function TeamMembersAccessManager() {
           </div>
         )}
 
-        {resendUrl && (
+        {resendInfo && (
           <ResendInviteDialog
-            memberName={`${resendUrl.member?.first_name ?? ''} ${resendUrl.member?.last_name ?? ''}`.trim()}
-            memberEmail={resendUrl.member?.email ?? ''}
-            url={resendUrl.url}
-            onClose={() => setResendUrl(null)}
+            memberName={`${resendInfo.member?.first_name ?? ''} ${resendInfo.member?.last_name ?? ''}`.trim()}
+            memberEmail={resendInfo.member?.email ?? ''}
+            maskedToken={resendInfo.maskedToken}
+            expiresAt={resendInfo.expiresAt}
+            onClose={() => setResendInfo(null)}
           />
         )}
 
@@ -1458,18 +1481,17 @@ function TeamMembersAccessManager() {
 }
 
 function ResendInviteDialog({
-  memberName, memberEmail, url, onClose,
+  memberName: _memberName, memberEmail, maskedToken, expiresAt, onClose,
 }: {
-  memberName: string
+  memberName:  string
   memberEmail: string
-  url:        string
-  onClose:    () => void
+  maskedToken: string
+  expiresAt:   string
+  onClose:     () => void
 }) {
-  const copy = () => {
-    navigator.clipboard.writeText(url)
-    toast.success('Lien copié')
-  }
-  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`Bonjour ${memberName}, voici ton nouveau lien d'invitation pour rejoindre l'équipe Next Gital : ${url}\n\nCe lien est valable 7 jours.`)}`
+  const expiresLabel = new Date(expiresAt).toLocaleString('fr-FR', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  })
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
@@ -1481,25 +1503,21 @@ function ResendInviteDialog({
         <div className="space-y-4">
           <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
             <p className="text-sm text-emerald-800 dark:text-emerald-200">
-              Un email vient d'être envoyé à <strong>{memberEmail}</strong> avec un lien valable <strong>7 jours</strong>.
+              Un email vient d'être envoyé à <strong>{memberEmail}</strong>. Lien valable jusqu'au <strong>{expiresLabel}</strong>.
             </p>
           </div>
-          <div>
-            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              🔗 Lien direct (à envoyer par WhatsApp si l'email n'arrive pas)
-            </label>
-            <div className="flex gap-2 mt-1.5">
-              <Input value={url} readOnly className="font-mono text-xs" />
-              <Button size="sm" onClick={copy}>Copier</Button>
-            </div>
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              Empreinte token (audit)
+            </p>
+            <p className="font-mono text-sm">{maskedToken}</p>
+            <p className="text-[11px] text-muted-foreground">
+              Le lien complet ne quitte jamais le serveur (sécurité). Cette empreinte permet
+              de corréler l'invitation avec le journal d'audit.
+            </p>
           </div>
-          <div className="flex gap-2 pt-2 border-t border-border">
-            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
-              <Button variant="secondary" className="w-full">
-                💬 Envoyer via WhatsApp
-              </Button>
-            </a>
-            <Button onClick={onClose} className="flex-1">Fermer</Button>
+          <div className="flex justify-end pt-2 border-t border-border">
+            <Button onClick={onClose}>Fermer</Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
             💡 Ce lien remplace tous les liens précédents. Les anciens emails d'invitation ne fonctionnent plus.
@@ -1683,6 +1701,8 @@ function PermissionsMatrix() {
 ═══════════════════════════════════════════════════════════════════ */
 export default function Equipe() {
   const { data: members = [], isLoading } = useTeam()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const detailBase = tenantSlug ? `/${tenantSlug}/equipe` : '/equipe'
   const createMember = useCreateTeamMember()
   const deleteMember = useDeleteTeamMember()
   const updateMember = useUpdateTeamMember()
@@ -1724,7 +1744,7 @@ export default function Equipe() {
             onImport={async (row) => { await createMember.mutateAsync(row as any) }}
           />
           <Button size="sm" onClick={() => { setEditing(undefined); setShowForm(true) }}>
-            <Plus className="w-4 h-4" /> Ajouter un membre
+            <Plus className="w-4 h-4" /> Ajouter un salarié
           </Button>
         </div>
       </div>
@@ -1750,11 +1770,8 @@ export default function Equipe() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="membres">
+      <Tabs defaultValue="salaires">
         <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="membres">
-            <Users className="w-4 h-4 mr-1.5" /> Membres ({members.length})
-          </TabsTrigger>
           <TabsTrigger value="conges">
             <CalendarDays className="w-4 h-4 mr-1.5" /> Congés
           </TabsTrigger>
@@ -1778,104 +1795,6 @@ export default function Equipe() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Membres ── */}
-        <TabsContent value="membres" className="space-y-4 mt-4">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Rechercher un membre..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-          </div>
-
-          {isLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-400" />
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filtered.map((m, i) => (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.04 }}
-                  className="card-premium p-5 hover:border-blue-500/30 transition-all duration-300 group"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="relative">
-                      <div className="avatar-initials-purple w-12 h-12 flex-shrink-0">
-                        <span className="font-bold text-sm">{getInitials(`${m.prenom} ${m.nom}`)}</span>
-                      </div>
-                      <span className={cn('absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900', STATUT_CONFIG[m.statut].dot)} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground text-sm">{m.prenom} {m.nom}</h3>
-                      {m.poste && <p className="text-xs text-muted-foreground truncate">{m.poste}</p>}
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="w-7 h-7"
-                        onClick={() => { setEditing(m); setShowForm(true) }}>
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="w-7 h-7 text-red-400"
-                        onClick={() => { if (confirm('Supprimer ce membre ?')) deleteMember.mutate(m.id) }}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Contact info */}
-                  <div className="mt-3 space-y-1">
-                    {m.email     && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Mail className="w-3.5 h-3.5 flex-shrink-0" /><span className="truncate">{m.email}</span></div>}
-                    {m.telephone && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Phone className="w-3.5 h-3.5 flex-shrink-0" />{m.telephone}</div>}
-                    {m.date_embauche && <div className="flex items-center gap-2 text-xs text-muted-foreground"><CalendarDays className="w-3.5 h-3.5 flex-shrink-0" />Depuis {formatDate(m.date_embauche)}</div>}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {m.departement && (
-                        <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', DEPT_COLORS[m.departement] || 'text-muted-foreground bg-muted')}>
-                          {m.departement}
-                        </span>
-                      )}
-                      {m.role && (
-                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-bold', ROLE_COLORS[m.role])}>
-                          {ROLE_LABELS[m.role]}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 flex-shrink-0">
-                      {formatCurrency(m.salaire_base)}
-                    </span>
-                  </div>
-
-                  {/* Quick status */}
-                  <div className="mt-2 flex items-center gap-1">
-                    {(['actif','conge','inactif'] as const).map(s => (
-                      <button key={s}
-                        onClick={() => quickStatut(m, s)}
-                        className={cn(
-                          'text-[10px] px-2 py-0.5 rounded-full font-medium transition-all',
-                          m.statut === s
-                            ? `${STATUT_CONFIG[s].dot.replace('bg-','bg-')} text-white`
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                        )}
-                      >
-                        {STATUT_CONFIG[s].label}
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              ))}
-              {filtered.length === 0 && (
-                <div className="col-span-full empty-state">
-                  <Users className="empty-state-icon" />
-                  <p className="empty-state-title">Aucun membre trouvé</p>
-                </div>
-              )}
-            </div>
-          )}
-        </TabsContent>
-
         {/* ── Congés ── */}
         <TabsContent value="conges" className="mt-4">
           <CongesTab members={members} />
@@ -1883,7 +1802,11 @@ export default function Equipe() {
 
         {/* ── Salaires ── */}
         <TabsContent value="salaires" className="mt-4">
-          <SalairesTab members={members} />
+          <SalairesTab
+            members={members}
+            detailBase={detailBase}
+            onEditMember={(m) => { setEditing(m); setShowForm(true) }}
+          />
         </TabsContent>
 
         {/* ── Stagiaires ── */}
