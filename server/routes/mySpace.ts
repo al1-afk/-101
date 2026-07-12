@@ -169,7 +169,9 @@ router.get('/dashboard', async (req: Request, res: Response) => {
                 COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
                 COUNT(*) FILTER (WHERE status = 'todo')::int        AS todo,
                 COUNT(*) FILTER (WHERE status IN ('todo','in_progress') AND due_date < CURRENT_DATE)::int AS overdue
-           FROM public.team_member_tasks WHERE team_member_id = $1`, [m.id],
+           FROM public.team_member_tasks
+          WHERE team_member_id = $1
+             OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)`, [m.id],
       ),
       tenantQuery(
         m.tenantId,
@@ -216,7 +218,9 @@ router.get('/tasks', async (req: Request, res: Response) => {
          FROM public.team_member_tasks t
          LEFT JOIN public.projets p ON p.id = t.project_id
          WHERE t.team_member_id = $1
-         ORDER BY (t.status = 'done'), (t.status = 'cancelled'), t.due_date NULLS LAST, t.created_at DESC`,
+            OR t.assigned_stagiaire_id IN (
+                 SELECT id FROM public.stagiaires WHERE member_id = $1)
+         ORDER BY (t.status = 'done'), (t.status = 'cancelled'), t.due_date NULLS LAST, t.created_at ASC`,
       [m.id],
     )
     res.json(tasks)
@@ -274,7 +278,10 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
     const row = await tenantQueryOne(
       m.tenantId,
       `UPDATE public.team_member_tasks SET ${sets.join(', ')}
-        WHERE id = $${i++} AND team_member_id = $${i} RETURNING id, title`,
+        WHERE id = $${i++}
+          AND (team_member_id = $${i}
+               OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $${i}))
+        RETURNING id, title`,
       params,
     )
     if (!row) return res.status(404).json({ error: 'Tâche introuvable' })
@@ -408,9 +415,13 @@ router.get('/projets', async (req: Request, res: Response) => {
               p.client_id, c.nom AS client_nom, c.entreprise AS client_entreprise,
               pa.role AS my_role,
               (SELECT COUNT(*)::int FROM public.team_member_tasks t
-                WHERE t.project_id = p.id AND t.team_member_id = $1) AS my_tasks_count,
+                WHERE t.project_id = p.id
+                  AND (t.team_member_id = $1
+                       OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))) AS my_tasks_count,
               (SELECT COUNT(*)::int FROM public.team_member_tasks t
-                WHERE t.project_id = p.id AND t.team_member_id = $1 AND t.status = 'done') AS my_tasks_done
+                WHERE t.project_id = p.id AND t.status = 'done'
+                  AND (t.team_member_id = $1
+                       OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))) AS my_tasks_done
          FROM public.projet_assignees pa
          JOIN public.projets p ON p.id = pa.projet_id
          LEFT JOIN public.clients c ON c.id = p.client_id
@@ -472,13 +483,15 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
     }
     if (!projet) return res.status(404).json({ error: 'Projet introuvable' })
 
-    /* Also pull the member's tasks on this project */
+    /* Also pull the member's tasks on this project (direct or via stagiaire link) */
     const myTasks = await tenantQuery(
       m.tenantId,
       `SELECT id, title, status, priority, due_date, category, elapsed_seconds, is_request
          FROM public.team_member_tasks
-        WHERE project_id = $1 AND team_member_id = $2
-        ORDER BY (status = 'done'), due_date NULLS LAST, created_at DESC`,
+        WHERE project_id = $1
+          AND (team_member_id = $2
+               OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $2))
+        ORDER BY (status = 'done'), due_date NULLS LAST, created_at ASC`,
       [id, m.id],
     )
 
