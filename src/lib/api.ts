@@ -391,3 +391,21 @@ export const teamMemberTasksApi         = tableApi('team_member_tasks')
 
 /* ── Bons de livraison (handover client + mots de passe + liens) ── */
 export const bonsLivraisonApi           = tableApi('bons_livraison')
+
+/* ── Journal d'activité unifié (CRUD + membres + sécurité) ─────── */
+export interface ActivityEntry {
+  id:           string
+  source:       'crud' | 'member' | 'security'
+  module:       string
+  action:       string
+  title:        string
+  detail:       string | null
+  actor:        string | null
+  actor_email:  string | null
+  record_id:    string | null
+  ip:           string | null
+  created_at:   string
+}
+export const activityApi = {
+  list: (limit = 500) => api.get<ActivityEntry[]>(`/api/activity?limit=${limit}`),
+}

@@ -20,6 +20,7 @@ import teamRoutes      from './routes/team'
 import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib/expiryReminderScheduler'
 import mySpaceRoutes   from './routes/mySpace'
 import sendDocumentRoutes from './routes/sendDocument'
+import activityRoutes  from './routes/activity'
 
 dotenv.config({ path: '.env.local' })
 
@@ -154,6 +155,7 @@ app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/team',      teamRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
+app.use('/api/activity',  activityRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */
