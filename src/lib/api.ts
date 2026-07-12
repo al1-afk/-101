@@ -233,6 +233,8 @@ export const teamMgmtApi = {
   suspend: (id: string) => api.post<{ success: true }>(`/api/team/members/${id}/suspend`, {}),
   activate:(id: string) => api.post<{ success: true }>(`/api/team/members/${id}/activate`, {}),
   resend:  (id: string) => api.post<InviteIssuedResponse>(`/api/team/members/${id}/resend`, {}),
+  shareLink: (id: string) => api.post<{ success: true; invite_url: string; expires_at: string }>(`/api/team/members/${id}/share-link`, {}),
+  shareResetLink: (id: string) => api.post<{ success: true; invite_url: string; expires_at: string }>(`/api/team/members/${id}/share-reset-link`, {}),
   resetPwd:(id: string) => api.post<InviteIssuedResponse>(`/api/team/members/${id}/reset-password`, {}),
   archive: (id: string) => api.delete<{ success: true }>(`/api/team/members/${id}`),
   listArchived:    () => api.get<TeamMemberRow[]>('/api/team/members?archived=true'),

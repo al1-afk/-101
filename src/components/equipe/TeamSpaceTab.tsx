@@ -10,7 +10,7 @@ import { motion } from 'framer-motion'
 import {
   UserPlus, Loader2, Mail, Phone, Briefcase, Check, X, Search, MoreVertical,
   Send, ShieldOff, ShieldCheck, RefreshCw, Trash2, KeyRound, Copy, Activity, ClipboardList,
-  AlertTriangle, ChevronDown,
+  AlertTriangle, ChevronDown, MessageCircle, Share2,
 } from 'lucide-react'
 import { teamMgmtApi, type TeamMemberRow, type TeamMemberAccess } from '@/lib/api'
 import { SOP_CATEGORIES } from '@/lib/sopCategories'
@@ -233,6 +233,28 @@ function MemberActions({ member, onOpen, onInvalidate }: {
 }) {
   const _qc = useQueryClient()
   const [shareInfo, setShareInfo] = useState<{ kind: 'invite' | 'reset'; maskedToken: string; expiresAt: string } | null>(null)
+  const [shareUrl, setShareUrl] = useState<{ url: string; expiresAt: string } | null>(null)
+  const [sharing, setSharing] = useState(false)
+
+  const generateShareLink = async () => {
+    setSharing(true)
+    try {
+      const res = await teamMgmtApi.shareLink(member.id)
+      setShareUrl({ url: res.invite_url, expiresAt: res.expires_at })
+      onInvalidate()
+    } catch (e: any) { toast.error(e?.message ?? 'Erreur lors de la génération du lien') }
+    finally { setSharing(false) }
+  }
+
+  const generateShareResetLink = async () => {
+    setSharing(true)
+    try {
+      const res = await teamMgmtApi.shareResetLink(member.id)
+      setShareUrl({ url: res.invite_url, expiresAt: res.expires_at })
+      onInvalidate()
+    } catch (e: any) { toast.error(e?.message ?? 'Erreur lors de la génération du lien') }
+    finally { setSharing(false) }
+  }
 
   const run = async (fn: () => Promise<any>, okMsg: string) => {
     try { await fn(); toast.success(okMsg); onInvalidate() }
@@ -268,6 +290,16 @@ function MemberActions({ member, onOpen, onInvalidate }: {
         {member.account_status === 'invited' && (
           <DropdownMenuItem onClick={() => runAndShare(() => teamMgmtApi.resend(member.id), 'invite', 'Invitation renvoyée')}>
             <Send className="w-4 h-4 mr-2" /> Renvoyer l'invitation
+          </DropdownMenuItem>
+        )}
+        {member.account_status === 'invited' && (
+          <DropdownMenuItem onClick={generateShareLink} disabled={sharing}>
+            <Share2 className="w-4 h-4 mr-2" /> {sharing ? 'Génération…' : 'Partager lien invitation (WhatsApp…)'}
+          </DropdownMenuItem>
+        )}
+        {(member.account_status === 'active' || member.account_status === 'suspended') && (
+          <DropdownMenuItem onClick={generateShareResetLink} disabled={sharing}>
+            <Share2 className="w-4 h-4 mr-2" /> {sharing ? 'Génération…' : 'Partager lien réinitialisation (WhatsApp…)'}
           </DropdownMenuItem>
         )}
         {(member.account_status === 'invited' || member.account_status === 'active' || member.account_status === 'suspended') && (
@@ -324,7 +356,108 @@ function MemberActions({ member, onOpen, onInvalidate }: {
         onClose={() => setShareInfo(null)}
       />
     )}
+
+    {shareUrl && (
+      <ShareUrlDialog
+        url={shareUrl.url}
+        expiresAt={shareUrl.expiresAt}
+        memberName={`${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()}
+        memberPhone={member.telephone ?? ''}
+        isReset={member.account_status !== 'invited'}
+        onClose={() => setShareUrl(null)}
+      />
+    )}
     </>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ShareUrlDialog — affiche le lien COMPLET à copier / envoyer WhatsApp.
+   Sécurité : action tracée dans l'audit côté serveur.
+   ════════════════════════════════════════════════════════════════════ */
+function ShareUrlDialog({
+  url, expiresAt, memberName, memberPhone, isReset = false, onClose,
+}: {
+  url:         string
+  expiresAt:   string
+  memberName:  string
+  memberPhone: string
+  isReset?:    boolean
+  onClose:     () => void
+}) {
+  const expiresLabel = new Date(expiresAt).toLocaleString('fr-FR', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  })
+  const message = isReset
+    ? `Bonjour ${memberName}, voici ton lien pour réinitialiser ton mot de passe Next Gital :\n\n${url}\n\nCe lien est valable jusqu'au ${expiresLabel}. Ton mot de passe actuel a été désactivé.`
+    : `Bonjour ${memberName}, voici ton lien d'invitation Next Gital pour créer ton compte :\n\n${url}\n\nCe lien est valable jusqu'au ${expiresLabel}.`
+  const cleanPhone = memberPhone.replace(/[^0-9]/g, '')
+  const waHref = cleanPhone
+    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`
+    : `https://wa.me/?text=${encodeURIComponent(message)}`
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(url)
+    toast.success('Lien copié')
+  }
+  const copyMessage = () => {
+    navigator.clipboard.writeText(message)
+    toast.success('Message copié')
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Share2 className="w-5 h-5 text-blue-500" /> {isReset ? 'Partager le lien de réinitialisation' : "Partager le lien d'invitation"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/40">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              Lien valable jusqu'au <strong>{expiresLabel}</strong>. Il remplace tous les liens précédents pour {memberName}.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">🔗 Lien complet</p>
+            <div className="flex items-center gap-2">
+              <input readOnly value={url} onFocus={e => e.target.select()}
+                className="flex-1 px-2 py-1.5 rounded border border-border bg-background text-xs font-mono" />
+              <Button size="sm" variant="secondary" onClick={copyUrl}>
+                <Copy className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <a href={waHref} target="_blank" rel="noopener noreferrer" className="w-full">
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
+                <MessageCircle className="w-4 h-4 mr-1.5" /> Envoyer WhatsApp
+              </Button>
+            </a>
+            <Button variant="secondary" onClick={copyMessage}>
+              <Copy className="w-4 h-4 mr-1.5" /> Copier message
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-900/20 p-2.5">
+            <p className="text-[11px] text-amber-800 dark:text-amber-200 flex gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <span>
+                Ce lien donne accès direct au compte. Ne partagez qu'avec le destinataire prévu.
+                L'action est enregistrée dans le journal d'audit.
+              </span>
+            </p>
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-border">
+            <Button variant="secondary" onClick={onClose}>Fermer</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

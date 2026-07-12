@@ -860,6 +860,127 @@ router.post('/members/:id/resend', inviteLimiter, ...requireAdminMgr, async (req
   }
 })
 
+/* POST /api/team/members/:id/share-link — generate a fresh invite token and
+   RETURN the raw URL so admin can copy/paste it (WhatsApp, SMS…).
+   Action tracée dans l'audit. Le lien remplace tous les précédents. */
+router.post('/members/:id/share-link', inviteLimiter, ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+
+  try {
+    const member = await tenantQueryOne<{ email: string; prenom: string }>(
+      tenantId,
+      `SELECT email, prenom FROM public.team_members WHERE id = $1`, [id])
+    if (!member) return res.status(404).json({ error: 'Membre introuvable' })
+
+    const token = randomToken()
+    const tokenHash = hashToken(token)
+    await tenantQuery(
+      tenantId,
+      `UPDATE public.team_members
+          SET invitation_token = NULL,
+              invitation_token_hash = $1,
+              invitation_purpose = 'invite',
+              invitation_used_at = NULL,
+              invitation_created_by = $3,
+              invitation_created_ip = $4::inet,
+              invitation_sent_at = NOW(),
+              invitation_expires_at = NOW() + INTERVAL '48 hours',
+              account_status = 'invited', updated_at = NOW()
+        WHERE id = $2`,
+      [tokenHash, id, req.user!.userId, req.ip ?? '0.0.0.0'],
+    )
+    const inviteUrl = `${frontendOrigin(req)}/invite/${token}`
+    await logActivity(tenantId, id, 'invite_link_shared',
+      { by: req.user!.userId, token_prefix: tokenPrefix(token) },
+      req.ip, req.headers['user-agent'] as string,
+    )
+    await recordSecurityAudit(tenantId, {
+      actorUserId: req.user!.userId,
+      targetType:  'team_member', targetId: id,
+      action:      'invite_link_shared',
+      tokenPrefix: tokenPrefix(token),
+      ip:          req.ip, ua: req.headers['user-agent'] as string,
+    })
+    res.json({
+      success:    true,
+      invite_url: inviteUrl,
+      expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+    })
+  } catch (err: any) {
+    logger.error('[team:share-link]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* POST /api/team/members/:id/share-reset-link — generate a fresh reset token
+   and RETURN the raw URL so admin can send it via WhatsApp/SMS.
+   Comme reset-password, invalide le mot de passe actuel + révoque les sessions.
+   Action tracée dans l'audit. */
+router.post('/members/:id/share-reset-link', inviteLimiter, ...requireAdminMgr, async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const { id } = req.params
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+
+  try {
+    const member = await tenantQueryOne<{ email: string; prenom: string; user_id: string | null }>(
+      tenantId,
+      `SELECT email, prenom, user_id FROM public.team_members WHERE id = $1`, [id],
+    )
+    if (!member) return res.status(404).json({ error: 'Membre introuvable' })
+
+    const token = randomToken()
+    const tokenHash = hashToken(token)
+    await tenantQuery(
+      tenantId,
+      `UPDATE public.team_members
+          SET invitation_token = NULL,
+              invitation_token_hash = $1,
+              invitation_purpose = 'reset',
+              invitation_used_at = NULL,
+              invitation_created_by = $3,
+              invitation_created_ip = $4::inet,
+              invitation_sent_at = NOW(),
+              invitation_expires_at = NOW() + INTERVAL '30 minutes',
+              account_status = CASE WHEN account_status = 'archived' THEN account_status ELSE 'invited' END,
+              updated_at = NOW()
+        WHERE id = $2`,
+      [tokenHash, id, req.user!.userId, req.ip ?? '0.0.0.0'],
+    )
+    if (member.user_id) {
+      await query(`UPDATE public.users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [
+        await bcrypt.hash(randomToken(), 12),
+        member.user_id,
+      ])
+      await query(
+        `UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false`,
+        [member.user_id],
+      ).catch(() => {})
+    }
+    const resetUrl = `${frontendOrigin(req)}/invite/${token}`
+    await logActivity(tenantId, id, 'reset_link_shared',
+      { by: req.user!.userId, token_prefix: tokenPrefix(token) },
+      req.ip, req.headers['user-agent'] as string,
+    )
+    await recordSecurityAudit(tenantId, {
+      actorUserId: req.user!.userId,
+      targetType:  'team_member', targetId: id,
+      action:      'reset_link_shared',
+      tokenPrefix: tokenPrefix(token),
+      ip:          req.ip, ua: req.headers['user-agent'] as string,
+    })
+    res.json({
+      success:    true,
+      invite_url: resetUrl,
+      expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    })
+  } catch (err: any) {
+    logger.error('[team:share-reset-link]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
 /* POST /api/team/members/:id/reset-password — generate reset token.
    Expiration courte (30 min). Token stocké hashé, jamais retourné en clair. */
 router.post('/members/:id/reset-password', inviteLimiter, ...requireAdminMgr, async (req: Request, res: Response) => {
