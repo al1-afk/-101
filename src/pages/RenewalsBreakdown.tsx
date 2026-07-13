@@ -19,8 +19,30 @@ export default function RenewalsBreakdown() {
   const base = tenantSlug ? `/${tenantSlug}` : ''
   const { data: clients = [], isLoading } = useClients()
 
-  /* Répartition : mêmes règles que la page Clients (actifs uniquement,
-     mois d'expiration du domaine → hébergement → date début). */
+  const currentYear = new Date().getFullYear()
+  const [year, setYear] = useState<number>(currentYear)
+
+  /* Années disponibles : de la plus ancienne date connue jusqu'à currentYear + 3.
+     Permet de voir l'historique passé + projection sur les 3 prochaines années. */
+  const availableYears = useMemo(() => {
+    let minYear = currentYear
+    for (const c of clients) {
+      if (c.statut !== 'Actif') continue
+      const meta = parseClientNotes(c.notes).meta
+      const dateStr = meta.domainExpiry ?? meta.hostingExpiry ?? c.date_debut_contrat
+      if (!dateStr) continue
+      const y = new Date(dateStr).getFullYear()
+      if (!isNaN(y) && y < minYear) minYear = y
+    }
+    const maxYear = currentYear + 3
+    const years: number[] = []
+    for (let y = minYear; y <= maxYear; y++) years.push(y)
+    return years
+  }, [clients, currentYear])
+
+  /* Répartition pour l'année sélectionnée. Un client compte pour cette année
+     s'il est Actif ET si sa date de départ (domainExpiry) est ≤ à cette année
+     (on considère que les renouvellements se répètent chaque année). */
   const { months, unscheduled } = useMemo(() => {
     const months: Array<{ total: number; clients: Array<{ id: string; nom: string; montant: number; date: string }> }> =
       Array.from({ length: 12 }, () => ({ total: 0, clients: [] }))
@@ -33,21 +55,28 @@ export default function RenewalsBreakdown() {
       const dateStr = meta.domainExpiry ?? meta.hostingExpiry ?? c.date_debut_contrat
       const d = dateStr ? new Date(dateStr) : null
       if (!d || isNaN(d.getTime())) {
-        unscheduled.push({ id: c.id, nom: c.nom, montant: price })
+        /* Sans date : uniquement sur l'année en cours (référence par défaut) */
+        if (year === currentYear) {
+          unscheduled.push({ id: c.id, nom: c.nom, montant: price })
+        }
         continue
       }
+      /* Renouvellement récurrent : compte uniquement à partir de l'année de départ */
+      if (d.getFullYear() > year) continue
+      /* Date affichée = jour/mois d'origine mais dans l'année sélectionnée */
+      const displayDate = `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       months[d.getMonth()].total += price
-      months[d.getMonth()].clients.push({ id: c.id, nom: c.nom, montant: price, date: dateStr! })
+      months[d.getMonth()].clients.push({ id: c.id, nom: c.nom, montant: price, date: displayDate })
     }
     return { months, unscheduled }
-  }, [clients])
+  }, [clients, year, currentYear])
 
   const scheduledTotal = months.reduce((s, m) => s + m.total, 0)
   const unscheduledTotal = unscheduled.reduce((s, c) => s + c.montant, 0)
   const grandTotal = scheduledTotal + unscheduledTotal
   const max = Math.max(1, ...months.map(m => m.total))
-  const currentMonth = new Date().getMonth()
-  const [expanded, setExpanded] = useState<number | null>(currentMonth)
+  const currentMonth = year === currentYear ? new Date().getMonth() : -1
+  const [expanded, setExpanded] = useState<number | null>(new Date().getMonth())
 
   if (isLoading) {
     return (
@@ -59,17 +88,51 @@ export default function RenewalsBreakdown() {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Breadcrumb + retour */}
-      <div className="flex items-center gap-2">
+      {/* Breadcrumb + retour + sélecteur d'année */}
+      <div className="flex items-center gap-3 flex-wrap">
         <Button variant="secondary" size="sm" onClick={() => navigate(`${base}/clients`)}>
           <ArrowLeft className="w-4 h-4" /> Retour aux clients
         </Button>
+        <div className="flex-1" />
+        <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border">
+          {availableYears.map(y => {
+            const isActive  = y === year
+            const isCurrent = y === currentYear
+            const isFuture  = y > currentYear
+            return (
+              <button
+                key={y}
+                onClick={() => setYear(y)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  isActive
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background'
+                }`}
+                title={
+                  isCurrent ? 'Année en cours' :
+                  isFuture  ? 'Projection future' :
+                              'Année passée'
+                }
+              >
+                {y}
+                {isCurrent && !isActive && (
+                  <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />
+                )}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Header — bandeau vert avec les chiffres clés */}
       <div className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-6 shadow-lg">
-        <h1 className="text-2xl font-bold mb-1">Revenus renouvellements — mois par mois</h1>
-        <p className="text-sm text-emerald-50 mb-4">Répartition annuelle des paiements domaine + hébergement des clients actifs.</p>
+        <h1 className="text-2xl font-bold mb-1">
+          Revenus renouvellements — {year}
+          {year === currentYear && <span className="ml-2 text-sm font-normal opacity-80">· année en cours</span>}
+          {year > currentYear && <span className="ml-2 text-sm font-normal opacity-80">· projection</span>}
+          {year < currentYear && <span className="ml-2 text-sm font-normal opacity-80">· historique</span>}
+        </h1>
+        <p className="text-sm text-emerald-50 mb-4">Répartition mensuelle des paiements domaine + hébergement des clients actifs.</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white/15 backdrop-blur-sm rounded-xl p-3">
             <p className="text-[10px] uppercase tracking-wider text-emerald-100 font-semibold">Total annuel</p>
