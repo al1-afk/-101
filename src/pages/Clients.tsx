@@ -198,23 +198,25 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   )
 }
 
-/* ─── Badge de statut cliquable — cycle Actif ↔ Inactif ────────── */
+/* ─── Toggle switch style iOS — Actif (vert) ↔ Inactif (rouge) ── */
 function StatusBadge({ statut, onClick }: { statut: string; onClick: () => void }) {
-  const cfg: Record<string, { label: string; cls: string; dot: string }> = {
-    Actif:   { label: 'Actif',   cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-500' },
-    Inactif: { label: 'Inactif', cls: 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30',                   dot: 'bg-red-500' },
-    Nouveau: { label: 'Nouveau', cls: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30',               dot: 'bg-blue-500' },
-  }
-  const s = cfg[statut] ?? cfg.Nouveau
+  /* Nouveau = état par défaut, traité comme "pas encore Actif" (gris) */
+  const isActif = statut === 'Actif'
   return (
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onClick() }}
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${s.cls} hover:opacity-80 transition-opacity cursor-pointer`}
-      title="Cliquer pour changer le statut"
+      className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors ${
+        isActif ? 'bg-emerald-500' : statut === 'Inactif' ? 'bg-red-500' : 'bg-slate-300 dark:bg-slate-600'
+      }`}
+      title={isActif ? 'Client actif — cliquer pour désactiver' : 'Client inactif — cliquer pour activer'}
+      aria-label={`Statut : ${statut}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-      {s.label}
+      <span
+        className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+          isActif ? 'translate-x-4' : 'translate-x-0.5'
+        }`}
+      />
     </button>
   )
 }
