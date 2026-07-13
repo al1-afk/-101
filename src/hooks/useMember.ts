@@ -43,16 +43,28 @@ export function useMember() {
     const token = memberTokenStore.get()
     if (!token) { setState({ ...INITIAL, loading: false }); return }
     const payload = parseJwt(token)
-    if (!payload || (payload.exp && payload.exp * 1000 < Date.now())) {
+    /* JWT corrompu (non parsable) → clear. JWT expiré côté client → on
+       laisse api.ts déclencher un refresh silencieux au premier /me. */
+    if (!payload) {
       memberTokenStore.clear()
       setState({ ...INITIAL, loading: false })
       return
     }
+    /* Hydratation optimiste immédiate — l'UI s'affiche connectée tout de
+       suite pendant que /me confirme en arrière-plan. */
+    setState(prev => ({ ...prev, loading: true, isAuth: true }))
     memberAuthApi.me()
       .then(member => setState({ loading: false, isAuth: true, member }))
-      .catch(() => {
-        memberTokenStore.clear()
-        setState({ ...INITIAL, loading: false })
+      .catch(err => {
+        /* api.ts a déjà purgé si AUTH_INVALID (message 'Session expirée')
+           OU si erreur transient (5xx, network) → on garde la session
+           hydratée pour ne pas déconnecter injustement. */
+        const msg = String(err?.message ?? '')
+        if (msg === 'Session expirée') {
+          setState({ ...INITIAL, loading: false })
+        } else {
+          setState(prev => ({ ...prev, loading: false }))
+        }
       })
   }, [])
 

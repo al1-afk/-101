@@ -34,6 +34,36 @@ export class TransientRefreshError extends Error {
 }
 
 let _refreshPromise: Promise<string> | null = null
+let _memberRefreshPromise: Promise<string> | null = null
+
+/* Refresh dédié aux team_members : mêmes règles transient/AUTH_INVALID
+   que côté admin, mais via /api/team/auth/refresh et memberTokenStore. */
+async function refreshMemberToken(): Promise<string> {
+  if (_memberRefreshPromise) return _memberRefreshPromise
+  _memberRefreshPromise = (async () => {
+    let res: Response
+    try {
+      res = await fetch(`${BASE_URL}/api/team/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    } catch (netErr: any) {
+      throw new TransientRefreshError(netErr?.message ?? 'network')
+    }
+    if (res.status >= 500) throw new TransientRefreshError(`http_${res.status}`)
+    if (res.status === 401 || res.status === 403) {
+      const data = await res.json().catch(() => ({}))
+      throw new AuthInvalidError(data?.code ?? 'AUTH_INVALID')
+    }
+    if (!res.ok) throw new TransientRefreshError(`http_${res.status}`)
+    const data = await res.json().catch(() => null as any)
+    if (!data?.token) throw new TransientRefreshError('empty_response')
+    memberTokenStore.set(data.token)
+    return data.token as string
+  })().finally(() => { _memberRefreshPromise = null })
+  return _memberRefreshPromise
+}
 
 async function refreshAccessToken(): Promise<string> {
   if (_refreshPromise) return _refreshPromise
@@ -100,7 +130,34 @@ async function request<T>(
     throw new Error('Erreur réseau — vérifiez votre connexion')
   }
 
-  /* Auto-refresh on 401 (admin-side only) — tente un refresh silencieux
+  /* Auto-refresh on 401 (member-side) — logique miroir de l'admin.
+     Sans ce refresh, un employé était déconnecté dès l'expiration du
+     access token (bug rapporté : "il me connecte puis me vire vite"). */
+  if (res.status === 401 && source === 'member' && _retry) {
+    const data = await res.json().catch(() => ({}))
+    if (data.code === 'TOKEN_REUSE' || data.code === 'NO_REFRESH' || data.code === 'INVALID_REFRESH') {
+      memberTokenStore.clear()
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/team-login')) {
+        window.location.href = '/team-login'
+      }
+      throw new Error(data.error ?? 'Session expirée')
+    }
+    try {
+      await refreshMemberToken()
+      return request<T>(method, path, body, auth, false)
+    } catch (err: any) {
+      if (err instanceof AuthInvalidError) {
+        memberTokenStore.clear()
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/team-login')) {
+          window.location.href = '/team-login'
+        }
+        throw new Error('Session expirée')
+      }
+      throw new Error('Serveur temporairement indisponible')
+    }
+  }
+
+  /* Auto-refresh on 401 (admin-side) — tente un refresh silencieux
      sur TOUT 401 (avec ou sans code), pour couvrir aussi les tokens
      corrompus/mal signés/expirés côté client sans code explicite. */
   if (res.status === 401 && source === 'admin' && _retry) {

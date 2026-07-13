@@ -25,7 +25,7 @@
 import { Router, Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { query, queryOne, tenantQuery, tenantQueryOne } from '../db/pool'
-import { requireAuth, signAccessToken, signRefreshToken } from '../middleware/auth'
+import { requireAuth, signAccessToken, signRefreshToken, verifyRefreshToken } from '../middleware/auth'
 import { NextFunction } from 'express'
 import { authLimiter, inviteLimiter } from '../middleware/security'
 import { sendEmail } from '../lib/email'
@@ -249,15 +249,7 @@ router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Resp
       tenantId: member.tenant_id,
       role:     'team_member',
     })
-    const refreshToken = signRefreshToken({ userId: user!.id, tenantId: member.tenant_id })
-
-    res.cookie('gestiq_team_refresh', refreshToken, {
-      httpOnly: true,
-      secure:   process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge:   7 * 24 * 60 * 60 * 1000,
-      path:     '/api/team/auth',
-    })
+    await issueMemberRefreshToken(res, user!.id, member.tenant_id, req.ip ?? '', req.headers['user-agent'] ?? '')
 
     res.json({
       token: accessToken,
@@ -273,6 +265,27 @@ router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Resp
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
+
+/* Helper — signe + stocke le hash du refresh token en DB + pose le cookie.
+   Table refresh_tokens partagée avec les admins (revocation unifiée). */
+async function issueMemberRefreshToken(
+  res: Response, userId: string, tenantId: string, ip: string, ua: string,
+) {
+  const refreshToken = signRefreshToken({ userId, tenantId })
+  const tokenHash    = hashToken(refreshToken)
+  await query(
+    `INSERT INTO refresh_tokens (user_id, tenant_id, token_hash, ip_address, user_agent, expires_at)
+     VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '90 days')`,
+    [userId, tenantId, tokenHash, ip || null, ua || null],
+  )
+  res.cookie('gestiq_team_refresh', refreshToken, {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge:   90 * 24 * 60 * 60 * 1000,
+    path:     '/api/team/auth',
+  })
+}
 
 /* ════════════════════════════════════════════════════════════════════
    MEMBER AUTH
@@ -340,15 +353,7 @@ router.post('/auth/login', authLimiter, async (req: Request, res: Response) => {
       tenantId: member.tenant_id,
       role:     'team_member',
     })
-    const refreshToken = signRefreshToken({ userId: user.id, tenantId: member.tenant_id })
-
-    res.cookie('gestiq_team_refresh', refreshToken, {
-      httpOnly: true,
-      secure:   process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge:   7 * 24 * 60 * 60 * 1000,
-      path:     '/api/team/auth',
-    })
+    await issueMemberRefreshToken(res, user.id, member.tenant_id, req.ip ?? '', req.headers['user-agent'] ?? '')
 
     res.json({
       token: accessToken,
@@ -361,6 +366,64 @@ router.post('/auth/login', authLimiter, async (req: Request, res: Response) => {
     })
   } catch (err: any) {
     logger.error('[team:login]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* POST /api/team/auth/refresh — rotation refresh token pour team members.
+   Miroir de /api/auth/refresh (admin). Distingue transient (5xx géré par le
+   client) de la vraie invalidation (401 avec code explicite). */
+router.post('/auth/refresh', authLimiter, async (req: Request, res: Response) => {
+  const rawToken = req.cookies?.gestiq_team_refresh
+  if (!rawToken) return res.status(401).json({ error: 'Session expirée', code: 'NO_REFRESH' })
+
+  const payload = verifyRefreshToken(rawToken)
+  if (!payload) {
+    res.clearCookie('gestiq_team_refresh', { path: '/api/team/auth' })
+    return res.status(401).json({ error: 'Session invalide', code: 'INVALID_REFRESH' })
+  }
+
+  const tokenHash = hashToken(rawToken)
+  try {
+    /* Trouve + révoque atomiquement l'ancien token (rotation) */
+    const stored = await queryOne<{ id: string }>(
+      `UPDATE refresh_tokens
+          SET revoked = true
+        WHERE token_hash = $1 AND revoked = false AND expires_at > NOW()
+        RETURNING id`,
+      [tokenHash],
+    )
+    if (!stored) {
+      /* Token déjà utilisé ou révoqué → détection de réutilisation :
+         on révoque TOUTES les sessions de cet utilisateur par sécurité. */
+      await query(`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`, [payload.userId])
+      res.clearCookie('gestiq_team_refresh', { path: '/api/team/auth' })
+      return res.status(401).json({ error: 'Session compromise détectée', code: 'TOKEN_REUSE' })
+    }
+
+    /* Charge le membre pour émettre un nouveau access token */
+    const member = await queryOne<{ email: string; account_status: string }>(
+      `SELECT m.email, m.account_status
+         FROM public.team_members m
+        WHERE m.user_id = $1 AND m.tenant_id = $2 LIMIT 1`,
+      [payload.userId, payload.tenantId],
+    )
+    if (!member || member.account_status !== 'active') {
+      res.clearCookie('gestiq_team_refresh', { path: '/api/team/auth' })
+      return res.status(401).json({ error: 'Compte inactif', code: 'INVALID_REFRESH' })
+    }
+
+    const accessToken = signAccessToken({
+      userId:   payload.userId,
+      email:    member.email,
+      tenantId: payload.tenantId,
+      role:     'team_member',
+    })
+    await issueMemberRefreshToken(res, payload.userId, payload.tenantId, req.ip ?? '', req.headers['user-agent'] ?? '')
+
+    res.json({ token: accessToken })
+  } catch (err: any) {
+    logger.error('[team:refresh]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
@@ -401,6 +464,16 @@ router.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
 })
 
 router.post('/auth/logout', requireAuth, async (req: Request, res: Response) => {
+  /* Révoque le refresh token courant (si présent) — jamais tous les autres,
+     pour ne pas déconnecter le membre de ses autres appareils. */
+  const rawToken = req.cookies?.gestiq_team_refresh
+  if (rawToken) {
+    const tokenHash = hashToken(rawToken)
+    await query(
+      `UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`,
+      [tokenHash],
+    ).catch(() => {})
+  }
   res.clearCookie('gestiq_team_refresh', { path: '/api/team/auth' })
   if (req.user?.role === 'team_member') {
     const member = await tenantQueryOne<{ id: string }>(
