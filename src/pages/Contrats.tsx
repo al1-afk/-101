@@ -264,7 +264,7 @@ function ContratCard({ contrat, onDelete, onEdit }: {
             </div>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Date</label>
                 <Input type="date" value={vers.date} onChange={e => setVers(p => ({ ...p, date: e.target.value }))} />
@@ -440,7 +440,7 @@ export default function Contrats() {
             </div>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">N° Contrat</label><Input value={form.numero} onChange={e => setForm(p => ({ ...p, numero: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Client</label><ClientCombobox value={form.client} onChange={v => setForm(p => ({ ...p, client: v }))} /></div>
               <div className="space-y-1.5 col-span-2"><label className="form-label">Objet</label><AutocorrectInput value={form.objet} onChange={e => setForm(p => ({ ...p, objet: e.target.value }))} /></div>

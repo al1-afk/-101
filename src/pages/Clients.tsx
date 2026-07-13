@@ -148,7 +148,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
 
   return (
     <form id="client-form" onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5 col-span-2 sm:col-span-1">
           <label className="form-label">Nom complet *</label>
           <Input value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} required />
@@ -182,7 +182,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
       {/* ── Bloc Contrat / Prestation ───────────────────────────── */}
       <div className="rounded-xl border border-dashed border-blue-300 dark:border-blue-700/50 bg-blue-50/30 dark:bg-blue-950/10 p-3 space-y-3">
         <p className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-widest">💼 Contrat / Prestation</p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="form-label">Type de service</label>
             <Select value={form.type_service || 'none'} onValueChange={v => setForm(p => ({ ...p, type_service: v === 'none' ? '' : v }))}>

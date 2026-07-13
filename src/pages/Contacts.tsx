@@ -104,7 +104,7 @@ export default function Contacts() {
       </div>
 
       {/* ── Stats ── */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="card-premium p-5 flex items-center gap-4">
           <div className="w-11 h-11 rounded-xl bg-slate-500/15 flex items-center justify-center">
             <Users className="w-5 h-5 text-slate-600 dark:text-slate-300" />
@@ -265,7 +265,7 @@ export default function Contacts() {
             </div>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Nom complet *</label>
                 <AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} />

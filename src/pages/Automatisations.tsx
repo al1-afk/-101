@@ -477,7 +477,7 @@ function RuleFormFields({
       </div>
 
       {(trigger === 'invoice_overdue' || trigger === 'domain_expiring' || trigger === 'subscription_expiring') && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label className="text-sm font-medium">
               {trigger === 'invoice_overdue' ? 'Délai après échéance (j)' : 'Jours avant expiration'}
@@ -506,7 +506,7 @@ function RuleFormFields({
       )}
 
       {trigger === 'client_created' && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Délai après création (j)</label>
             <Input

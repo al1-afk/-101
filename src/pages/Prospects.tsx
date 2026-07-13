@@ -537,7 +537,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {/* Valeur */}
                       <div>
                         <p className="form-label mb-1.5">Valeur (MAD)</p>
@@ -587,7 +587,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                   {/* Section — Planning */}
                   <div className="space-y-3">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Planning</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <p className="form-label mb-1.5">1er contact</p>
                         <div className="relative">

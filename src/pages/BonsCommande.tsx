@@ -119,7 +119,7 @@ export default function BonsCommande() {
             </div>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">N° BC</label><Input value={form.numero} onChange={e => setForm(p => ({ ...p, numero: e.target.value }))} placeholder={`BC-${new Date().getFullYear()}-001`} /></div>
               <div className="space-y-1.5"><label className="form-label">Fournisseur *</label><AutocorrectInput value={form.fournisseur} onChange={e => setForm(p => ({ ...p, fournisseur: e.target.value }))} /></div>
               <div className="space-y-1.5 col-span-2"><label className="form-label">Objet</label><AutocorrectInput value={form.objet} onChange={e => setForm(p => ({ ...p, objet: e.target.value }))} /></div>

@@ -225,7 +225,7 @@ function VehicleCard({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
           <div className="rounded-md bg-muted/40 p-2">
             <div className="text-muted-foreground text-[10px] uppercase">Kilométrage</div>
             <div className="font-bold flex items-center gap-1"><Gauge className="w-3 h-3" />{Number(vehicle.kilometrage).toLocaleString('fr-FR')} km</div>
@@ -577,7 +577,7 @@ function QuickMaintForm({ vehicleId, kmCurrent }: { vehicleId: string; kmCurrent
         <Field label="Description" small>
           <AutocorrectInput value={desc} onChange={(e) => setDesc(e.target.value)} className="h-8" placeholder="Vidange + filtres" required />
         </Field>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Field label="Prochain km" small>
             <Input type="number" value={proxKm ?? ''} onChange={(e) => setProxKm(e.target.value ? Number(e.target.value) : null)} className="h-8" placeholder={`${kmCurrent + 10000}`} />
           </Field>

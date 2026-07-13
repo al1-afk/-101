@@ -175,7 +175,7 @@ function ClientPicker({ value, onChange }: { value: string | null; onChange: (id
               <label className="text-xs font-medium text-muted-foreground">Entreprise</label>
               <Input value={quickForm.entreprise} onChange={e => setQuickForm(p => ({ ...p, entreprise: e.target.value }))} placeholder="Ex: TUNING CAR SARL" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Téléphone</label>
                 <Input value={quickForm.telephone} onChange={e => setQuickForm(p => ({ ...p, telephone: e.target.value }))} placeholder="06…" />

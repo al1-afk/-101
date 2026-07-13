@@ -73,7 +73,7 @@ export default function RecurrenceDialog({ open, onOpenChange, value, onSave }: 
         </p>
 
         {/* Type de récurrence */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {([
             { id: 'daily',        label: 'Chaque jour' },
             { id: 'weekly',       label: 'Jours choisis' },

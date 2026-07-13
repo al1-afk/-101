@@ -66,11 +66,13 @@ export default function AppLayout() {
               initial={{ x: -280 }} animate={{ x: 0 }} exit={{ x: -280 }}
               transition={{ type: 'spring', stiffness: 320, damping: 32 }}
               className="fixed left-0 top-0 h-[100dvh] z-50 md:hidden"
+              style={{ paddingLeft: 'env(safe-area-inset-left)' }}
             >
               <Sidebar collapsed={false} onToggle={() => setMobileOpen(false)} />
               <button
                 onClick={() => setMobileOpen(false)}
-                className="absolute top-4 right-4 p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+                aria-label="Fermer le menu"
+                className="absolute top-3 right-3 p-2 rounded-lg bg-slate-800/90 text-slate-300 hover:text-white hover:bg-slate-700 active:scale-95 transition-all min-w-[40px] min-h-[40px] flex items-center justify-center"
               >
                 <X className="w-4 h-4" />
               </button>

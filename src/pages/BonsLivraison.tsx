@@ -321,7 +321,7 @@ export default function BonsLivraison() {
 
           <div className="space-y-5">
             {/* Méta */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Numéro *</label>
                 <Input
@@ -349,7 +349,7 @@ export default function BonsLivraison() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Projet (optionnel)</label>
                 <Select
@@ -469,7 +469,7 @@ export default function BonsLivraison() {
             </div>
 
             {/* Statut + notes */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Statut</label>
                 <Select

@@ -149,7 +149,7 @@ function ClientEditForm({ client, onClose }: { client: Client; onClose: () => vo
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Nom complet *</label>
           <AutocorrectInput value={form.nom} onChange={s('nom')} required />

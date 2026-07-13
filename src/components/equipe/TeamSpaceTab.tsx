@@ -431,7 +431,7 @@ function ShareUrlDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <a href={waHref} target="_blank" rel="noopener noreferrer" className="w-full">
               <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
                 <MessageCircle className="w-4 h-4 mr-1.5" /> Envoyer WhatsApp
@@ -664,7 +664,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
               <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 mb-2">
                 Importer depuis un profil existant
               </p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => { setImportOpen(o => o === 'stagiaire' ? null : 'stagiaire'); setImportSearch('') }}
@@ -868,7 +868,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
 
               <div className="mt-3">
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2 block">Type de membre *</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {(['employee','trainer','freelance'] as const).map(t => (
                     <button
                       key={t}
@@ -1129,7 +1129,7 @@ function MemberDetailDialog({ id, onClose }: { id: string; onClose: () => void }
                   <p className="text-sm text-slate-500">{data.job_title || 'Membre'}</p>
                 </div>
               </div>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div><dt className="text-xs text-slate-500">Email</dt><dd className="text-slate-900 dark:text-slate-100">{data.email}</dd></div>
                 <div><dt className="text-xs text-slate-500">Téléphone</dt><dd className="text-slate-900 dark:text-slate-100">{data.telephone || '—'}</dd></div>
                 <div><dt className="text-xs text-slate-500">Type</dt><dd className="text-slate-900 dark:text-slate-100">{TYPE_META[data.member_type]?.label}</dd></div>

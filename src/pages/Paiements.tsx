@@ -1357,7 +1357,7 @@ export default function Paiements() {
             </div>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2">
                 <label className="form-label">Client *</label>
                 <ClientCombobox
@@ -1501,7 +1501,7 @@ export default function Paiements() {
             <DialogTitle>{editingContratId ? 'Modifier le contrat' : 'Nouveau contrat'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Numéro</label>
                 <Input value={contratForm.numero} onChange={e => setContratForm(p => ({ ...p, numero: e.target.value }))} />

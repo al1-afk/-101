@@ -178,7 +178,7 @@ function EventForm({ initial, defaultDate, onSave, onClose }: {
         <label className="form-label">Titre *</label>
         <AutocorrectInput value={form.titre} onChange={e => setForm(p => ({ ...p, titre: e.target.value }))} placeholder="RDV, Démo, Appel…" autoFocus required />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label className="form-label">Date *</label>
           <Input type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} required />

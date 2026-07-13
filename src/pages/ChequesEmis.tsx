@@ -138,7 +138,7 @@ export default function ChequesEmis() {
         <DialogContent>
           <DialogHeader><DialogTitle>Enregistrer un chèque émis</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">Référence</label><Input value={form.reference} onChange={e => setForm(p => ({ ...p, reference: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Montant (MAD)</label><Input type="number" value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Bénéficiaire</label><AutocorrectInput value={form.beneficiaire} onChange={e => setForm(p => ({ ...p, beneficiaire: e.target.value }))} /></div>

@@ -315,7 +315,7 @@ function Card({ title, icon: Icon, children }: { title: string; icon: React.Elem
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-3 gap-3 text-sm items-start">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm items-start">
       <dt className="text-xs text-muted-foreground pt-0.5">{label}</dt>
       <dd className="col-span-2 text-foreground break-words">{value ?? '—'}</dd>
     </div>

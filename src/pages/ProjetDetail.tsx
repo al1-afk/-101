@@ -496,7 +496,7 @@ function OverviewTab({ projet, onUpdate }: { projet: Projet; onUpdate: (patch: P
 
       <div className="card-premium p-5 space-y-3">
         <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Budget & coûts</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Budget</label>
             <Input type="number" value={projet.budget ?? ''} onChange={e => onUpdate({ budget: e.target.value ? Number(e.target.value) : null })} placeholder="0" />
@@ -510,7 +510,7 @@ function OverviewTab({ projet, onUpdate }: { projet: Projet; onUpdate: (patch: P
 
       <div className="card-premium p-5 space-y-3 md:col-span-2">
         <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Dates</p>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Début</label>
             <Input type="date" value={toDateInput(projet.date_debut)} onChange={e => onUpdate({ date_debut: e.target.value || null })} />

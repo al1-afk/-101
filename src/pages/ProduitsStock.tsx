@@ -215,7 +215,7 @@ function ProductCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
         <div>
           <div className="text-muted-foreground">Prix vente</div>
           <div className="font-semibold">{formatCurrency(product.prix_vente)}</div>
@@ -514,7 +514,7 @@ function QuickMovementDialog({ product, onClose }: { product: StockProduct | nul
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={submit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Type">
                 <Select value={type} onValueChange={(v) => setType(v as MovementType)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1053,7 +1053,7 @@ function NewTicketForm() {
               <span>Total TTC</span><span className="text-blue-600">{formatCurrency(totals.ttc)}</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
               <Select value={methode} onValueChange={(v) => setMethode(v as TicketPaymentMethod)}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -1114,7 +1114,7 @@ function TicketDetailDialog({ id, onClose }: { id: string | null; onClose: () =>
             <LoadingBlock label="Chargement…" />
           ) : (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div>
                   <span className="text-muted-foreground">Date :</span>{' '}
                   {new Date(ticket.date).toLocaleString('fr-FR')}

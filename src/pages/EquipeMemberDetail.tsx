@@ -320,7 +320,7 @@ function OverviewTab({ memberId, member, tenantBase }: { memberId: string; membe
             <div className="h-full bg-emerald-500 transition-all" style={{ width: `${completionRate}%` }} />
           </div>
         )}
-        <div className="grid grid-cols-4 gap-2 text-center">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-center">
           <StatBox value={tasksCounts.total}      label="Total" />
           <StatBox value={tasksCounts.done}       label="Terminées" tone="emerald" />
           <StatBox value={tasksCounts.inProgress} label="En cours"  tone="blue" />
@@ -764,7 +764,7 @@ function CongesTab({ memberId }: { memberId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <StatBox value={totals.total} label="Demandes" />
         <StatBox value={totals.approuves} label="Approuvées" tone="emerald" />
         <StatBox value={totals.jours} label="Jours pris" tone="blue" />

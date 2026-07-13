@@ -214,7 +214,7 @@ export default function Depenses() {
             {/* Category */}
             <div className="space-y-1.5">
               <label className="form-label">🏷️ Catégorie</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {CATEGORIES.map(c => (
                   <button
                     key={c.key}
@@ -236,7 +236,7 @@ export default function Depenses() {
             {/* Type */}
             <div className="space-y-1.5">
               <label className="form-label">👤 Type</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { value: 'personnel', label: '👤 Personnel' },
                   { value: 'business', label: '💼 Business' },
@@ -284,7 +284,7 @@ export default function Depenses() {
         <div className="space-y-4">
           <div>
             <h2 className="section-title mb-3">📊 Statistiques</h2>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <StatCard
                 emoji="📅"
                 label="Aujourd'hui"
@@ -354,7 +354,7 @@ export default function Depenses() {
           <span className="font-semibold text-foreground">{formatDH(monthData.total)}</span>
         </p>
 
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {/* By category */}
           <div>
             <p className="text-sm font-medium text-center mb-2 text-muted-foreground">Par catégorie</p>

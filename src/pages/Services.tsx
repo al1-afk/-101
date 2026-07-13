@@ -255,7 +255,7 @@ export default function Services() {
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Prix HT (MAD) *</label>
                 <Input

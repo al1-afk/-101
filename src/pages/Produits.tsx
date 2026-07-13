@@ -488,7 +488,7 @@ export default function Produits() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
                   Prix HT (MAD)

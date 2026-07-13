@@ -430,7 +430,7 @@ function InlineBlock({
           <TableBlock block={block} onUpdate={onUpdate} />
         ) : block.type === 'callout' ? (
           <div className="space-y-1.5">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <select value={block.variant ?? 'tip'} onChange={e => onUpdate({ variant: e.target.value as SopBlock['variant'] })}
                 className="h-8 rounded-md border border-border bg-[var(--surface-input)] px-2 text-xs">
                 <option value="tip">💡 Tip</option>

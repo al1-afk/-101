@@ -1252,7 +1252,7 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                 >
                   <div className="rounded-xl border border-blue-600/30 bg-blue-600/5 p-4 space-y-3">
                     <p className="text-xs font-bold text-blue-600 dark:text-blue-400">Nouveau client</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <AutocorrectInput placeholder="Nom *" value={newClientForm.nom}
                         onChange={e => setNewClientForm(p => ({ ...p, nom: e.target.value }))} className="text-sm" />
                       <Input placeholder="Téléphone" value={newClientForm.telephone}
@@ -1336,7 +1336,7 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
             )}
 
             {/* Dates */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">Date du devis</label>
                 <Input type="date" value={dateDevis} onChange={e => setDateDevis(e.target.value)} className="mt-1" />
@@ -1640,7 +1640,7 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
                 </div>
 
                 {/* Conditions + Bank */}
-                <div className="px-8 pt-5 pb-6 grid grid-cols-2 gap-5 flex-1">
+                <div className="px-8 pt-5 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-5 flex-1">
                   <div>
                     <p className="text-[9px] font-bold text-[#1E64C8] uppercase tracking-widest mb-2">Conditions de paiement</p>
                     <ul className="space-y-1.5">

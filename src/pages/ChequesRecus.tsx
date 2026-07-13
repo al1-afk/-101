@@ -83,7 +83,7 @@ export default function ChequesRecus() {
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="card-premium p-5 flex items-center gap-4">
           <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center flex-shrink-0">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -144,7 +144,7 @@ export default function ChequesRecus() {
         <DialogContent>
           <DialogHeader><DialogTitle>Enregistrer un chèque reçu</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="form-label">Référence</label><Input value={form.reference} onChange={e => setForm(p => ({ ...p, reference: e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Montant (MAD)</label><Input type="number" value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} /></div>
               <div className="space-y-1.5"><label className="form-label">Émetteur</label><AutocorrectInput value={form.emetteur} onChange={e => setForm(p => ({ ...p, emetteur: e.target.value }))} /></div>

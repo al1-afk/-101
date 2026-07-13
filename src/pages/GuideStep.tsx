@@ -351,7 +351,7 @@ function StepNavigation({ steps, currentKey, base }: { steps: GuideStep[]; curre
   const next = idx < sorted.length - 1 ? sorted[idx + 1] : null
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {prev ? (
         <Link
           to={`${base}/guides/${prev.step_key}`}

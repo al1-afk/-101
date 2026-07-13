@@ -191,7 +191,7 @@ export function ImportExportButtons<T>({ schema, data, onImport }: Props<T>) {
           {!parsing && result && importedCount === null && (
             <div className="space-y-4">
               {/* Summary */}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 <SummaryCard label="Lignes lues"  value={result.rows.length}    color="text-foreground" />
                 <SummaryCard label="Valides"       value={result.valid.length}   color="text-emerald-600 dark:text-emerald-400" icon={<CheckCircle2 className="w-3.5 h-3.5" />} />
                 <SummaryCard label="Erreurs"      value={result.invalid.length} color="text-red-600 dark:text-red-400" icon={<AlertTriangle className="w-3.5 h-3.5" />} />

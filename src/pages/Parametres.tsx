@@ -190,7 +190,7 @@ export default function Parametres() {
               <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               Informations personnelles
             </h2>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Nom complet</label>
                 <AutocorrectInput value={profile.fullname} onChange={e => setProfile(p => ({ ...p, fullname: e.target.value }))} />
@@ -224,7 +224,7 @@ export default function Parametres() {
               <Globe className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               Configuration entreprise
             </h2>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Raison sociale</label>
                 <AutocorrectInput value={entreprise.company} onChange={e => setEntreprise(p => ({ ...p, company: e.target.value }))} />

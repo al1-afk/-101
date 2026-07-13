@@ -146,7 +146,7 @@ function TeamMemberForm({ member, onClose }: { member?: TeamMember; onClose: () 
 
   return (
     <form id="team-member-form" onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <label className="form-label">Prénom *</label>
           <AutocorrectInput value={form.prenom} onChange={e => setForm(p => ({ ...p, prenom: e.target.value }))} required />
@@ -272,7 +272,7 @@ function CongesTab({ members }: { members: TeamMember[] }) {
   return (
     <div className="space-y-4">
       {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div className="card-premium p-3 flex items-center gap-3">
           <Clock className="w-5 h-5 text-amber-500" />
           <div><p className="text-lg font-bold">{pending}</p><p className="text-xs text-muted-foreground">En attente</p></div>
@@ -405,7 +405,7 @@ function CongesTab({ members }: { members: TeamMember[] }) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="form-label">Date début *</label>
                 <Input type="date" value={form.date_debut} onChange={e => setForm(p => ({ ...p, date_debut: e.target.value }))} required />
@@ -546,7 +546,7 @@ function SalairesTab({ members, detailBase, onEditMember }: {
       </div>
 
       {/* Summary KPIs */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {[
           { label: 'Masse salariale', value: formatCurrency(totaux.base), icon: Banknote, color: 'text-blue-500' },
           { label: 'Primes total',    value: formatCurrency(totaux.prime), icon: TrendingUp, color: 'text-emerald-500' },
@@ -796,7 +796,7 @@ function InviteForm({ onClose }: { onClose: () => void }) {
   return (
     <form onSubmit={handleInvite} className="space-y-4">
       {/* Identité */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label className="form-label">Prénom *</label>
           <AutocorrectInput value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Ahmed" required />

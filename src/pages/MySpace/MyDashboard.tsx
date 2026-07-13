@@ -246,7 +246,7 @@ export default function MyDashboard() {
             Voir toutes les tâches <ArrowRight className="w-3 h-3" />
           </Link>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <TodayPill
             value={widgets.todayCount}
             label={widgets.todayCount > 1 ? 'tâches à faire aujourd\'hui' : 'tâche à faire aujourd\'hui'}

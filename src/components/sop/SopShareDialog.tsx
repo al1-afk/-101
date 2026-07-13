@@ -116,7 +116,7 @@ export function SopShareDialog({ open, sopId, sopTitle, onClose }: Props) {
             {/* Default access selector */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Niveau d'accès par défaut</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {ACCESS_OPTIONS.map(opt => {
                   const Icon = opt.icon
                   const active = defaultAccess === opt.value

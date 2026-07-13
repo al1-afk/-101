@@ -395,7 +395,7 @@ export default function AbonnementsClients() {
               <label className="text-sm font-medium">Nom de l'abonnement</label>
               <AutocorrectInput placeholder="Ex: Pack Site + Maintenance" value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Montant (MAD)</label>
                 <Input type="number" min={0} value={form.montant} onChange={e => setForm(p => ({ ...p, montant: +e.target.value }))} />
@@ -412,7 +412,7 @@ export default function AbonnementsClients() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Date début</label>
                 <Input type="date" value={form.date_debut} onChange={e => setForm(p => ({ ...p, date_debut: e.target.value }))} />

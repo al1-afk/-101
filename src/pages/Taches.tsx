@@ -252,7 +252,7 @@ function ActionDrawer({
 
       {/* Meta info */}
       <div className="px-5 py-3 border-b border-border bg-muted/30">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="font-medium text-foreground">{action.client}</span>
@@ -915,7 +915,7 @@ export default function Taches() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Client <span className="text-muted-foreground font-normal">(optionnel)</span></label>
                 <AutocorrectInput
@@ -940,7 +940,7 @@ export default function Taches() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Valeur du deal (MAD)</label>
                 <Input
@@ -961,7 +961,7 @@ export default function Taches() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="form-label">Échéance <span className="text-muted-foreground font-normal">(auto: aujourd'hui)</span></label>
                 <Input

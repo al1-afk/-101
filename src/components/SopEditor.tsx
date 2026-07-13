@@ -485,7 +485,7 @@ function BlockEditor({
           <TableBlockEditor block={block} onUpdate={onUpdate} />
         ) : block.type === 'callout' ? (
           <>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <select value={block.variant ?? 'tip'} onChange={e => onUpdate({ variant: e.target.value as SopBlock['variant'] })}
                 className="h-9 rounded-lg border border-border bg-[var(--surface-input)] px-2 text-sm">
                 <option value="tip">💡 Tip</option>
@@ -587,7 +587,7 @@ function ImageBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
 
       {meta.url && (
         <>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             <select value={meta.size ?? 'medium'} onChange={e => onUpdate({ image: { ...meta, size: e.target.value as any } })}
               className="h-9 rounded-lg border border-border bg-[var(--surface-input)] px-2 text-sm">
               <option value="small">Petit</option>
@@ -668,7 +668,7 @@ function VideoBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (pat
 
       {meta.url.trim() && (
         <>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <select value={meta.size ?? 'medium'} onChange={e => onUpdate({ video: { ...meta, size: e.target.value as any } })}
               className="h-9 rounded-lg border border-border bg-[var(--surface-input)] px-2 text-sm">
               <option value="small">Petit</option>

@@ -141,7 +141,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <label className="text-xs text-slate-400 font-medium">Pays</label>
                       <Select value={data.country} onValueChange={v => set('country', v)}>
@@ -199,7 +199,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
                 <>
                   <div className="space-y-3">
                     <p className="text-xs text-slate-400 font-medium">Thème de l'interface</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {(['dark', 'light'] as const).map(t => (
                         <button
                           key={t}
@@ -236,7 +236,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
                     <h3 className="text-lg font-bold text-white">NEXT GITAL est prêt, {data.fullname || 'bienvenue'} !</h3>
                     <p className="text-sm text-slate-400 mt-1">{data.company} — {data.activity || data.country}</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                     {[
                       { label: 'CRM & Prospects',  icon: '🎯' },
                       { label: 'Factures & Devis',  icon: '📄' },

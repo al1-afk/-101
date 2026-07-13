@@ -301,7 +301,7 @@ function FactureDetailModal({
         {/* Body */}
         <div className="space-y-5 py-1">
           {/* Client + Dates row */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl bg-muted space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Client</p>
               <p className="font-semibold text-foreground">{facture.client_nom || '—'}</p>
@@ -1037,7 +1037,7 @@ function FactureWizard({
               >
                 <div className="rounded-xl border border-blue-600/30 bg-blue-600/5 p-4 space-y-3">
                   <p className="text-xs font-bold text-blue-600 dark:text-blue-400">Nouveau client</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <AutocorrectInput placeholder="Nom *" value={newClientForm.nom}
                       onChange={e => setNewClientForm(p => ({ ...p, nom: e.target.value }))} className="text-sm" />
                     <Input placeholder="Téléphone" value={newClientForm.telephone}
@@ -1121,7 +1121,7 @@ function FactureWizard({
           )}
 
           {/* Dates */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="form-label">Date de la facture</label>
               <Input type="date" value={dateFacture} onChange={e => setDateFacture(e.target.value)} className="mt-1" />
