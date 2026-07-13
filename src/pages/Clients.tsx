@@ -198,6 +198,27 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   )
 }
 
+/* ─── Badge de statut cliquable — cycle Actif ↔ Inactif ────────── */
+function StatusBadge({ statut, onClick }: { statut: string; onClick: () => void }) {
+  const cfg: Record<string, { label: string; cls: string; dot: string }> = {
+    Actif:   { label: 'Actif',   cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-500' },
+    Inactif: { label: 'Inactif', cls: 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30',                   dot: 'bg-red-500' },
+    Nouveau: { label: 'Nouveau', cls: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30',               dot: 'bg-blue-500' },
+  }
+  const s = cfg[statut] ?? cfg.Nouveau
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${s.cls} hover:opacity-80 transition-opacity cursor-pointer`}
+      title="Cliquer pour changer le statut"
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {s.label}
+    </button>
+  )
+}
+
 export default function Clients() {
   const navigate = useNavigate()
   const { data: clients = [], isLoading } = useClients()
@@ -212,14 +233,31 @@ export default function Clients() {
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_RANGE)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Actif' | 'Inactif' | 'Nouveau'>('all')
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
   const filtered = useMemo(() =>
-    clients.filter(c =>
-      (!search || [c.nom, c.email, c.entreprise, c.ville].some(f => f?.toLowerCase().includes(search.toLowerCase())))
-      && dateMatch(c.created_at)
-    )
-  , [clients, search, dateMatch])
+    clients.filter(c => {
+      const statusMatch = statusFilter === 'all' || (c.statut ?? 'Nouveau') === statusFilter
+      const searchMatch = !search || [c.nom, c.email, c.entreprise, c.ville].some(f => f?.toLowerCase().includes(search.toLowerCase()))
+      return statusMatch && searchMatch && dateMatch(c.created_at)
+    })
+  , [clients, search, dateMatch, statusFilter])
+
+  const statusCounts = useMemo(() => ({
+    all:     clients.length,
+    Actif:   clients.filter(c => c.statut === 'Actif').length,
+    Inactif: clients.filter(c => c.statut === 'Inactif').length,
+    Nouveau: clients.filter(c => !c.statut || c.statut === 'Nouveau').length,
+  }), [clients])
+
+  const toggleStatut = (c: Client) => {
+    /* Cycle : Nouveau → Actif → Inactif → Actif (le cycle reste sur Actif/Inactif
+       une fois qu'on a quitté Nouveau, pour éviter de revenir à Nouveau par erreur). */
+    const current = c.statut ?? 'Nouveau'
+    const next = current === 'Actif' ? 'Inactif' : 'Actif'
+    updateClient.mutate({ id: c.id, statut: next } as any)
+  }
 
   const allSelected = filtered.length > 0 && filtered.every(c => selected.has(c.id))
   const someSelected = filtered.some(c => selected.has(c.id)) && !allSelected
@@ -304,10 +342,34 @@ export default function Clients() {
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Rechercher un client..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      {/* Search + status filter */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Rechercher un client..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {([
+            { key: 'all',     label: 'Tous',    dot: 'bg-slate-400' },
+            { key: 'Actif',   label: 'Actif',   dot: 'bg-emerald-500' },
+            { key: 'Inactif', label: 'Inactif', dot: 'bg-red-500' },
+            { key: 'Nouveau', label: 'Nouveau', dot: 'bg-blue-500' },
+          ] as const).map(f => (
+            <button
+              key={f.key}
+              onClick={() => setStatusFilter(f.key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                statusFilter === f.key
+                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-300'
+                  : 'bg-transparent border-border hover:bg-muted/40'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${f.dot}`} />
+              {f.label}
+              <span className="text-[10px] opacity-70">{statusCounts[f.key]}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table */}
@@ -333,6 +395,7 @@ export default function Clients() {
                   </th>
                   <th className="w-8 text-center py-1.5 px-2">#</th>
                   <th className="text-left py-1.5 px-2">Client</th>
+                  <th className="text-center py-1.5 px-2">Statut</th>
                   <th className="text-left py-1.5 px-2">Contact</th>
                   <th className="text-left py-1.5 px-2">Type</th>
                   <th className="text-left py-1.5 px-2">Catégorie</th>
@@ -377,6 +440,9 @@ export default function Clients() {
                             )}
                           </div>
                         </button>
+                      </td>
+                      <td className="py-1 px-2 text-center">
+                        <StatusBadge statut={c.statut ?? 'Nouveau'} onClick={() => toggleStatut(c)} />
                       </td>
                       <td className="py-1 px-2">
                         <div className="text-[10px] space-y-0">
@@ -503,7 +569,7 @@ export default function Clients() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={12}>
+                    <td colSpan={13}>
                       <div className="empty-state">
                         <User className="empty-state-icon" />
                         <p className="empty-state-title">Aucun client trouvé</p>

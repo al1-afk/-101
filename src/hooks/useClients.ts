@@ -22,6 +22,9 @@ export interface Client {
   date_debut_contrat?:  string | null  // YYYY-MM-DD
   montant_ttc_annuel?:  number | null
   prix_renouvellement?: number | null
+  /* Statut business : Actif (contrat en cours), Inactif (contrat terminé,
+     pas renouvelé, gelé…). Défaut Nouveau à la création. */
+  statut?:              string | null  // 'Nouveau' | 'Actif' | 'Inactif'
 }
 
 const KEY = 'clients'
