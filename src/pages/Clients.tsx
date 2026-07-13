@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, User, Building2, Phone, Mail, MapPin,
-  Edit2, Trash2, Loader2, Eye, Globe, Server, X,
+  Edit2, Trash2, Loader2, Eye, Globe, Server, X, RotateCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
@@ -58,6 +58,17 @@ function DomainCell({
       deltaCls   = 'text-blue-600 dark:text-blue-400'
     }
   }
+  /* Renouveler d'un an : prend la date actuelle (ou today si vide),
+     ajoute 365 jours, sauvegarde. Un clic = un an de plus. */
+  const renewOneYear = () => {
+    const base = expiry ? new Date(expiry) : new Date()
+    if (isNaN(base.getTime())) return
+    const next = new Date(base)
+    next.setFullYear(next.getFullYear() + 1)
+    const iso = next.toISOString().slice(0, 10)
+    onSave({ expiry: iso })
+  }
+
   return (
     <div className="flex items-center gap-1 min-w-0">
       <input
@@ -77,6 +88,15 @@ function DomainCell({
           {deltaLabel}
         </span>
       )}
+      <button
+        type="button"
+        onClick={renewOneYear}
+        className="flex-shrink-0 w-4 h-4 rounded flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15 transition-colors"
+        title="Renouveler d'un an — ajoute 365 jours à la date"
+        aria-label="Renouveler d'un an"
+      >
+        <RotateCw className="w-2.5 h-2.5" />
+      </button>
     </div>
   )
 }
