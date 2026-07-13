@@ -18,6 +18,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY server ./server
+COPY scripts ./scripts
 COPY tsconfig.json tsconfig.node.json ./
 
 ENV NODE_ENV=production
