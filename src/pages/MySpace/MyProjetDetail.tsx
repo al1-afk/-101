@@ -217,8 +217,8 @@ export default function MyProjetDetail() {
         </Section>
       )}
 
-      {/* ── Équipe du projet ── */}
-      {projet.teammates && projet.teammates.length > 0 && (
+      {/* ── Équipe du projet — visible seulement si l'admin a activé le partage ── */}
+      {shareInfos && projet.teammates && projet.teammates.length > 0 && (
         <Section title={`Équipe (${projet.teammates.length})`} icon={Users} color="violet">
           <div className="space-y-1.5">
             {projet.teammates.map((m: any, i: number) => (

@@ -495,8 +495,9 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
       [id, m.id],
     )
 
-    /* And all assignees of this project (for the "team" panel) */
-    const teammates = await tenantQuery(
+    /* Coéquipiers : jamais exposés si l'admin a désactivé share_infos.
+       Le membre restreint ne doit pas savoir qui d'autre est sur le projet. */
+    const teammates = shareInfos ? await tenantQuery(
       m.tenantId,
       `SELECT pa.role, tm.prenom AS first_name, tm.nom AS last_name, tm.email, tm.job_title
          FROM public.projet_assignees pa
@@ -504,7 +505,7 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
         WHERE pa.projet_id = $1
         ORDER BY (pa.role = 'lead') DESC, tm.prenom`,
       [id],
-    )
+    ) : []
 
     res.json({ ...projet, my_role: (assigned as any).role, share_infos: shareInfos, my_tasks: myTasks, teammates })
   } catch (err: any) {
