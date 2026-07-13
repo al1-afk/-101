@@ -234,6 +234,91 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   )
 }
 
+/* ─── Modal : répartition mensuelle des revenus de renouvellement ── */
+const MONTHS_FR = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+]
+function RenewalBreakdownModal({
+  months, onClose,
+}: {
+  months: Array<{ total: number; clients: Array<{ nom: string; montant: number; date: string }> }>
+  onClose: () => void
+}) {
+  const grandTotal = months.reduce((s, m) => s + m.total, 0)
+  const max = Math.max(1, ...months.map(m => m.total))
+  const currentMonth = new Date().getMonth()
+  const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' MAD'
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+         onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+           onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <div>
+            <h2 className="text-lg font-bold text-foreground">Revenus renouvellements — mois par mois</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Total annuel des clients actifs : <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmt(grandTotal)}</span> · Moyenne mensuelle : {fmt(grandTotal / 12)}
+            </p>
+          </div>
+          <button onClick={onClose}
+                  className="w-8 h-8 rounded-lg hover:bg-muted/60 flex items-center justify-center transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto p-5 space-y-2">
+          {months.map((m, i) => {
+            const pct = (m.total / max) * 100
+            const isCurrent = i === currentMonth
+            return (
+              <details key={i} className="rounded-lg border border-border overflow-hidden">
+                <summary className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors ${isCurrent ? 'bg-blue-500/5' : ''}`}>
+                  <span className={`text-xs font-semibold min-w-24 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-foreground'}`}>
+                    {MONTHS_FR[i]}
+                    {isCurrent && <span className="ml-1 text-[9px] font-bold uppercase tracking-wider">· mois en cours</span>}
+                  </span>
+                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all"
+                         style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 min-w-24 text-right">
+                    {m.total ? fmt(m.total) : '—'}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground min-w-12 text-right">
+                    {m.clients.length} client{m.clients.length > 1 ? 's' : ''}
+                  </span>
+                </summary>
+                {m.clients.length > 0 && (
+                  <div className="border-t border-border bg-muted/20 p-3 space-y-1">
+                    {m.clients
+                      .sort((a, b) => b.montant - a.montant)
+                      .map((c, j) => (
+                        <div key={j} className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-background transition-colors">
+                          <span className="truncate flex-1 text-foreground">{c.nom}</span>
+                          <span className="text-muted-foreground text-[10px] mx-3">{new Date(c.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmt(c.montant)}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </details>
+            )
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-border bg-muted/20 text-xs text-muted-foreground">
+          💡 Le mois de renouvellement = mois d'expiration du domaine (ou hébergement si le domaine n'est pas défini).
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Toggle switch style iOS — Actif (vert) ↔ Inactif (rouge) ── */
 function StatusBadge({ statut, onClick }: { statut: string; onClick: () => void }) {
   /* Nouveau = état par défaut, traité comme "pas encore Actif" (gris) */
@@ -272,6 +357,7 @@ export default function Clients() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | 'Actif' | 'Inactif' | 'Nouveau'>('all')
+  const [showBreakdown, setShowBreakdown] = useState(false)
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
   const filtered = useMemo(() =>
@@ -333,6 +419,28 @@ export default function Clients() {
     return { ca, renew, count }
   }, [clients])
 
+  /* Répartition mensuelle des revenus de renouvellement.
+     Chaque client actif compte au mois où tombe sa date de renouvellement
+     domaine (fallback : hébergement, puis date début contrat). */
+  const monthlyBreakdown = useMemo(() => {
+    const months: Array<{ total: number; clients: Array<{ nom: string; montant: number; date: string }> }> =
+      Array.from({ length: 12 }, () => ({ total: 0, clients: [] }))
+    for (const c of clients) {
+      if (c.statut !== 'Actif') continue
+      const price = Number(c.prix_renouvellement ?? 0)
+      if (!price) continue
+      const meta = parseClientNotes(c.notes).meta
+      const dateStr = meta.domainExpiry ?? meta.hostingExpiry ?? c.date_debut_contrat
+      if (!dateStr) continue
+      const d = new Date(dateStr)
+      if (isNaN(d.getTime())) continue
+      const m = d.getMonth()
+      months[m].total += price
+      months[m].clients.push({ nom: c.nom, montant: price, date: dateStr })
+    }
+    return months
+  }, [clients])
+
   const bulkDelete = async () => {
     const ids = [...selected]
     if (ids.length === 0) return
@@ -383,14 +491,30 @@ export default function Clients() {
           </p>
           <p className="text-[11px] text-muted-foreground">contrats en cours</p>
         </div>
-        <div className="card-premium p-3">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Renouvellements (actifs)</p>
+        <button
+          type="button"
+          onClick={() => setShowBreakdown(true)}
+          className="card-premium p-3 text-left hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-colors cursor-pointer"
+          title="Voir la répartition mensuelle des revenus de renouvellement"
+        >
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
+            Renouvellements (actifs)
+            <Eye className="w-3 h-3 opacity-60" />
+          </p>
           <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
             {new Intl.NumberFormat('fr-FR').format(Math.round(totals.renew))} MAD
           </p>
-          <p className="text-[11px] text-muted-foreground">domaine + hébergement / an</p>
-        </div>
+          <p className="text-[11px] text-muted-foreground">domaine + hébergement / an · cliquer pour le détail</p>
+        </button>
       </div>
+
+      {/* Modal : répartition mensuelle des renouvellements */}
+      {showBreakdown && (
+        <RenewalBreakdownModal
+          months={monthlyBreakdown}
+          onClose={() => setShowBreakdown(false)}
+        />
+      )}
 
       {/* Bulk action bar — visible only when items are selected */}
       {selected.size > 0 && (
