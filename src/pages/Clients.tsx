@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   Plus, Search, User, Building2, Phone, Mail, MapPin,
   Edit2, Trash2, Loader2, Eye, Globe, Server, X, RotateCw,
@@ -234,186 +234,6 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   )
 }
 
-/* ─── Modal : répartition mensuelle des revenus de renouvellement ── */
-const MONTHS_FR = [
-  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
-  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
-]
-function RenewalBreakdownModal({
-  months, unscheduled, onClose,
-}: {
-  months: Array<{ total: number; clients: Array<{ nom: string; montant: number; date: string }> }>
-  unscheduled: Array<{ nom: string; montant: number }>
-  onClose: () => void
-}) {
-  const scheduledTotal = months.reduce((s, m) => s + m.total, 0)
-  const unscheduledTotal = unscheduled.reduce((s, c) => s + c.montant, 0)
-  const grandTotal = scheduledTotal + unscheduledTotal
-  const max = Math.max(1, ...months.map(m => m.total))
-  const currentMonth = new Date().getMonth()
-  const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' MAD'
-  const [expanded, setExpanded] = useState<number | null>(currentMonth)
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70"
-      onClick={onClose}
-    >
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col ring-1 ring-slate-200 dark:ring-slate-800"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header — bandeau vert dégradé, sans flou */}
-        <div className="relative bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-6 flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors"
-            aria-label="Fermer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-          <h2 className="text-xl font-bold mb-1">Revenus renouvellements — mois par mois</h2>
-          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm text-emerald-50">
-            <span>
-              Total annuel : <strong className="text-white text-base">{fmt(grandTotal)}</strong>
-            </span>
-            <span>
-              Moyenne mensuelle : <strong className="text-white">{fmt(grandTotal / 12)}</strong>
-            </span>
-          </div>
-        </div>
-
-        {/* Body — grille 12 mois compacte */}
-        <div className="overflow-y-auto p-4 space-y-1.5 flex-1 bg-slate-50 dark:bg-slate-950/50">
-          {/* Section "À planifier" — clients actifs avec revenu mais sans date d'expiration */}
-          {unscheduled.length > 0 && (
-            <div className="rounded-xl overflow-hidden border border-amber-300 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 mb-2">
-              <div className="p-3 flex items-center gap-3">
-                <div className="min-w-[110px]">
-                  <div className="text-sm font-bold text-amber-800 dark:text-amber-300">À planifier</div>
-                  <div className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                    dates manquantes
-                  </div>
-                </div>
-                <div className="flex-1 text-[11px] text-amber-800 dark:text-amber-200">
-                  {unscheduled.length} client{unscheduled.length > 1 ? 's' : ''} actif{unscheduled.length > 1 ? 's' : ''} sans date d'expiration — ajoute une date pour les répartir sur un mois
-                </div>
-                <div className="min-w-[120px] text-right">
-                  <div className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(unscheduledTotal)}</div>
-                  <div className="text-[10px] text-amber-600 dark:text-amber-400/80">non répartis</div>
-                </div>
-              </div>
-              <div className="border-t border-amber-200 dark:border-amber-800/40 bg-white/50 dark:bg-slate-950/40 p-2 space-y-0.5">
-                {unscheduled
-                  .sort((a, b) => b.montant - a.montant)
-                  .map((c, j) => (
-                    <div key={j} className="flex items-center justify-between text-xs py-1.5 px-3 rounded-lg">
-                      <span className="truncate flex-1 text-slate-800 dark:text-slate-200 font-medium">{c.nom}</span>
-                      <span className="font-semibold text-amber-700 dark:text-amber-400 min-w-[90px] text-right">{fmt(c.montant)}</span>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {months.map((m, i) => {
-            const pct = max > 0 ? (m.total / max) * 100 : 0
-            const isCurrent = i === currentMonth
-            const isOpen = expanded === i
-            const hasData = m.clients.length > 0
-            return (
-              <div
-                key={i}
-                className={`rounded-xl overflow-hidden border transition-colors ${
-                  isCurrent
-                    ? 'border-blue-400 dark:border-blue-500/60 bg-blue-50/40 dark:bg-blue-950/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => hasData && setExpanded(isOpen ? null : i)}
-                  disabled={!hasData}
-                  className={`w-full flex items-center gap-3 p-3 text-left transition-colors ${
-                    hasData ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/50' : 'cursor-default opacity-70'
-                  }`}
-                >
-                  {/* Nom du mois */}
-                  <div className="min-w-[110px]">
-                    <div className={`text-sm font-bold ${isCurrent ? 'text-blue-700 dark:text-blue-300' : 'text-slate-900 dark:text-slate-100'}`}>
-                      {MONTHS_FR[i]}
-                    </div>
-                    {isCurrent && (
-                      <div className="text-[9px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                        mois en cours
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Barre + chiffre */}
-                  <div className="flex-1 flex items-center gap-3">
-                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="min-w-[120px] text-right">
-                      <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                        {m.total ? fmt(m.total) : '—'}
-                      </div>
-                      {hasData && (
-                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                          {m.clients.length} client{m.clients.length > 1 ? 's' : ''}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {hasData && (
-                    <div className={`w-5 h-5 flex items-center justify-center text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}>
-                      ›
-                    </div>
-                  )}
-                </button>
-
-                {/* Détail clients — visible quand déplié */}
-                {isOpen && hasData && (
-                  <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 p-2 space-y-0.5">
-                    {m.clients
-                      .sort((a, b) => b.montant - a.montant)
-                      .map((c, j) => (
-                        <div
-                          key={j}
-                          className="flex items-center justify-between text-xs py-1.5 px-3 rounded-lg hover:bg-white dark:hover:bg-slate-800/60 transition-colors"
-                        >
-                          <span className="truncate flex-1 text-slate-800 dark:text-slate-200 font-medium">
-                            {c.nom}
-                          </span>
-                          <span className="text-slate-500 text-[11px] font-mono mx-3">
-                            {new Date(c.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
-                          </span>
-                          <span className="font-semibold text-emerald-600 dark:text-emerald-400 min-w-[90px] text-right">
-                            {fmt(c.montant)}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[11px] text-slate-500 dark:text-slate-400 flex-shrink-0">
-          Le mois de renouvellement est déterminé par la date d'expiration du domaine (fallback : hébergement puis date de début).
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ─── Toggle switch style iOS — Actif (vert) ↔ Inactif (rouge) ── */
 function StatusBadge({ statut, onClick }: { statut: string; onClick: () => void }) {
   /* Nouveau = état par défaut, traité comme "pas encore Actif" (gris) */
@@ -439,6 +259,8 @@ function StatusBadge({ statut, onClick }: { statut: string; onClick: () => void 
 
 export default function Clients() {
   const navigate = useNavigate()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const base = tenantSlug ? `/${tenantSlug}` : ''
   const { data: clients = [], isLoading } = useClients()
   const createClient = useCreateClient()
   /* Silent update — used for inline cell edits (date + montants) to
@@ -452,7 +274,6 @@ export default function Clients() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | 'Actif' | 'Inactif' | 'Nouveau'>('all')
-  const [showBreakdown, setShowBreakdown] = useState(false)
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
   const filtered = useMemo(() =>
@@ -514,32 +335,8 @@ export default function Clients() {
     return { ca, renew, count }
   }, [clients])
 
-  /* Répartition mensuelle des revenus de renouvellement.
-     Chaque client actif compte au mois où tombe sa date de renouvellement
-     domaine (fallback : hébergement, puis date début contrat).
-     Les clients actifs SANS date sont placés dans "unscheduled" pour que
-     le total du modal corresponde exactement à la KPI carte. */
-  const monthlyBreakdown = useMemo(() => {
-    const months: Array<{ total: number; clients: Array<{ nom: string; montant: number; date: string }> }> =
-      Array.from({ length: 12 }, () => ({ total: 0, clients: [] }))
-    const unscheduled: Array<{ nom: string; montant: number }> = []
-    for (const c of clients) {
-      if (c.statut !== 'Actif') continue
-      const price = Number(c.prix_renouvellement ?? 0)
-      if (!price) continue
-      const meta = parseClientNotes(c.notes).meta
-      const dateStr = meta.domainExpiry ?? meta.hostingExpiry ?? c.date_debut_contrat
-      const d = dateStr ? new Date(dateStr) : null
-      if (!d || isNaN(d.getTime())) {
-        unscheduled.push({ nom: c.nom, montant: price })
-        continue
-      }
-      const m = d.getMonth()
-      months[m].total += price
-      months[m].clients.push({ nom: c.nom, montant: price, date: dateStr! })
-    }
-    return { months, unscheduled }
-  }, [clients])
+  /* Le breakdown mensuel a été déplacé sur sa propre page :
+     /clients/renewals — voir src/pages/RenewalsBreakdown.tsx */
 
   const bulkDelete = async () => {
     const ids = [...selected]
@@ -593,7 +390,7 @@ export default function Clients() {
         </div>
         <button
           type="button"
-          onClick={() => setShowBreakdown(true)}
+          onClick={() => navigate(`${base}/clients/renewals`)}
           className="card-premium p-3 text-left hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-colors cursor-pointer"
           title="Voir la répartition mensuelle des revenus de renouvellement"
         >
@@ -604,18 +401,9 @@ export default function Clients() {
           <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
             {new Intl.NumberFormat('fr-FR').format(Math.round(totals.renew))} MAD
           </p>
-          <p className="text-[11px] text-muted-foreground">domaine + hébergement / an · cliquer pour le détail</p>
+          <p className="text-[11px] text-muted-foreground">domaine + hébergement / an · voir le détail →</p>
         </button>
       </div>
-
-      {/* Modal : répartition mensuelle des renouvellements */}
-      {showBreakdown && (
-        <RenewalBreakdownModal
-          months={monthlyBreakdown.months}
-          unscheduled={monthlyBreakdown.unscheduled}
-          onClose={() => setShowBreakdown(false)}
-        />
-      )}
 
       {/* Bulk action bar — visible only when items are selected */}
       {selected.size > 0 && (

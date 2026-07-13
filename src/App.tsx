@@ -14,6 +14,7 @@ const Dashboard      = lazy(() => import('@/pages/Dashboard'))
 const Auth           = lazy(() => import('@/pages/Auth'))
 const Prospects      = lazy(() => import('@/pages/Prospects'))
 const Clients        = lazy(() => import('@/pages/Clients'))
+const RenewalsBreakdown = lazy(() => import('@/pages/RenewalsBreakdown'))
 const ClientDetail   = lazy(() => import('@/pages/ClientDetail'))
 const Devis          = lazy(() => import('@/pages/Devis'))
 const DevisPreview   = lazy(() => import('@/pages/DevisPreview'))
@@ -123,6 +124,7 @@ export default function App() {
               <Route index                              element={<Dashboard />} />
               <Route path="prospects"                  element={<Prospects />} />
               <Route path="clients"                    element={<Clients />} />
+              <Route path="clients/renewals"           element={<RenewalsBreakdown />} />
               <Route path="clients/:id"                element={<ClientDetail />} />
               <Route path="taches"                     element={<Taches />} />
               <Route path="projets"                    element={<Projets />} />
