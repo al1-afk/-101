@@ -39,7 +39,11 @@ export function useAuth() {
   const navigate = useNavigate()
   const [state, setState] = useState<AuthState>(INITIAL)
 
-  /* On mount: verify existing token */
+  /* On mount: verify existing token.
+     RÈGLE : ne JAMAIS wipe le token sur simple erreur — seul un 401 explicite
+     du serveur (via api.ts qui a déjà tenté le refresh) doit déconnecter.
+     Une erreur réseau, un 502, un 503 au démarrage doivent laisser la session
+     intacte pour que l'utilisateur reste connecté dès que le réseau revient. */
   useEffect(() => {
     const token = tokenStore.get()
     if (!token) {
@@ -47,12 +51,27 @@ export function useAuth() {
       return
     }
     const payload = parseJwt(token)
-    if (!payload || (payload.exp && payload.exp * 1000 < Date.now())) {
+    /* JWT expiré côté client : on ne clear PAS le token — on va laisser
+       api.ts déclencher un refresh automatique au premier call authApi.me().
+       Si le refresh réussit, la session est restaurée. Si le refresh échoue
+       avec un vrai AUTH_INVALID, api.ts appellera purgeClientSession. */
+    if (!payload) {
+      /* Token corrompu (pas un JWT) : là on nettoie car aucun refresh possible */
       tokenStore.clear()
       setState({ ...INITIAL, loading: false })
       return
     }
-    /* Token looks valid — try to confirm with server */
+    /* Hydratation optimiste immédiate depuis le JWT — l'utilisateur voit
+       l'app connectée pendant que /me se confirme en arrière-plan. */
+    setState(prev => ({
+      ...prev,
+      loading:        true,
+      isAuthorized:   true,
+      tenantId:       payload.tenantId ?? null,
+      userId:         payload.userId ?? payload.sub ?? null,
+      email:          payload.email ?? null,
+      role:           payload.role ?? null,
+    }))
     authApi.me()
       .then(me => {
         setState({
@@ -67,9 +86,20 @@ export function useAuth() {
           allowedModules: (me as any).allowed_modules ?? null,
         })
       })
-      .catch(() => {
-        tokenStore.clear()
-        setState({ ...INITIAL, loading: false })
+      .catch(err => {
+        /* /me a échoué APRÈS une tentative de refresh (gérée par api.ts).
+           Deux cas :
+           - api.ts a déjà purgé + redirect (AUTH_INVALID) → on ne fait rien
+           - erreur transient (réseau, 5xx) → on garde la session hydratée
+             depuis le JWT et on marque juste loading=false. */
+        const msg = String(err?.message ?? '')
+        if (msg === 'Session expirée') {
+          /* purgeClientSession() a déjà été appelée par api.ts */
+          setState({ ...INITIAL, loading: false })
+          return
+        }
+        /* Transient : garder la session hydratée depuis le JWT */
+        setState(prev => ({ ...prev, loading: false }))
       })
   }, [])
 

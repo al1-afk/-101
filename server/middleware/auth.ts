@@ -52,14 +52,22 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-/* Access token — 15 minutes */
+/* Access token — 1 heure.
+   Historique : 15 min forçait un /refresh très fréquent, et chaque échec
+   transient (5xx, réseau) provoquait à tort une déconnexion.
+   1h réduit d'un facteur 4 les fenêtres de refresh sans compromettre
+   significativement la sécurité (le refresh reste vérifié en DB). */
 export function signAccessToken(payload: JwtPayload): string {
-  return jwt.sign({ ...payload, type: 'access' }, ACCESS_SECRET, { expiresIn: '15m' })
+  return jwt.sign({ ...payload, type: 'access' }, ACCESS_SECRET, { expiresIn: '1h' })
 }
 
-/* Refresh token — 7 days, stored as httpOnly cookie */
+/* Refresh token — 90 jours, stocké en httpOnly cookie + hashé en DB.
+   Historique : 7 jours obligeait les utilisateurs à se reconnecter chaque
+   semaine. 90 jours permet une session vraiment persistante entre les
+   fermetures/réouvertures du navigateur. La révocation reste possible
+   individuellement ou globalement depuis l'admin. */
 export function signRefreshToken(payload: Pick<JwtPayload, 'userId' | 'tenantId'>): string {
-  return jwt.sign({ ...payload, type: 'refresh' }, REFRESH_SECRET, { expiresIn: '7d' })
+  return jwt.sign({ ...payload, type: 'refresh' }, REFRESH_SECRET, { expiresIn: '90d' })
 }
 
 export function verifyRefreshToken(token: string): (Pick<JwtPayload, 'userId' | 'tenantId'> & { type: string }) | null {

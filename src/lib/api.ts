@@ -19,23 +19,51 @@ export const memberTokenStore = {
   clear:  ()        => localStorage.removeItem('gestiq_member_token'),
 }
 
-/* ── Token refresh (singleton promise — prevents parallel refreshes) */
+/* ── Token refresh (singleton promise — prevents parallel refreshes)
+   Distinction critique entre :
+     - AUTH_INVALID  → refresh token vraiment révoqué/expiré → logout légitime
+     - TRANSIENT     → network, 5xx, timeout, JSON invalide → NE PAS déconnecter
+   Historique : avant, toute erreur (network incluse) déclenchait purgeClientSession()
+   ce qui provoquait des déconnexions injustifiées à chaque hoquet réseau. */
+export class AuthInvalidError extends Error {
+  code: string
+  constructor(code = 'AUTH_INVALID') { super(code); this.code = code }
+}
+export class TransientRefreshError extends Error {
+  constructor(msg = 'transient') { super(msg) }
+}
+
 let _refreshPromise: Promise<string> | null = null
 
 async function refreshAccessToken(): Promise<string> {
   if (_refreshPromise) return _refreshPromise
-  _refreshPromise = fetch(`${BASE_URL}/api/auth/refresh`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-  })
-    .then(r => r.json())
-    .then(d => {
-      if (!d.token) throw new Error('refresh_failed')
-      tokenStore.set(d.token)
-      return d.token as string
-    })
-    .finally(() => { _refreshPromise = null })
+  _refreshPromise = (async () => {
+    let res: Response
+    try {
+      res = await fetch(`${BASE_URL}/api/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    } catch (netErr: any) {
+      /* Erreur réseau (offline, DNS, CORS avant réponse) → transient */
+      throw new TransientRefreshError(netErr?.message ?? 'network')
+    }
+    /* 5xx = serveur en rade → transient, on ne déconnecte pas */
+    if (res.status >= 500) throw new TransientRefreshError(`http_${res.status}`)
+    /* 401/403 avec code auth = refresh vraiment invalide → logout légitime */
+    if (res.status === 401 || res.status === 403) {
+      const data = await res.json().catch(() => ({}))
+      throw new AuthInvalidError(data?.code ?? 'AUTH_INVALID')
+    }
+    /* Autres statuts non-OK : on considère transient (safer default) */
+    if (!res.ok) throw new TransientRefreshError(`http_${res.status}`)
+
+    const data = await res.json().catch(() => null as any)
+    if (!data?.token) throw new TransientRefreshError('empty_response')
+    tokenStore.set(data.token)
+    return data.token as string
+  })().finally(() => { _refreshPromise = null })
   return _refreshPromise
 }
 
@@ -57,37 +85,61 @@ async function request<T>(
   if (source === 'admin')  headers['Authorization'] = `Bearer ${tokenStore.get()}`
   if (source === 'member') headers['Authorization'] = `Bearer ${memberTokenStore.get()}`
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    credentials: 'include',
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  /* Fetch avec capture explicite des erreurs réseau — jamais de logout ici */
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      credentials: 'include',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+  } catch (netErr: any) {
+    /* Erreur réseau (offline, timeout, DNS) → on lance une erreur claire
+       SANS toucher à la session. L'utilisateur reste connecté. */
+    throw new Error('Erreur réseau — vérifiez votre connexion')
+  }
 
-  /* Auto-refresh on 401 TOKEN_EXPIRED (admin-side only) */
+  /* Auto-refresh on 401 (admin-side only) — tente un refresh silencieux
+     sur TOUT 401 (avec ou sans code), pour couvrir aussi les tokens
+     corrompus/mal signés/expirés côté client sans code explicite. */
   if (res.status === 401 && source === 'admin' && _retry) {
     const data = await res.json().catch(() => ({}))
-    if (data.code === 'TOKEN_EXPIRED') {
-      try {
-        await refreshAccessToken()
-        return request<T>(method, path, body, auth, false)
-      } catch {
-        /* Refresh failed — purge every client-side cache so the
-           next user on this browser cannot see stale data. */
-        const { purgeClientSession } = await import('./session')
-        await purgeClientSession()
-        window.location.href = '/auth'
-        throw new Error('Session expirée')
-      }
-    }
-    /* TOKEN_REUSE (session hijack detected) or other hard 401 —
-       same cleanup, the user is being force-logged-out. */
+
+    /* Codes explicites d'auth invalide → purge légitime, pas de retry. */
     if (data.code === 'TOKEN_REUSE' || data.code === 'NO_REFRESH' || data.code === 'INVALID_REFRESH') {
       const { purgeClientSession } = await import('./session')
       await purgeClientSession()
-      window.location.href = '/auth'
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
+        window.location.href = '/auth'
+      }
+      throw new Error(data.error ?? 'Session expirée')
     }
-    throw new Error(data.error ?? 'Non authentifié')
+
+    /* Tout autre 401 (TOKEN_EXPIRED, token corrompu, sans code) → refresh + retry.
+       Si le refresh échoue avec AUTH_INVALID → logout. Si transient → on
+       propage l'erreur SANS déconnecter. */
+    try {
+      await refreshAccessToken()
+      return request<T>(method, path, body, auth, false)
+    } catch (err: any) {
+      if (err instanceof AuthInvalidError) {
+        const { purgeClientSession } = await import('./session')
+        await purgeClientSession()
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
+          window.location.href = '/auth'
+        }
+        throw new Error('Session expirée')
+      }
+      /* Transient : NE PAS déconnecter. On propage. */
+      throw new Error('Serveur temporairement indisponible')
+    }
+  }
+
+  /* 5xx server error : on ne touche PAS à la session, juste on remonte l'erreur */
+  if (res.status >= 500) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error ?? `Serveur temporairement indisponible (${res.status})`)
   }
 
   const data = await res.json().catch(() => ({}))

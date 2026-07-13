@@ -25,19 +25,22 @@ async function issueTokenPair(
   const refreshToken = signRefreshToken({ userId: user.id, tenantId: user.tenant_id })
   const tokenHash    = hashToken(refreshToken)
 
-  /* Store hashed refresh token — raw token NEVER written to DB */
+  /* Store hashed refresh token — raw token NEVER written to DB.
+     Durée alignée sur signRefreshToken() = 90 jours (session persistante). */
   await query(
     `INSERT INTO refresh_tokens (user_id, tenant_id, token_hash, ip_address, user_agent, expires_at)
-     VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '7 days')`,
+     VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '90 days')`,
     [user.id, user.tenant_id, tokenHash, ip, ua]
   )
 
-  /* httpOnly cookie — not readable by JS */
+  /* httpOnly cookie — pas lisible par JS. maxAge doit être aligné avec
+     l'expiration en DB pour éviter que le cookie disparaisse alors que
+     le refresh token est encore valide côté serveur. */
   res.cookie('gestiq_refresh', refreshToken, {
     httpOnly: true,
     secure:   process.env.NODE_ENV === 'production',
     sameSite: 'strict',
-    maxAge:   7 * 24 * 60 * 60 * 1000,
+    maxAge:   90 * 24 * 60 * 60 * 1000,
     path:     '/api/auth',
   })
 
