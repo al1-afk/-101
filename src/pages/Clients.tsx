@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, User, Building2, Phone, Mail, MapPin,
-  Edit2, Trash2, Loader2, Eye, Globe, Server, AlertTriangle, Clock, X,
+  Edit2, Trash2, Loader2, Eye, Globe, Server, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
@@ -31,36 +31,52 @@ function DomainCell({
   onSave:  (patch: { name?: string; expiry?: string }) => void
 }) {
   const days = daysUntil(expiry)
-  /* Couleur de la date selon expiration. Pas de badge séparé : la couleur de
-     la date suffit (rouge = imminent, ambre = bientôt, neutre = OK). */
+  /* Couleur + libellé du delta (jours restants ou dépassés).
+       - rouge : déjà expiré OU expire dans moins de 30j
+       - ambre : 30-90j
+       - bleu  : > 90j (calme) */
   let dateCls = 'text-muted-foreground'
-  let badgeIcon: React.ElementType | null = null
+  let deltaLabel = ''
+  let deltaCls   = 'text-muted-foreground'
   if (days !== null) {
-    if (days < 30) {
-      dateCls = 'text-red-600 dark:text-red-400 font-semibold'
-      badgeIcon = AlertTriangle
+    if (days < 0) {
+      /* Expiré : "+15j" = 15 jours de retard */
+      dateCls    = 'text-red-600 dark:text-red-400 font-semibold'
+      deltaLabel = `+${Math.abs(days)}j`
+      deltaCls   = 'text-red-600 dark:text-red-400 font-bold'
+    } else if (days < 30) {
+      dateCls    = 'text-red-600 dark:text-red-400 font-semibold'
+      deltaLabel = `J-${days}`
+      deltaCls   = 'text-red-600 dark:text-red-400 font-bold'
     } else if (days <= 90) {
-      dateCls = 'text-amber-600 dark:text-amber-400'
-      badgeIcon = Clock
+      dateCls    = 'text-amber-600 dark:text-amber-400'
+      deltaLabel = `J-${days}`
+      deltaCls   = 'text-amber-600 dark:text-amber-400 font-semibold'
     } else {
-      dateCls = 'text-blue-600 dark:text-blue-400'
-      badgeIcon = Clock
+      dateCls    = 'text-blue-600 dark:text-blue-400'
+      deltaLabel = `J-${days}`
+      deltaCls   = 'text-blue-600 dark:text-blue-400'
     }
   }
   return (
-    <div className="flex items-center gap-0.5 min-w-0">
+    <div className="flex items-center gap-1 min-w-0">
       <input
         type="date"
         defaultValue={(expiry ?? '').slice(0, 10)}
         key={`e-${expiry ?? ''}`}
         onChange={e => onSave({ expiry: e.target.value || undefined })}
         className={`bg-transparent border-0 hover:bg-muted/60 focus:bg-muted/80 focus:ring-1 focus:ring-blue-400 rounded px-1 py-0 text-[10px] cursor-pointer w-20 outline-none ${dateCls}`}
-        title="Cliquer pour modifier"
+        title={days !== null && days < 0
+          ? `Expiré depuis ${Math.abs(days)} jour${Math.abs(days) > 1 ? 's' : ''}`
+          : days !== null
+            ? `Expire dans ${days} jour${days > 1 ? 's' : ''}`
+            : 'Cliquer pour modifier'}
       />
-      {badgeIcon && expiry && (() => {
-        const I = badgeIcon
-        return <I className={`w-2.5 h-2.5 flex-shrink-0 ${dateCls}`} />
-      })()}
+      {deltaLabel && (
+        <span className={`text-[9px] leading-none whitespace-nowrap ${deltaCls}`}>
+          {deltaLabel}
+        </span>
+      )}
     </div>
   )
 }
