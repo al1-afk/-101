@@ -240,12 +240,15 @@ const MONTHS_FR = [
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
 ]
 function RenewalBreakdownModal({
-  months, onClose,
+  months, unscheduled, onClose,
 }: {
   months: Array<{ total: number; clients: Array<{ nom: string; montant: number; date: string }> }>
+  unscheduled: Array<{ nom: string; montant: number }>
   onClose: () => void
 }) {
-  const grandTotal = months.reduce((s, m) => s + m.total, 0)
+  const scheduledTotal = months.reduce((s, m) => s + m.total, 0)
+  const unscheduledTotal = unscheduled.reduce((s, c) => s + c.montant, 0)
+  const grandTotal = scheduledTotal + unscheduledTotal
   const max = Math.max(1, ...months.map(m => m.total))
   const currentMonth = new Date().getMonth()
   const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' MAD'
@@ -282,6 +285,37 @@ function RenewalBreakdownModal({
 
         {/* Body — grille 12 mois compacte */}
         <div className="overflow-y-auto p-4 space-y-1.5 flex-1 bg-slate-50 dark:bg-slate-950/50">
+          {/* Section "À planifier" — clients actifs avec revenu mais sans date d'expiration */}
+          {unscheduled.length > 0 && (
+            <div className="rounded-xl overflow-hidden border border-amber-300 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 mb-2">
+              <div className="p-3 flex items-center gap-3">
+                <div className="min-w-[110px]">
+                  <div className="text-sm font-bold text-amber-800 dark:text-amber-300">À planifier</div>
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                    dates manquantes
+                  </div>
+                </div>
+                <div className="flex-1 text-[11px] text-amber-800 dark:text-amber-200">
+                  {unscheduled.length} client{unscheduled.length > 1 ? 's' : ''} actif{unscheduled.length > 1 ? 's' : ''} sans date d'expiration — ajoute une date pour les répartir sur un mois
+                </div>
+                <div className="min-w-[120px] text-right">
+                  <div className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(unscheduledTotal)}</div>
+                  <div className="text-[10px] text-amber-600 dark:text-amber-400/80">non répartis</div>
+                </div>
+              </div>
+              <div className="border-t border-amber-200 dark:border-amber-800/40 bg-white/50 dark:bg-slate-950/40 p-2 space-y-0.5">
+                {unscheduled
+                  .sort((a, b) => b.montant - a.montant)
+                  .map((c, j) => (
+                    <div key={j} className="flex items-center justify-between text-xs py-1.5 px-3 rounded-lg">
+                      <span className="truncate flex-1 text-slate-800 dark:text-slate-200 font-medium">{c.nom}</span>
+                      <span className="font-semibold text-amber-700 dark:text-amber-400 min-w-[90px] text-right">{fmt(c.montant)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {months.map((m, i) => {
             const pct = max > 0 ? (m.total / max) * 100 : 0
             const isCurrent = i === currentMonth
@@ -482,24 +516,29 @@ export default function Clients() {
 
   /* Répartition mensuelle des revenus de renouvellement.
      Chaque client actif compte au mois où tombe sa date de renouvellement
-     domaine (fallback : hébergement, puis date début contrat). */
+     domaine (fallback : hébergement, puis date début contrat).
+     Les clients actifs SANS date sont placés dans "unscheduled" pour que
+     le total du modal corresponde exactement à la KPI carte. */
   const monthlyBreakdown = useMemo(() => {
     const months: Array<{ total: number; clients: Array<{ nom: string; montant: number; date: string }> }> =
       Array.from({ length: 12 }, () => ({ total: 0, clients: [] }))
+    const unscheduled: Array<{ nom: string; montant: number }> = []
     for (const c of clients) {
       if (c.statut !== 'Actif') continue
       const price = Number(c.prix_renouvellement ?? 0)
       if (!price) continue
       const meta = parseClientNotes(c.notes).meta
       const dateStr = meta.domainExpiry ?? meta.hostingExpiry ?? c.date_debut_contrat
-      if (!dateStr) continue
-      const d = new Date(dateStr)
-      if (isNaN(d.getTime())) continue
+      const d = dateStr ? new Date(dateStr) : null
+      if (!d || isNaN(d.getTime())) {
+        unscheduled.push({ nom: c.nom, montant: price })
+        continue
+      }
       const m = d.getMonth()
       months[m].total += price
-      months[m].clients.push({ nom: c.nom, montant: price, date: dateStr })
+      months[m].clients.push({ nom: c.nom, montant: price, date: dateStr! })
     }
-    return months
+    return { months, unscheduled }
   }, [clients])
 
   const bulkDelete = async () => {
@@ -572,7 +611,8 @@ export default function Clients() {
       {/* Modal : répartition mensuelle des renouvellements */}
       {showBreakdown && (
         <RenewalBreakdownModal
-          months={monthlyBreakdown}
+          months={monthlyBreakdown.months}
+          unscheduled={monthlyBreakdown.unscheduled}
           onClose={() => setShowBreakdown(false)}
         />
       )}
