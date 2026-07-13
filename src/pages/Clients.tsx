@@ -249,70 +249,131 @@ function RenewalBreakdownModal({
   const max = Math.max(1, ...months.map(m => m.total))
   const currentMonth = new Date().getMonth()
   const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' MAD'
+  const [expanded, setExpanded] = useState<number | null>(currentMonth)
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-         onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col"
-           onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <div>
-            <h2 className="text-lg font-bold text-foreground">Revenus renouvellements — mois par mois</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Total annuel des clients actifs : <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmt(grandTotal)}</span> · Moyenne mensuelle : {fmt(grandTotal / 12)}
-            </p>
-          </div>
-          <button onClick={onClose}
-                  className="w-8 h-8 rounded-lg hover:bg-muted/60 flex items-center justify-center transition-colors">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70"
+      onClick={onClose}
+    >
+      <div
+        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col ring-1 ring-slate-200 dark:ring-slate-800"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header — bandeau vert dégradé, sans flou */}
+        <div className="relative bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-6 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors"
+            aria-label="Fermer"
+          >
             <X className="w-4 h-4" />
           </button>
+          <h2 className="text-xl font-bold mb-1">Revenus renouvellements — mois par mois</h2>
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm text-emerald-50">
+            <span>
+              Total annuel : <strong className="text-white text-base">{fmt(grandTotal)}</strong>
+            </span>
+            <span>
+              Moyenne mensuelle : <strong className="text-white">{fmt(grandTotal / 12)}</strong>
+            </span>
+          </div>
         </div>
 
-        {/* Body */}
-        <div className="overflow-y-auto p-5 space-y-2">
+        {/* Body — grille 12 mois compacte */}
+        <div className="overflow-y-auto p-4 space-y-1.5 flex-1 bg-slate-50 dark:bg-slate-950/50">
           {months.map((m, i) => {
-            const pct = (m.total / max) * 100
+            const pct = max > 0 ? (m.total / max) * 100 : 0
             const isCurrent = i === currentMonth
+            const isOpen = expanded === i
+            const hasData = m.clients.length > 0
             return (
-              <details key={i} className="rounded-lg border border-border overflow-hidden">
-                <summary className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors ${isCurrent ? 'bg-blue-500/5' : ''}`}>
-                  <span className={`text-xs font-semibold min-w-24 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-foreground'}`}>
-                    {MONTHS_FR[i]}
-                    {isCurrent && <span className="ml-1 text-[9px] font-bold uppercase tracking-wider">· mois en cours</span>}
-                  </span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all"
-                         style={{ width: `${pct}%` }} />
+              <div
+                key={i}
+                className={`rounded-xl overflow-hidden border transition-colors ${
+                  isCurrent
+                    ? 'border-blue-400 dark:border-blue-500/60 bg-blue-50/40 dark:bg-blue-950/20'
+                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => hasData && setExpanded(isOpen ? null : i)}
+                  disabled={!hasData}
+                  className={`w-full flex items-center gap-3 p-3 text-left transition-colors ${
+                    hasData ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/50' : 'cursor-default opacity-70'
+                  }`}
+                >
+                  {/* Nom du mois */}
+                  <div className="min-w-[110px]">
+                    <div className={`text-sm font-bold ${isCurrent ? 'text-blue-700 dark:text-blue-300' : 'text-slate-900 dark:text-slate-100'}`}>
+                      {MONTHS_FR[i]}
+                    </div>
+                    {isCurrent && (
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                        mois en cours
+                      </div>
+                    )}
                   </div>
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 min-w-24 text-right">
-                    {m.total ? fmt(m.total) : '—'}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground min-w-12 text-right">
-                    {m.clients.length} client{m.clients.length > 1 ? 's' : ''}
-                  </span>
-                </summary>
-                {m.clients.length > 0 && (
-                  <div className="border-t border-border bg-muted/20 p-3 space-y-1">
+
+                  {/* Barre + chiffre */}
+                  <div className="flex-1 flex items-center gap-3">
+                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="min-w-[120px] text-right">
+                      <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                        {m.total ? fmt(m.total) : '—'}
+                      </div>
+                      {hasData && (
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {m.clients.length} client{m.clients.length > 1 ? 's' : ''}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {hasData && (
+                    <div className={`w-5 h-5 flex items-center justify-center text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}>
+                      ›
+                    </div>
+                  )}
+                </button>
+
+                {/* Détail clients — visible quand déplié */}
+                {isOpen && hasData && (
+                  <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 p-2 space-y-0.5">
                     {m.clients
                       .sort((a, b) => b.montant - a.montant)
                       .map((c, j) => (
-                        <div key={j} className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-background transition-colors">
-                          <span className="truncate flex-1 text-foreground">{c.nom}</span>
-                          <span className="text-muted-foreground text-[10px] mx-3">{new Date(c.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
-                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmt(c.montant)}</span>
+                        <div
+                          key={j}
+                          className="flex items-center justify-between text-xs py-1.5 px-3 rounded-lg hover:bg-white dark:hover:bg-slate-800/60 transition-colors"
+                        >
+                          <span className="truncate flex-1 text-slate-800 dark:text-slate-200 font-medium">
+                            {c.nom}
+                          </span>
+                          <span className="text-slate-500 text-[11px] font-mono mx-3">
+                            {new Date(c.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
+                          </span>
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400 min-w-[90px] text-right">
+                            {fmt(c.montant)}
+                          </span>
                         </div>
                       ))}
                   </div>
                 )}
-              </details>
+              </div>
             )
           })}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-border bg-muted/20 text-xs text-muted-foreground">
-          💡 Le mois de renouvellement = mois d'expiration du domaine (ou hébergement si le domaine n'est pas défini).
+        <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-[11px] text-slate-500 dark:text-slate-400 flex-shrink-0">
+          Le mois de renouvellement est déterminé par la date d'expiration du domaine (fallback : hébergement puis date de début).
         </div>
       </div>
     </div>
