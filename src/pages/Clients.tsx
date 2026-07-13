@@ -317,6 +317,20 @@ export default function Clients() {
   })
   const clearSelection = () => setSelected(new Set())
 
+  /* Totaux — calculés sur la liste FILTRÉE pour refléter la vue courante.
+     - CA annuel : somme des contrats annuels (montant_ttc_annuel)
+     - Revenus renouvellements : somme des prix_renouvellement (récurrent)
+     Ces deux chiffres évoluent quand on change le filtre statut ou la période. */
+  const totals = useMemo(() => {
+    let ca = 0
+    let renew = 0
+    for (const c of filtered) {
+      ca    += Number(c.montant_ttc_annuel  ?? 0)
+      renew += Number(c.prix_renouvellement ?? 0)
+    }
+    return { ca, renew }
+  }, [filtered])
+
   const bulkDelete = async () => {
     const ids = [...selected]
     if (ids.length === 0) return
@@ -350,6 +364,29 @@ export default function Clients() {
             <Plus className="w-4 h-4" />
             Nouveau client
           </Button>
+        </div>
+      </div>
+
+      {/* KPI bar — 3 chiffres clés qui suivent le filtre courant */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="card-premium p-3">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Clients affichés</p>
+          <p className="text-xl font-bold text-foreground mt-0.5">{filtered.length}</p>
+          <p className="text-[11px] text-muted-foreground">sur {clients.length} au total</p>
+        </div>
+        <div className="card-premium p-3">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Chiffre d'affaires annuel</p>
+          <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-0.5">
+            {new Intl.NumberFormat('fr-FR').format(Math.round(totals.ca))} MAD
+          </p>
+          <p className="text-[11px] text-muted-foreground">contrats en cours</p>
+        </div>
+        <div className="card-premium p-3">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Revenus renouvellements</p>
+          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+            {new Intl.NumberFormat('fr-FR').format(Math.round(totals.renew))} MAD
+          </p>
+          <p className="text-[11px] text-muted-foreground">domaine + hébergement / an</p>
         </div>
       </div>
 
