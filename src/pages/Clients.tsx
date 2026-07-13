@@ -2,8 +2,9 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, User, Building2, Phone, Mail, MapPin,
-  Edit2, Trash2, Loader2, Eye, Globe, Server, AlertTriangle, Clock,
+  Edit2, Trash2, Loader2, Eye, Globe, Server, AlertTriangle, Clock, X,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -209,6 +210,8 @@ export default function Clients() {
   const [showForm, setShowForm] = useState(false)
   const [editingClient, setEditingClient] = useState<Client | undefined>()
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_RANGE)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
   const filtered = useMemo(() =>
@@ -217,6 +220,42 @@ export default function Clients() {
       && dateMatch(c.created_at)
     )
   , [clients, search, dateMatch])
+
+  const allSelected = filtered.length > 0 && filtered.every(c => selected.has(c.id))
+  const someSelected = filtered.some(c => selected.has(c.id)) && !allSelected
+
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+  const toggleAll = () => setSelected(prev => {
+    if (allSelected) {
+      const next = new Set(prev)
+      filtered.forEach(c => next.delete(c.id))
+      return next
+    }
+    const next = new Set(prev)
+    filtered.forEach(c => next.add(c.id))
+    return next
+  })
+  const clearSelection = () => setSelected(new Set())
+
+  const bulkDelete = async () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    if (!confirm(`Supprimer définitivement ${ids.length} client${ids.length > 1 ? 's' : ''} ?\n\nCette action est irréversible.`)) return
+    setBulkDeleting(true)
+    try {
+      const results = await Promise.allSettled(ids.map(id => deleteClient.mutateAsync(id)))
+      const ok   = results.filter(r => r.status === 'fulfilled').length
+      const fail = results.length - ok
+      if (fail === 0) toast.success(`${ok} client${ok > 1 ? 's' : ''} supprimé${ok > 1 ? 's' : ''}`)
+      else if (ok === 0) toast.error(`Échec : aucune suppression n'a réussi`)
+      else toast.warning(`${ok} supprimé${ok > 1 ? 's' : ''} · ${fail} échec${fail > 1 ? 's' : ''}`)
+      clearSelection()
+    } finally { setBulkDeleting(false) }
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -237,6 +276,28 @@ export default function Clients() {
           </Button>
         </div>
       </div>
+
+      {/* Bulk action bar — visible only when items are selected */}
+      {selected.size > 0 && (
+        <div className="card-premium p-3 flex items-center gap-3 border-blue-500/30 bg-blue-500/5">
+          <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+            {selected.size} client{selected.size > 1 ? 's' : ''} sélectionné{selected.size > 1 ? 's' : ''}
+          </span>
+          <div className="flex-1" />
+          <Button size="sm" variant="secondary" onClick={clearSelection}>
+            <X className="w-3.5 h-3.5 mr-1" /> Annuler
+          </Button>
+          <Button
+            size="sm"
+            onClick={bulkDelete}
+            disabled={bulkDeleting}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {bulkDeleting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1" />}
+            Supprimer {selected.size}
+          </Button>
+        </div>
+      )}
 
       {/* Date filter */}
       <div className="card-premium p-3">
@@ -260,6 +321,16 @@ export default function Clients() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border bg-muted/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  <th className="w-8 text-center py-1.5 px-2">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={el => { if (el) el.indeterminate = someSelected }}
+                      onChange={toggleAll}
+                      className="w-3.5 h-3.5 rounded border-border cursor-pointer accent-blue-600"
+                      title={allSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                    />
+                  </th>
                   <th className="w-8 text-center py-1.5 px-2">#</th>
                   <th className="text-left py-1.5 px-2">Client</th>
                   <th className="text-left py-1.5 px-2">Contact</th>
@@ -276,8 +347,18 @@ export default function Clients() {
               <tbody>
                 {filtered.map((c, idx) => {
                   const meta = parseClientNotes(c.notes).meta
+                  const isSelected = selected.has(c.id)
                   return (
-                    <tr key={c.id} className="border-b border-border hover:bg-muted/30 group">
+                    <tr key={c.id} className={`border-b border-border hover:bg-muted/30 group ${isSelected ? 'bg-blue-500/5' : ''}`}>
+                      <td className="text-center py-1 px-2">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleOne(c.id)}
+                          className="w-3.5 h-3.5 rounded border-border cursor-pointer accent-blue-600"
+                          aria-label={`Sélectionner ${c.nom}`}
+                        />
+                      </td>
                       <td className="text-center text-[10px] font-mono text-muted-foreground py-1 px-2">{idx + 1}</td>
                       <td className="py-1 px-2">
                         <button
@@ -422,7 +503,7 @@ export default function Clients() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11}>
+                    <td colSpan={12}>
                       <div className="empty-state">
                         <User className="empty-state-icon" />
                         <p className="empty-state-title">Aucun client trouvé</p>
