@@ -919,11 +919,15 @@ router.post('/members/:id/resend', inviteLimiter, ...requireAdminMgr, async (req
       tokenPrefix: tokenPrefix(token),
       ip:          req.ip, ua: req.headers['user-agent'] as string,
     })
-    /* SAFE RESPONSE — no raw URL, only a masked token to help the admin
-       cross-reference audit logs. */
+    /* RESPONSE avec le lien brut : l'admin peut le copier / le partager
+       (WhatsApp, SMS, chat…) sans avoir à passer par un second endpoint.
+       Motif : le canal email n'est pas toujours fiable (RESEND_API_KEY
+       manquant, spam, etc.) → l'admin doit toujours pouvoir récupérer le
+       lien après un resend. Action tracée dans l'audit. */
     res.json({
       success:      true,
       status:       'invited',
+      invite_url:   inviteUrl,
       expires_at:   new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
       masked_token: maskToken(token),
     })

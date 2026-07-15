@@ -268,9 +268,14 @@ function MemberActions({ member, onOpen, onInvalidate }: {
   ) => {
     try {
       const res = await fn()
-      const maskedToken = res?.masked_token
       const expiresAt   = res?.expires_at
-      if (maskedToken && expiresAt) setShareInfo({ kind, maskedToken, expiresAt })
+      /* Priorité au lien brut (invite_url) : ouvre le dialog copie/WhatsApp
+         directement. Fallback sur masked_token si l'API ne renvoie que ça. */
+      if (res?.invite_url && expiresAt) {
+        setShareUrl({ url: res.invite_url, expiresAt })
+      } else if (res?.masked_token && expiresAt) {
+        setShareInfo({ kind, maskedToken: res.masked_token, expiresAt })
+      }
       toast.success(okMsg)
       onInvalidate()
     } catch (e: any) { toast.error(e?.message ?? 'Erreur') }
