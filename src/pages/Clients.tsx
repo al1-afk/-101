@@ -365,7 +365,21 @@ export default function Clients() {
           <ImportExportButtons
             schema={clientsSchema}
             data={clients}
-            onImport={async (row) => { await createClient.mutateAsync(row as any) }}
+            onImport={async (row) => {
+              /* Import idempotent : match par nom (insensible à la casse).
+                 Si trouvé → UPDATE (préserve l'id, statut, historique) ;
+                 sinon → CREATE avec statut 'Actif' par défaut (les imports
+                 sont des listes de clients réels, pas des leads). */
+              const nom = String((row as any).nom ?? '').trim()
+              const existing = nom
+                ? clients.find(c => c.nom?.toLowerCase() === nom.toLowerCase())
+                : undefined
+              if (existing) {
+                await updateClient.mutateAsync({ id: existing.id, ...(row as any) })
+              } else {
+                await createClient.mutateAsync({ statut: 'Actif', ...(row as any) })
+              }
+            }}
           />
           <Button size="sm" onClick={() => { setEditingClient(undefined); setShowForm(true) }}>
             <Plus className="w-4 h-4" />

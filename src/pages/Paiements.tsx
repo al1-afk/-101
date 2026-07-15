@@ -490,7 +490,7 @@ export default function Paiements() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
     return paiements.filter(p => {
-      const clientNom = clientMap.get(p.client_id) ?? ''
+      const clientNom = (p.client_id && clientMap.get(p.client_id)) || ''
       if (q && !p.reference.toLowerCase().includes(q) && !clientNom.toLowerCase().includes(q)) return false
       if (methodeFilter !== 'all' && p.methode !== methodeFilter) return false
       if (statusFilter  !== 'all' && p.status  !== statusFilter)  return false
@@ -542,6 +542,7 @@ export default function Paiements() {
 
     const byClient = new Map<string, { total: number; count: number }>()
     paye.forEach(p => {
+      if (!p.client_id) return
       const cur = byClient.get(p.client_id) ?? { total: 0, count: 0 }
       cur.total += Number(p.montant)
       cur.count += 1
@@ -681,22 +682,14 @@ export default function Paiements() {
               schema={paiementsSchema}
               data={paiements}
               onImport={async (row: any) => {
-                /* Le CSV/JSON contient un nom de client (colonne "client") mais
-                   la table paiements exige un client_id UUID. On lookup par nom
-                   (insensible à la casse) et on crée le client si absent. */
-                let clientId: string | null = null
+                /* Colonne "client" (optionnelle) : lookup par nom exact (insensible
+                   à la casse). Aucun client n'est créé ni modifié ici — si le nom
+                   n'existe pas côté clients, on importe le paiement avec client_id
+                   à NULL (FK ON DELETE SET NULL, colonne nullable). */
                 const nom = String(row.client ?? '').trim()
-                if (nom) {
-                  const existing = clients.find(c =>
-                    c.nom?.toLowerCase() === nom.toLowerCase())
-                  if (existing) {
-                    clientId = existing.id
-                  } else {
-                    const created = await createClient.mutateAsync({ nom } as any)
-                    clientId = (created as any)?.id ?? null
-                  }
-                }
-                if (!clientId) throw new Error(`Client "${nom || '?'}" introuvable et non créé`)
+                const clientId = nom
+                  ? clients.find(c => c.nom?.toLowerCase() === nom.toLowerCase())?.id ?? null
+                  : null
                 const { client: _drop, ...rest } = row
                 await createP.mutateAsync({ ...rest, client_id: clientId } as any)
               }}
@@ -767,7 +760,7 @@ export default function Paiements() {
               {formatCurrency(stats.totalEncaisse + stats.totalEnAttente)}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              {stats.count + stats.contratsRemainingCount} transaction(s) · {new Set(filtered.map(p => p.client_id)).size} client(s)
+              {stats.count + stats.contratsRemainingCount} transaction(s) · {new Set(filtered.map(p => p.client_id).filter(Boolean)).size} client(s)
             </p>
           </div>
           <div className="flex items-center gap-2 text-right flex-wrap">
@@ -885,7 +878,7 @@ export default function Paiements() {
                               const statConf = STATUS_CONFIG[p.status] ?? STATUS_CONFIG.paye
                               const MethIcon = methConf.icon
                               const StatIcon = statConf.icon
-                              const nom = clientMap.get(p.client_id) ?? '—'
+                              const nom = (p.client_id && clientMap.get(p.client_id)) || 'Sans client'
                               return (
                                 <div key={p.id} className="flex items-center gap-4 px-5 py-3 hover:bg-muted/20 transition-colors">
                                   <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${methConf.bg}`}>

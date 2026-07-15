@@ -130,7 +130,7 @@ function parseValue(raw: string, field: FieldDef): any {
     case 'date': {
       /* Accept date ranges like "05/07/2025 – 20/07/2025" : prendre la première.
          Couvre tiret (-), en dash (–), em dash (—), minus (−), "to" / "à". */
-      const first = trimmed.split(/\s*[-–—−]\s*|\s+(?:to|à|au)\s+/i)[0].trim()
+      const first = trimmed.split(/\s*[–—−]\s*|\s+(?:to|à|au)\s+/i)[0].trim()
       // YYYY-MM-DD or ISO
       if (/^\d{4}-\d{2}-\d{2}/.test(first)) return first.slice(0, 10)
       // DD/MM/YYYY or DD.MM.YYYY or DD-MM-YYYY
@@ -140,7 +140,15 @@ function parseValue(raw: string, field: FieldDef): any {
         const yyyy = y.length === 2 ? `20${y}` : y
         return `${yyyy}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`
       }
-      return first
+      // YYYY-MM (mois seul) → premier du mois
+      const ym = first.match(/^(\d{4})-(\d{1,2})$/)
+      if (ym) return `${ym[1]}-${ym[2].padStart(2,'0')}-01`
+      // YYYY (année seule) → 1er janvier
+      if (/^\d{4}$/.test(first)) return `${first}-01-01`
+      /* Format non reconnu : renvoie null plutôt que la chaîne brute,
+         qui ferait échouer tout l'INSERT côté Postgres. La ligne est
+         importée avec la date à null. */
+      return null
     }
     default:
       return trimmed

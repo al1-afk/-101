@@ -112,10 +112,12 @@ export default function Statistiques() {
     const yearPaiements = paiements.filter(p => p.status === 'paye' && new Date(p.date).getFullYear() === y)
     const byClient = new Map<string, number>()
     yearPaiements.forEach(p => {
+      if (!p.client_id) return
       byClient.set(p.client_id, (byClient.get(p.client_id) ?? 0) + Number(p.montant))
     })
     const clientsFirstPaiement = new Map<string, string>()
     paiements.forEach(p => {
+      if (!p.client_id) return
       const existing = clientsFirstPaiement.get(p.client_id)
       if (!existing || new Date(p.date) < new Date(existing)) {
         clientsFirstPaiement.set(p.client_id, p.date)
@@ -123,7 +125,7 @@ export default function Statistiques() {
     })
     let nouveaux = 0, renouvs = 0
     yearPaiements.forEach(p => {
-      const first = clientsFirstPaiement.get(p.client_id)
+      const first = p.client_id ? clientsFirstPaiement.get(p.client_id) : null
       if (first && new Date(first).getFullYear() === y) nouveaux += Number(p.montant)
       else renouvs += Number(p.montant)
     })
@@ -195,6 +197,7 @@ export default function Statistiques() {
   const topClients = useMemo(() => {
     const byClient = new Map<string, number>()
     paiements.filter(p => p.status === 'paye').forEach(p => {
+      if (!p.client_id) return
       byClient.set(p.client_id, (byClient.get(p.client_id) ?? 0) + Number(p.montant))
     })
     return [...byClient.entries()]

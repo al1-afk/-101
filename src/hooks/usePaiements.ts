@@ -12,7 +12,7 @@ export interface Paiement {
   reference:     string
   facture_id:    string | null
   contrat_id:    string | null
-  client_id:     string
+  client_id:     string | null
   date:          string
   montant:       number
   type_paiement: PaiementType
