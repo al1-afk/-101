@@ -128,6 +128,7 @@ export const paiementsSchema: EntitySchema<any> = {
   filename: 'paiements',
   fields: [
     { key: 'reference',     label: 'Référence',     required: true },
+    { key: 'client',        label: 'Client',        required: true },  /* nom du client — sera créé si absent */
     { key: 'date',          label: 'Date',          kind: 'date', required: true },
     { key: 'montant',       label: 'Montant',       kind: 'number', required: true },
     { key: 'type_paiement', label: 'Type' },

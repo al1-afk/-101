@@ -680,7 +680,26 @@ export default function Paiements() {
             <ImportExportButtons
               schema={paiementsSchema}
               data={paiements}
-              onImport={async (row) => { await createP.mutateAsync(row as any) }}
+              onImport={async (row: any) => {
+                /* Le CSV/JSON contient un nom de client (colonne "client") mais
+                   la table paiements exige un client_id UUID. On lookup par nom
+                   (insensible à la casse) et on crée le client si absent. */
+                let clientId: string | null = null
+                const nom = String(row.client ?? '').trim()
+                if (nom) {
+                  const existing = clients.find(c =>
+                    c.nom?.toLowerCase() === nom.toLowerCase())
+                  if (existing) {
+                    clientId = existing.id
+                  } else {
+                    const created = await createClient.mutateAsync({ nom } as any)
+                    clientId = (created as any)?.id ?? null
+                  }
+                }
+                if (!clientId) throw new Error(`Client "${nom || '?'}" introuvable et non créé`)
+                const { client: _drop, ...rest } = row
+                await createP.mutateAsync({ ...rest, client_id: clientId } as any)
+              }}
             />
             <Button size="sm" onClick={() => openForm()}>
               <Plus className="w-4 h-4" /> Nouveau paiement
