@@ -63,6 +63,19 @@ const Guides              = lazy(() => import('@/pages/Guides'))
 const GuideStep           = lazy(() => import('@/pages/GuideStep'))
 const Vision              = lazy(() => import('@/pages/Vision'))
 
+/* Outbound Marketing (module de prospection sortante) */
+const OutboundDashboard   = lazy(() => import('@/pages/Outbound/OutboundDashboard'))
+const OutboundProspects   = lazy(() => import('@/pages/Outbound/OutboundProspects'))
+const OutboundPipeline    = lazy(() => import('@/pages/Outbound/OutboundPipeline'))
+const OutboundFollowUps   = lazy(() => import('@/pages/Outbound/OutboundFollowUps'))
+const OutboundCampaigns   = lazy(() => import('@/pages/Outbound/OutboundCampaigns'))
+const OutboundTemplates   = lazy(() => import('@/pages/Outbound/OutboundTemplates'))
+const OutboundSectors     = lazy(() => import('@/pages/Outbound/OutboundSectors'))
+const OutboundTeam        = lazy(() => import('@/pages/Outbound/OutboundTeam'))
+const OutboundReports     = lazy(() => import('@/pages/Outbound/OutboundReports'))
+const OutboundEnrich      = lazy(() => import('@/pages/Outbound/OutboundEnrich'))
+const OutboundSettings    = lazy(() => import('@/pages/Outbound/OutboundSettings'))
+
 /* Team member space (invite + login + dashboard) */
 const InviteAccept        = lazy(() => import('@/pages/InviteAccept'))
 const TeamLogin           = lazy(() => import('@/pages/TeamLogin'))
@@ -123,6 +136,17 @@ export default function App() {
             }>
               <Route index                              element={<Dashboard />} />
               <Route path="prospects"                  element={<Prospects />} />
+              <Route path="outbound"                   element={<OutboundDashboard />} />
+              <Route path="outbound/prospects"         element={<OutboundProspects />} />
+              <Route path="outbound/pipeline"          element={<OutboundPipeline />} />
+              <Route path="outbound/follow-ups"        element={<OutboundFollowUps />} />
+              <Route path="outbound/campaigns"         element={<OutboundCampaigns />} />
+              <Route path="outbound/templates"         element={<OutboundTemplates />} />
+              <Route path="outbound/sectors"           element={<OutboundSectors />} />
+              <Route path="outbound/team"              element={<OutboundTeam />} />
+              <Route path="outbound/reports"           element={<OutboundReports />} />
+              <Route path="outbound/enrich"            element={<OutboundEnrich />} />
+              <Route path="outbound/settings"          element={<OutboundSettings />} />
               <Route path="clients"                    element={<Clients />} />
               <Route path="clients/renewals"           element={<RenewalsBreakdown />} />
               <Route path="clients/:id"                element={<ClientDetail />} />

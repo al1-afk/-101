@@ -21,6 +21,8 @@ import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib
 import mySpaceRoutes   from './routes/mySpace'
 import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
+import outboundRoutes  from './routes/outbound'
+import paiementsRecoveryRoutes from './routes/paiementsRecovery'
 
 dotenv.config({ path: '.env.local' })
 
@@ -136,6 +138,9 @@ app.use(cors((req, cb) => {
 }))
 
 /* ── Body parsing + sanitization ────────────────────────────── */
+/* Limite spéciale 100 MB pour la restauration de backup paiements (pg_dump
+   peut faire plusieurs dizaines de MB). Le reste des routes reste à 12 MB. */
+app.use('/api/paiements-recovery', express.json({ limit: '100mb' }))
 /* 12 MB pour accepter les images base64 stockées inline dans les blocs
    SOP (limite max 10 MB côté éditeur + marge de sérialisation JSON). */
 app.use(express.json({ limit: '12mb' }))
@@ -156,6 +161,8 @@ app.use('/api/team',      teamRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
 app.use('/api/activity',  activityRoutes)
+app.use('/api/outbound',  outboundRoutes)
+app.use('/api/paiements-recovery', paiementsRecoveryRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */

@@ -6,6 +6,7 @@ import {
   TrendingUp, TrendingDown, CheckCircle2, Clock,
   CreditCard, Banknote, Receipt, FileText, Wallet,
   Trophy, Calendar, Crown, BarChart3, Minus, FileSignature, Printer, Send,
+  Loader2,
 } from 'lucide-react'
 import { contratsApi } from '@/lib/api'
 import { toast } from 'sonner'
@@ -726,6 +727,10 @@ export default function Paiements() {
       </div>
 
       {view === 'paiements' && <>
+      {/* ── Bannière recovery : visible seulement s'il n'y a AUCUN paiement
+             mais des contrats/factures existent (situation anormale). ── */}
+      <PaiementsRecoveryBanner paiementsCount={paiements.length} contratsCount={contrats.length} />
+
       {/* ── Date filter (en haut) ── */}
       <div className="card-premium p-3">
         <DateRangeFilter value={dateRange} onChange={setDateRange} />
@@ -1597,6 +1602,267 @@ export default function Paiements() {
           buildPdf={() => generatePaiementReceiptPDFBlob(sendTarget.p, sendTarget.nom)}
         />
       )}
+    </div>
+  )
+}
+
+/* ── Bannière de récupération : détecte les paiements manquants et propose
+      soit de les recréer depuis contrats+factures, soit d'importer un backup. ── */
+function PaiementsRecoveryBanner({
+  paiementsCount, contratsCount,
+}: { paiementsCount: number; contratsCount: number }) {
+  const qc = useQueryClient()
+  const [expanded, setExpanded] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [diag, setDiag] = useState<{
+    paiements_actuels: number
+    contrats_a_recreer: number
+    factures_a_recreer: number
+    montant_total: number
+  } | null>(null)
+  const [mode, setMode] = useState<'recreate' | 'restore'>('recreate')
+  const [backupPreview, setBackupPreview] = useState<{
+    inserted: number; skipped_existing: number; skipped_invalid: number
+    montant_restaure: number; erreurs: string[]
+  } | null>(null)
+  const [backupFileName, setBackupFileName] = useState('')
+  const [backupSqlContent, setBackupSqlContent] = useState('')
+
+  /* Ne montre la bannière QUE si 0 paiements mais des contrats existent
+     (situation anormale). Si l'utilisateur n'a jamais rien saisi, pas de bannière. */
+  const shouldShow = paiementsCount === 0 && contratsCount > 0
+  if (!shouldShow) return null
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (f.size > 100 * 1024 * 1024) { toast.error('Fichier > 100 MB'); return }
+    setBackupFileName(f.name)
+    const content = await f.text()
+    setBackupSqlContent(content)
+    /* Preview immédiat (dry-run) */
+    setRunning(true)
+    try {
+      const r = await fetch('/api/paiements-recovery/restore-from-backup', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql_content: content, dry_run: true }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error ?? 'Preview échoué')
+      setBackupPreview(data)
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Preview échoué')
+      setBackupSqlContent(''); setBackupFileName('')
+    } finally { setRunning(false) }
+  }
+
+  const runBackupRestore = async () => {
+    if (!backupSqlContent) return
+    if (!confirm(`Restaurer ${backupPreview?.inserted ?? 0} paiements depuis "${backupFileName}" ?\n\nCette opération est SANS RISQUE : les paiements déjà présents seront skippés (pas de doublons).`)) return
+    setRunning(true)
+    try {
+      const r = await fetch('/api/paiements-recovery/restore-from-backup', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql_content: backupSqlContent, dry_run: false }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error ?? 'Restauration échouée')
+      toast.success(data.message)
+      qc.invalidateQueries({ queryKey: ['paiements'] })
+      setBackupSqlContent(''); setBackupFileName(''); setBackupPreview(null); setExpanded(false)
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Restauration échouée')
+    } finally { setRunning(false) }
+  }
+
+  const runDiagnostic = async () => {
+    setRunning(true)
+    try {
+      const r = await fetch('/api/paiements-recovery/diagnostic', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setDiag(await r.json())
+      setExpanded(true)
+    } catch (e: any) {
+      toast.error('Diagnostic échoué : ' + (e?.message ?? 'inconnu'))
+    } finally { setRunning(false) }
+  }
+
+  const runRecovery = async () => {
+    if (!confirm(`Recréer ${(diag?.contrats_a_recreer ?? 0) + (diag?.factures_a_recreer ?? 0)} paiements ?\n\nCette opération est SANS RISQUE : elle ne crée que les paiements manquants, jamais de doublons.`)) return
+    setRunning(true)
+    try {
+      const r = await fetch('/api/paiements-recovery/execute', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: false }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const data = await r.json()
+      toast.success(data.message ?? 'Récupération terminée')
+      qc.invalidateQueries({ queryKey: ['paiements'] })
+      setDiag(null); setExpanded(false)
+    } catch (e: any) {
+      toast.error('Récupération échouée : ' + (e?.message ?? 'inconnu'))
+    } finally { setRunning(false) }
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-amber-500/50 bg-amber-500/10 p-4">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+          <span className="text-lg">⚠️</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-amber-900 dark:text-amber-300">
+            Aucun paiement enregistré, mais {contratsCount} contrat(s) existent
+          </p>
+          <p className="text-xs text-amber-800 dark:text-amber-400 mt-0.5">
+            Cette situation est anormale. Deux options pour restaurer vos paiements :
+          </p>
+
+          {/* Choix du mode */}
+          <div className="flex gap-1 mt-3 mb-2 p-1 bg-background/50 rounded-lg inline-flex">
+            <button
+              onClick={() => { setMode('recreate'); setBackupPreview(null) }}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-all ${
+                mode === 'recreate' ? 'bg-amber-600 text-white' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              🔄 Recréer depuis contrats
+            </button>
+            <button
+              onClick={() => { setMode('restore'); setDiag(null) }}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-all ${
+                mode === 'restore' ? 'bg-amber-600 text-white' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              📁 Importer depuis backup (.sql)
+            </button>
+          </div>
+
+          {/* Mode 1 : Recréer depuis contrats */}
+          {mode === 'recreate' && !diag && (
+            <Button
+              size="sm"
+              onClick={runDiagnostic}
+              disabled={running}
+              className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs"
+            >
+              {running ? '⏳ Analyse…' : '🔍 Analyser ce qui peut être récupéré'}
+            </Button>
+          )}
+
+          {/* Mode 2 : Import backup */}
+          {mode === 'restore' && !backupPreview && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-muted-foreground">
+                Uploade un fichier <code className="px-1 rounded bg-muted">.sql</code> généré par <code className="px-1 rounded bg-muted">pg_dump</code>.
+                Seuls les paiements de votre tenant seront importés. Aucun doublon.
+              </p>
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="file"
+                  accept=".sql,.txt"
+                  onChange={handleFileSelect}
+                  disabled={running}
+                  className="text-xs"
+                />
+                {running && <Loader2 className="w-3 h-3 animate-spin" />}
+              </label>
+              <p className="text-[10px] text-muted-foreground italic">
+                💡 Sur le VPS : <code className="px-1 rounded bg-muted">docker exec &lt;container&gt; pg_dump -U said gestiq_prod &gt; backup.sql</code>
+              </p>
+            </div>
+          )}
+
+          {/* Résultat Mode 2 : preview du backup */}
+          {mode === 'restore' && backupPreview && (
+            <div className="space-y-2 text-xs mt-2">
+              <div className="rounded-lg bg-background/60 p-3 space-y-1 font-mono">
+                <p>📁 Fichier : <strong>{backupFileName}</strong></p>
+                <p>▸ Paiements trouvés (votre tenant) : <strong className="text-emerald-600">{backupPreview.inserted}</strong></p>
+                <p>▸ Déjà présents (skippés) : <strong>{backupPreview.skipped_existing}</strong></p>
+                <p>▸ Invalides (skippés) : <strong>{backupPreview.skipped_invalid}</strong></p>
+                <p className="pt-1 border-t border-border">
+                  ▸ Montant à restaurer : <strong className="text-emerald-600">
+                    {backupPreview.montant_restaure.toLocaleString('fr-FR')} MAD
+                  </strong>
+                </p>
+                {backupPreview.erreurs.length > 0 && (
+                  <div className="pt-1 border-t border-border text-red-600">
+                    ⚠ {backupPreview.erreurs.length} erreur(s) — {backupPreview.erreurs[0]}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={runBackupRestore}
+                  disabled={running || backupPreview.inserted === 0}
+                  className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                >
+                  {running ? '⏳ Restauration…' : `✅ Restaurer ${backupPreview.inserted} paiement(s)`}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => { setBackupPreview(null); setBackupSqlContent(''); setBackupFileName('') }}
+                  className="h-8 text-xs"
+                >
+                  Annuler
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {diag && expanded && (
+            <div className="mt-3 space-y-2 text-xs">
+              <div className="rounded-lg bg-background/60 p-3 space-y-1 font-mono">
+                <p>▸ Paiements actuels : <strong>{diag.paiements_actuels}</strong></p>
+                <p>▸ Contrats sans paiement : <strong>{diag.contrats_a_recreer}</strong></p>
+                <p>▸ Factures sans paiement : <strong>{diag.factures_a_recreer}</strong></p>
+                <p className="pt-1 border-t border-border">
+                  ▸ Total à récupérer : <strong className="text-emerald-600">
+                    {diag.montant_total.toLocaleString('fr-FR')} MAD
+                  </strong>
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={runRecovery}
+                  disabled={running || (diag.contrats_a_recreer + diag.factures_a_recreer === 0)}
+                  className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                >
+                  {running ? '⏳ Récupération…' : `✅ Recréer ${diag.contrats_a_recreer + diag.factures_a_recreer} paiement(s)`}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => { setDiag(null); setExpanded(false) }}
+                  className="h-8 text-xs"
+                >
+                  Annuler
+                </Button>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground italic">
+                💡 Les paiements seront créés en statut "en_attente". Vous pourrez les marquer comme
+                "payé" au fur et à mesure que vous retrouvez les traces des règlements réels.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

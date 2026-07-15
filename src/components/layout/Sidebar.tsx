@@ -13,6 +13,7 @@ import {
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
   Plus, Star, Command, Search, GripVertical,
+  Radar, Route, LineChart, MessagesSquare, LayoutGrid, Bell, Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
@@ -70,6 +71,16 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'guides',            label: 'Guides onboarding' },
   { key: 'vision',            label: 'Ma Vision (admin)' },
   { key: 'bientot',           label: 'Bientôt' },
+  /* Outbound Marketing */
+  { key: 'outbound',           label: 'Outbound — Tableau de bord' },
+  { key: 'outbound-prospects', label: 'Outbound — Prospects' },
+  { key: 'outbound-pipeline',  label: 'Outbound — Pipeline' },
+  { key: 'outbound-followups', label: 'Outbound — Relances' },
+  { key: 'outbound-campaigns', label: 'Outbound — Campagnes' },
+  { key: 'outbound-templates', label: 'Outbound — Modèles' },
+  { key: 'outbound-sectors',   label: 'Outbound — Secteurs' },
+  { key: 'outbound-team',      label: 'Outbound — Équipe' },
+  { key: 'outbound-reports',   label: 'Outbound — Rapports' },
 ]
 
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
@@ -85,6 +96,22 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { label: 'Templates',       href: '/templates', icon: Sparkles, badge: 'New', module: 'projets' },
       { label: 'Tâches',          href: '/taches',    icon: CheckSquare, module: 'taches' },
       { label: 'Calendrier',      href: '/calendrier',icon: CalendarDays, module: 'calendrier' },
+    ],
+  },
+  {
+    title: 'Outbound Marketing',
+    items: [
+      { label: 'Tableau de bord',    href: '/outbound',              icon: LayoutGrid,     badge: 'New', module: 'outbound' },
+      { label: 'Prospecter (Google)',href: '/outbound/enrich',       icon: MapPin,         badge: 'IA', module: 'outbound' },
+      { label: 'Prospects Outbound', href: '/outbound/prospects',    icon: Radar,          module: 'outbound-prospects' },
+      { label: 'Pipeline',           href: '/outbound/pipeline',     icon: Route,          module: 'outbound-pipeline' },
+      { label: 'Relances',           href: '/outbound/follow-ups',   icon: Bell,           module: 'outbound-followups' },
+      { label: 'Campagnes',          href: '/outbound/campaigns',    icon: Target,         module: 'outbound-campaigns' },
+      { label: 'Modèles messages',   href: '/outbound/templates',    icon: MessagesSquare, module: 'outbound-templates' },
+      { label: 'Secteurs & Sources', href: '/outbound/sectors',      icon: Layers,         module: 'outbound-sectors' },
+      { label: 'Équipe Outbound',    href: '/outbound/team',         icon: Users,          module: 'outbound-team' },
+      { label: 'Rapports',           href: '/outbound/reports',      icon: LineChart,      module: 'outbound-reports' },
+      { label: 'Automation setup',   href: '/outbound/settings',     icon: Settings,       module: 'outbound' },
     ],
   },
   {
@@ -146,7 +173,14 @@ const ALL_ITEMS: NavItem[] = NAV_GROUPS.flatMap(g => g.items)
 function getInitialExpanded(): string[] {
   try {
     const stored = localStorage.getItem('sidebar-expanded-groups')
-    if (stored) return JSON.parse(stored)
+    if (stored) {
+      const parsed = JSON.parse(stored) as string[]
+      /* Nouvelles sections ajoutées après le premier chargement doivent
+         apparaître dépliées (sinon l'utilisateur ne voit pas les nouveaux items). */
+      const allTitles = NAV_GROUPS.map(g => g.title)
+      const missing = allTitles.filter(t => !parsed.includes(t))
+      return [...parsed, ...missing]
+    }
   } catch {/* ignore */}
   return NAV_GROUPS.map(g => g.title)
 }
@@ -224,8 +258,33 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   }, [location.pathname, base])
 
   const { role: userRole, allowedModules } = useAuth()
+
+  /* Modules Outbound réservés aux managers (admin/manager).
+     L'agent (commercial) voit uniquement les pages où il gère ses propres données. */
+  const OUTBOUND_MANAGER_ONLY = new Set([
+    'outbound-campaigns',
+    'outbound-templates',
+    'outbound-sectors',
+    'outbound-team',
+    'outbound-reports',
+  ])
+  /* Modules Outbound accessibles aussi à commercial */
+  const OUTBOUND_MODULES = new Set([
+    'outbound', 'outbound-prospects', 'outbound-pipeline', 'outbound-followups',
+  ])
+
   const filterItem = (item: NavItem): boolean => {
     if (item.adminOnly && userRole !== 'admin') return false
+
+    /* Outbound : ni viewer ni comptable */
+    if (item.module?.startsWith('outbound')) {
+      if (userRole === 'viewer' || userRole === 'comptable') return false
+      if (OUTBOUND_MANAGER_ONLY.has(item.module) && !['admin','manager'].includes(userRole ?? '')) return false
+      if (userRole === 'admin' || userRole === 'manager') return true
+      /* Pour commercial : accepte les modules "agent" */
+      return OUTBOUND_MODULES.has(item.module)
+    }
+
     if (userRole === 'admin') return true
     if (!item.module) return true
     if (Array.isArray(allowedModules)) return allowedModules.includes(item.module)
