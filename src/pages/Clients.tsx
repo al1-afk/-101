@@ -367,15 +367,19 @@ export default function Clients() {
             data={clients}
             onImport={async (row) => {
               /* Import idempotent : match par nom (insensible à la casse).
-                 Si trouvé → UPDATE (préserve l'id, statut, historique) ;
-                 sinon → CREATE avec statut 'Actif' par défaut (les imports
-                 sont des listes de clients réels, pas des leads). */
+                 Si trouvé → UPDATE partiel : seules les colonnes non vides
+                 du CSV écrasent les valeurs existantes (une cellule vide
+                 ne détruit PAS la donnée en base).
+                 Sinon → CREATE avec statut 'Actif' par défaut. */
               const nom = String((row as any).nom ?? '').trim()
               const existing = nom
                 ? clients.find(c => c.nom?.toLowerCase() === nom.toLowerCase())
                 : undefined
               if (existing) {
-                await updateClient.mutateAsync({ id: existing.id, ...(row as any) })
+                const nonEmpty = Object.fromEntries(
+                  Object.entries(row as any).filter(([, v]) => v != null && v !== ''),
+                )
+                await updateClient.mutateAsync({ id: existing.id, ...nonEmpty })
               } else {
                 await createClient.mutateAsync({ statut: 'Actif', ...(row as any) })
               }
