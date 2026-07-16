@@ -217,24 +217,6 @@ export default function MyProjetDetail() {
         </Section>
       )}
 
-      {/* ── Équipe du projet — visible seulement si l'admin a activé le partage ── */}
-      {shareInfos && projet.teammates && projet.teammates.length > 0 && (
-        <Section title={`Équipe (${projet.teammates.length})`} icon={Users} color="violet">
-          <div className="space-y-1.5">
-            {projet.teammates.map((m: any, i: number) => (
-              <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-800/40">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-[10px]">
-                  {(m.first_name?.[0] ?? '') + (m.last_name?.[0] ?? '')}
-                </div>
-                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{m.first_name} {m.last_name}</span>
-                {m.role === 'lead' && <Crown className="w-3 h-3 text-amber-500" />}
-                {m.job_title && <span className="text-xs text-slate-500 ml-auto">{m.job_title}</span>}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
       {/* ── Documentation projet (lecture seule) ── */}
       {shareInfos && parsed.blocks.length > 0 && (
         <Section title="Documentation projet" icon={BookOpen} color="violet">
