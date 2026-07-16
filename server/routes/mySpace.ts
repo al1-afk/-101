@@ -402,7 +402,8 @@ router.post('/sops/activity', async (req: Request, res: Response) => {
   }
 })
 
-/* ── GET /api/my-space/projets — projects this member is assigned to ── */
+/* ── GET /api/my-space/projets — projects this member is assigned to,
+   OR has at least one task on (direct or via linked stagiaire). ── */
 router.get('/projets', async (req: Request, res: Response) => {
   const m = await resolveMember(req)
   if (!m) return res.status(403).json({ error: 'Compte inactif' })
@@ -413,7 +414,8 @@ router.get('/projets', async (req: Request, res: Response) => {
               p.date_debut, p.date_fin_prevue, p.date_fin_reelle,
               p.budget, p.progression,
               p.client_id, c.nom AS client_nom, c.entreprise AS client_entreprise,
-              pa.role AS my_role,
+              (SELECT role FROM public.projet_assignees
+                WHERE projet_id = p.id AND team_member_id = $1 LIMIT 1) AS my_role,
               (SELECT COUNT(*)::int FROM public.team_member_tasks t
                 WHERE t.project_id = p.id
                   AND (t.team_member_id = $1
@@ -422,10 +424,16 @@ router.get('/projets', async (req: Request, res: Response) => {
                 WHERE t.project_id = p.id AND t.status = 'done'
                   AND (t.team_member_id = $1
                        OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))) AS my_tasks_done
-         FROM public.projet_assignees pa
-         JOIN public.projets p ON p.id = pa.projet_id
+         FROM public.projets p
          LEFT JOIN public.clients c ON c.id = p.client_id
-        WHERE pa.team_member_id = $1
+        WHERE EXISTS (
+                SELECT 1 FROM public.projet_assignees pa
+                 WHERE pa.projet_id = p.id AND pa.team_member_id = $1)
+           OR EXISTS (
+                SELECT 1 FROM public.team_member_tasks t
+                 WHERE t.project_id = p.id
+                   AND (t.team_member_id = $1
+                        OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
         ORDER BY p.updated_at DESC`,
       [m.id],
     )
@@ -444,14 +452,27 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
 
   try {
-    /* Check assignment first + récupère share_infos */
-    const assigned = await tenantQueryOne<{ role: string; share_infos: boolean }>(
+    /* Check assignment first + récupère share_infos.
+       Fallback : accès via tâche (direct ou stagiaire lié) en mode restreint. */
+    let assigned = await tenantQueryOne<{ role: string; share_infos: boolean }>(
       m.tenantId,
       `SELECT role, COALESCE(share_infos, TRUE) AS share_infos FROM public.projet_assignees
         WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
       [m.id, id],
     )
-    if (!assigned) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
+    if (!assigned) {
+      const hasTask = await tenantQueryOne(
+        m.tenantId,
+        `SELECT 1 FROM public.team_member_tasks
+          WHERE project_id = $2
+            AND (team_member_id = $1
+                 OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))
+          LIMIT 1`,
+        [m.id, id],
+      )
+      if (!hasTask) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
+      assigned = { role: 'member', share_infos: false }
+    }
     const shareInfos = assigned.share_infos !== false
 
     let projet: any
@@ -525,7 +546,14 @@ router.get('/projets/:id/messages', async (req: Request, res: Response) => {
     /* Verify assignment */
     const assigned = await tenantQueryOne(
       m.tenantId,
-      `SELECT 1 FROM public.projet_assignees WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
+      `SELECT 1
+         WHERE EXISTS (SELECT 1 FROM public.projet_assignees
+                        WHERE team_member_id = $1 AND projet_id = $2)
+            OR EXISTS (SELECT 1 FROM public.team_member_tasks
+                        WHERE project_id = $2
+                          AND (team_member_id = $1
+                               OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
+         LIMIT 1`,
       [m.id, id],
     )
     if (!assigned) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
@@ -556,7 +584,14 @@ router.post('/projets/:id/messages', async (req: Request, res: Response) => {
   try {
     const assigned = await tenantQueryOne(
       m.tenantId,
-      `SELECT 1 FROM public.projet_assignees WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
+      `SELECT 1
+         WHERE EXISTS (SELECT 1 FROM public.projet_assignees
+                        WHERE team_member_id = $1 AND projet_id = $2)
+            OR EXISTS (SELECT 1 FROM public.team_member_tasks
+                        WHERE project_id = $2
+                          AND (team_member_id = $1
+                               OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
+         LIMIT 1`,
       [m.id, id],
     )
     if (!assigned) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
