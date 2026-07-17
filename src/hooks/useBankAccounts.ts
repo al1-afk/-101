@@ -31,7 +31,8 @@ interface PaiementRow {
   id:              string
   montant:         number
   bank_account_id: string | null
-  date_paiement:   string
+  date:            string
+  status:          string
   notes:           string | null
   reference:       string | null
 }
@@ -70,7 +71,9 @@ export function useBankAccountsWithSolde() {
 
   const enriched = useMemo<BankAccountWithSolde[]>(() => {
     const accounts = accountsQ.data ?? []
-    const paiements = paiementsQ.data ?? []
+    /* Seuls les paiements effectivement encaissés (status='paye') impactent
+       le solde. Un paiement 'en_attente' n'est pas encore dans le compte. */
+    const paiements = (paiementsQ.data ?? []).filter(p => p.status === 'paye')
     return accounts.map(a => {
       const total_entrees = paiements
         .filter(p => p.bank_account_id === a.id)
@@ -112,14 +115,16 @@ export function useAccountMonthlyHistory(accountId: string | null, monthsBack = 
     const account = accounts.find(a => a.id === accountId)
     if (!account) return { history: [], movements: [] }
 
-    const paiements = (paiementsQ.data ?? []).filter(p => p.bank_account_id === accountId)
+    /* Seuls les paiements encaissés (paye) impactent le solde du compte. */
+    const paiements = (paiementsQ.data ?? [])
+      .filter(p => p.bank_account_id === accountId && p.status === 'paye')
     const accountDepenses = depenses.filter(d => (d as any).bank_account_id === accountId)
 
     /* Mouvements unifiés triés du plus récent au plus ancien. */
     const movements: AccountMovement[] = [
       ...paiements.map(p => ({
         id:      p.id,
-        date:    p.date_paiement,
+        date:    p.date,
         type:    'entree' as const,
         montant: Number(p.montant || 0),
         label:   p.notes || p.reference || 'Paiement encaissé',
@@ -143,7 +148,7 @@ export function useAccountMonthlyHistory(accountId: string | null, monthsBack = 
       const endStr = d.toISOString().slice(0, 10)
       const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
       const totalPai = paiements
-        .filter(p => p.date_paiement && p.date_paiement <= endStr)
+        .filter(p => p.date && p.date <= endStr)
         .reduce((s, p) => s + Number(p.montant || 0), 0)
       const totalDep = accountDepenses
         .filter(x => x.date_depense && x.date_depense <= endStr)
