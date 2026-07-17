@@ -75,6 +75,10 @@ const OutboundTeam        = lazy(() => import('@/pages/Outbound/OutboundTeam'))
 const OutboundReports     = lazy(() => import('@/pages/Outbound/OutboundReports'))
 const OutboundEnrich      = lazy(() => import('@/pages/Outbound/OutboundEnrich'))
 const OutboundSettings    = lazy(() => import('@/pages/Outbound/OutboundSettings'))
+const OutboundAutopilot        = lazy(() => import('@/pages/Outbound/OutboundAutopilot'))
+const OutboundAutopilotMonitor      = lazy(() => import('@/pages/Outbound/OutboundAutopilotMonitor'))
+const OutboundAutopilotEmailPreview = lazy(() => import('@/pages/Outbound/OutboundAutopilotEmailPreview'))
+const OutboundTracking              = lazy(() => import('@/pages/Outbound/OutboundTracking'))
 
 /* Team member space (invite + login + dashboard) */
 const InviteAccept        = lazy(() => import('@/pages/InviteAccept'))
@@ -147,6 +151,10 @@ export default function App() {
               <Route path="outbound/reports"           element={<OutboundReports />} />
               <Route path="outbound/enrich"            element={<OutboundEnrich />} />
               <Route path="outbound/settings"          element={<OutboundSettings />} />
+              <Route path="outbound/autopilot"         element={<OutboundAutopilot />} />
+              <Route path="outbound/autopilot/monitor"       element={<OutboundAutopilotMonitor />} />
+              <Route path="outbound/autopilot/email-preview" element={<OutboundAutopilotEmailPreview />} />
+              <Route path="outbound/tracking"                element={<OutboundTracking />} />
               <Route path="clients"                    element={<Clients />} />
               <Route path="clients/renewals"           element={<RenewalsBreakdown />} />
               <Route path="clients/:id"                element={<ClientDetail />} />

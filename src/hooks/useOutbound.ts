@@ -394,3 +394,94 @@ export function useSendProspectWhatsApp() {
     onError: (e: any) => toast.error(e?.message ?? 'Envoi échoué'),
   })
 }
+
+/* ─── AUTOPILOT ─────────────────────────────────────────────────── */
+
+export function useAutopilotConfig() {
+  return useQuery({
+    queryKey: ['outbound', 'autopilot', 'config', tid()],
+    queryFn:  () => outboundApi.autopilotGetConfig(),
+    staleTime: 30_000,
+  })
+}
+
+export function useSaveAutopilotConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Parameters<typeof outboundApi.autopilotSaveConfig>[0]) =>
+      outboundApi.autopilotSaveConfig(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['outbound', 'autopilot'] })
+      toast.success('Configuration Autopilot enregistrée')
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Erreur enregistrement'),
+  })
+}
+
+/* Polling live 5s tant qu'un run est "running" — sinon 30s. */
+export function useAutopilotRuns(limit = 20) {
+  return useQuery({
+    queryKey: ['outbound', 'autopilot', 'runs', tid(), limit],
+    queryFn:  () => outboundApi.autopilotListRuns(limit),
+    refetchInterval: (q) => {
+      const rows = q.state.data as any[] | undefined
+      return rows?.some(r => r.status === 'running') ? 5_000 : 30_000
+    },
+  })
+}
+
+export function useAutopilotRun(id: string | null) {
+  return useQuery({
+    queryKey: ['outbound', 'autopilot', 'run', id ?? ''],
+    enabled: !!id,
+    queryFn: () => outboundApi.autopilotGetRun(id!),
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 3_000 : false),
+  })
+}
+
+export function useAutopilotEmailPreview(params: {
+  lang?: 'fr' | 'ar' | 'en'
+  service?: string
+  company?: string
+  contact?: string
+  city?: string
+  to?: string
+}) {
+  return useQuery({
+    queryKey: ['outbound', 'autopilot', 'email-preview', tid(), params],
+    queryFn:  () => outboundApi.autopilotEmailPreview(params),
+    staleTime: 5_000,
+  })
+}
+
+export function useRunAutopilotNow() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => outboundApi.autopilotRunNow(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['outbound', 'autopilot', 'runs'] })
+      toast.success('Autopilot lancé — suivi en direct dans Monitor')
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Lancement impossible'),
+  })
+}
+
+/* ─── TRACKING ─────────────────────────────────────────────────── */
+
+export function useTrackingStats() {
+  return useQuery({
+    queryKey: ['outbound', 'tracking', 'stats', tid()],
+    queryFn:  () => outboundApi.trackingStats(),
+    /* Refetch chaque 15s — les opens arrivent en asynchrone. */
+    refetchInterval: 15_000,
+  })
+}
+
+export function useTrackingProspectEvents(id: string | null) {
+  return useQuery({
+    queryKey: ['outbound', 'tracking', 'events', id ?? ''],
+    enabled: !!id,
+    queryFn: () => outboundApi.trackingProspectEvents(id!),
+    refetchInterval: 15_000,
+  })
+}

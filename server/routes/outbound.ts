@@ -27,6 +27,8 @@ import * as aiEmailGen from '../lib/aiEmailGen'
 import { verifyEmail, verifyPhoneFormat } from '../lib/verifyContact'
 import { sendEmail } from '../lib/email'
 import { buildOutboundEmailHtml } from '../lib/outboundEmailTemplate'
+import { pool } from '../db/pool'
+import { runAutopilotForTenantId, DEFAULT_MOROCCAN_CITIES } from '../lib/outboundAutopilot'
 
 const router = Router()
 router.use(requireAuth)
@@ -1277,7 +1279,7 @@ router.post('/prospects/:id/send-email', outboundExternalLimiter, async (req: Re
     `SELECT name, slug, settings, logo_url FROM tenants WHERE id = $1`, [tenantId])
   const settings = tenant?.settings ?? {}
 
-  const senderName    = String(req.body?.sender_name    ?? settings.sender_name    ?? (req.user!.email?.split('@')[0] ?? 'L\'équipe'))
+  const senderName    = String(req.body?.sender_name    ?? settings.sender_name    ?? 'L\'équipe NEXT GITAL')
   const senderRole    = String(req.body?.sender_role    ?? settings.sender_role    ?? 'Direction commerciale')
   const senderCompany = String(req.body?.sender_company ?? tenant?.name            ?? 'NEXT GITAL')
   const senderPhone   = req.body?.sender_phone   ?? settings.sender_phone   ?? process.env.OUTBOUND_SENDER_PHONE   ?? null
@@ -1390,6 +1392,339 @@ router.post('/prospects/:id/send-whatsapp', outboundExternalLimiter, async (req:
   } catch (e: any) {
     logger.error('[outbound/send-whatsapp]', e?.message)
     res.status(502).json({ error: 'Envoi WhatsApp échoué : ' + (e?.message ?? 'inconnue') })
+  }
+})
+
+/* ═════════════════════════════════════════════════════════════════
+   AUTOPILOT — config + runs + trigger manuel
+   Réservé aux admin/manager (canManageAll).
+═════════════════════════════════════════════════════════════════ */
+
+const AUTOPILOT_WRITE_COLUMNS = new Set([
+  'enabled','sector_id','keyword','cities',
+  'daily_prospect_limit','daily_search_limit','send_interval_seconds',
+  'send_window_start','send_window_end','run_hour_utc',
+  'channel_email','channel_whatsapp',
+  'language','tone','service_focus','whatsapp_template_id',
+  'require_email','require_website','require_phone',
+  'respect_ne_plus_contacter','default_owner_id',
+])
+
+router.get('/autopilot/config', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+  try {
+    const row = await tenantQueryOne<any>(req.user!.tenantId,
+      `SELECT * FROM outbound_autopilot_config WHERE tenant_id = $1 LIMIT 1`, [req.user!.tenantId])
+    /* On renvoie une config vide par défaut si non initialisée — permet à l'UI
+       de charger un formulaire pré-rempli avec les valeurs recommandées. */
+    if (!row) {
+      return res.json({
+        tenant_id: req.user!.tenantId,
+        enabled: false,
+        sector_id: null,
+        keyword: null,
+        cities: DEFAULT_MOROCCAN_CITIES,
+        daily_prospect_limit: 50,
+        daily_search_limit: 30,
+        send_interval_seconds: 180,
+        send_window_start: '09:00',
+        send_window_end: '18:00',
+        run_hour_utc: 7,
+        channel_email: true,
+        channel_whatsapp: false,
+        language: 'fr',
+        tone: 'professionnel',
+        service_focus: null,
+        whatsapp_template_id: null,
+        require_email: true,
+        require_website: false,
+        require_phone: false,
+        respect_ne_plus_contacter: true,
+        default_owner_id: req.user!.userId,
+        last_run_at: null,
+        last_run_status: null,
+        default_cities_suggestion: DEFAULT_MOROCCAN_CITIES,
+        _uninitialized: true,
+      })
+    }
+    res.json({ ...row, default_cities_suggestion: DEFAULT_MOROCCAN_CITIES })
+  } catch (e: any) {
+    logger.error('[autopilot GET config]', e?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.patch('/autopilot/config', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+
+  const raw = req.body ?? {}
+  const data: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (AUTOPILOT_WRITE_COLUMNS.has(k)) data[k] = v
+  }
+  /* Sanitize cities : array de strings non vides, trim + dedupe */
+  if ('cities' in data) {
+    const arr = Array.isArray(data.cities) ? data.cities : []
+    const clean = [...new Set(arr.map(c => String(c ?? '').trim()).filter(Boolean))]
+    data.cities = JSON.stringify(clean)
+  }
+  data.updated_by_id = req.user!.userId
+
+  const cols = Object.keys(data)
+  if (!cols.length) return res.status(400).json({ error: 'Rien à mettre à jour' })
+
+  try {
+    /* Upsert par tenant (une seule ligne autorisée) */
+    const insertCols = ['tenant_id', ...cols]
+    const insertVals = [req.user!.tenantId, ...cols.map(c => data[c])]
+    const placeholders = insertVals.map((_, i) => `$${i + 1}`).join(',')
+    const updateSet = cols.map((c, i) => `${c} = $${i + 2}`).join(', ')
+
+    const row = await tenantQueryOne<any>(req.user!.tenantId, `
+      INSERT INTO outbound_autopilot_config (${insertCols.join(',')})
+      VALUES (${placeholders})
+      ON CONFLICT (tenant_id) DO UPDATE
+        SET ${updateSet}
+      RETURNING *
+    `, insertVals)
+    res.json(row)
+  } catch (e: any) {
+    logger.error('[autopilot PUT config]', e?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* Historique + monitoring des runs — inclut les KPI de tracking. */
+router.get('/autopilot/runs', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+  const limit = Math.min(Math.max(1, Number(req.query.limit ?? 20)), 100)
+  try {
+    const rows = await tenantQuery<any>(req.user!.tenantId, `
+      SELECT id, started_at, finished_at, status, keyword, cities, channels,
+             searches_done, places_found, prospects_created, prospects_skipped,
+             emails_sent, emails_failed, whatsapp_sent, whatsapp_failed,
+             emails_opened, emails_clicked, emails_bounced, emails_replied,
+             error_message
+        FROM outbound_autopilot_runs
+       WHERE tenant_id = $1
+       ORDER BY started_at DESC
+       LIMIT $2
+    `, [req.user!.tenantId, limit])
+    res.json(rows)
+  } catch (e: any) {
+    logger.error('[autopilot GET runs]', e?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ─────────────────────────────────────────────────────────────
+   TRACKING — stats globales + timeline par prospect
+───────────────────────────────────────────────────────────── */
+
+router.get('/tracking/stats', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+  try {
+    const tenantId = req.user!.tenantId
+    /* Compteurs globaux — indépendants des runs Autopilot (inclut aussi les
+       envois manuels via /prospects/:id/send-email). */
+    const g = await tenantQueryOne<any>(tenantId, `
+      SELECT
+        COUNT(*) FILTER (WHERE date_dernier_contact IS NOT NULL)            AS sent,
+        COUNT(*) FILTER (WHERE email_opened_at IS NOT NULL)                 AS opened,
+        COUNT(*) FILTER (WHERE email_clicked_at IS NOT NULL)                AS clicked,
+        COUNT(*) FILTER (WHERE email_bounced = TRUE)                        AS bounced,
+        COUNT(*) FILTER (WHERE email_replied_at IS NOT NULL)                AS replied
+        FROM outbound_prospects WHERE tenant_id = $1
+    `, [tenantId])
+    /* Top prospects par engagement (open + click) */
+    const top = await tenantQuery<any>(tenantId, `
+      SELECT id, entreprise, ville, email,
+             email_opened_at, email_opened_count,
+             email_clicked_at, email_clicked_count,
+             email_bounced, email_replied_at
+        FROM outbound_prospects
+       WHERE tenant_id = $1
+         AND (email_opened_at IS NOT NULL OR email_clicked_at IS NOT NULL OR email_replied_at IS NOT NULL)
+       ORDER BY email_replied_at DESC NULLS LAST,
+                email_clicked_count DESC,
+                email_opened_count DESC
+       LIMIT 20
+    `, [tenantId])
+    res.json({ global: g, top_prospects: top })
+  } catch (e: any) {
+    logger.error('[tracking GET stats]', e?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.get('/tracking/prospects/:id/events', async (req: Request, res: Response) => {
+  const role = roleOf(req)
+  const tenantId = req.user!.tenantId
+  const userId = req.user!.userId
+  try {
+    const prospect = await tenantQueryOne<any>(tenantId,
+      `SELECT id, assigned_to_id FROM outbound_prospects WHERE id = $1`, [req.params.id])
+    if (!prospect) return res.status(404).json({ error: 'Introuvable' })
+    if (!canManageAll(role) && prospect.assigned_to_id !== userId) {
+      return res.status(403).json({ error: 'Accès refusé' })
+    }
+    const events = await tenantQuery<any>(tenantId, `
+      SELECT id, event_type, subject, target_url, bounce_reason, user_agent, created_at
+        FROM outbound_email_events
+       WHERE prospect_id = $1 AND tenant_id = $2
+       ORDER BY created_at DESC
+       LIMIT 100
+    `, [req.params.id, tenantId])
+    res.json(events)
+  } catch (e: any) {
+    logger.error('[tracking GET events]', e?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.get('/autopilot/runs/:id', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+  try {
+    const row = await tenantQueryOne<any>(req.user!.tenantId,
+      `SELECT * FROM outbound_autopilot_runs WHERE id = $1 AND tenant_id = $2`,
+      [req.params.id, req.user!.tenantId])
+    if (!row) return res.status(404).json({ error: 'Run introuvable' })
+    res.json(row)
+  } catch (e: any) {
+    logger.error('[autopilot GET run]', e?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* Prévisualisation du template email — HTML rendu avec des données d'exemple.
+   Utilisé par la page Preview côté client (iframe srcDoc). Aucun envoi. */
+router.get('/autopilot/email-preview', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+
+  const tenantId = req.user!.tenantId
+  const lang = (String(req.query.lang || 'fr').toLowerCase()) as 'fr' | 'ar' | 'en'
+  const service = String(req.query.service || 'ERP sur-mesure').trim()
+  const sampleProspect = {
+    entreprise: String(req.query.company    || 'Boulangerie Al Andalous'),
+    contact:    String(req.query.contact    || 'Ahmed Bennani'),
+    city:       String(req.query.city       || 'Oujda'),
+    email:      String(req.query.to         || 'ahmed@example.ma'),
+  }
+
+  /* Récupère la config sender du tenant (comme send-email) — fallback NEXT GITAL. */
+  const tenant = await tenantQueryOne<any>(tenantId,
+    `SELECT name, settings, logo_url FROM tenants WHERE id = $1`, [tenantId])
+  const settings = tenant?.settings ?? {}
+  /* Origine publique — sert à construire l'URL absolue du logo pour l'email. */
+  const publicOrigin = process.env.PUBLIC_APP_URL
+    ?? (req.headers.origin ? String(req.headers.origin) : `${req.protocol}://${req.get('host')}`)
+  const sender = {
+    name:    settings.sender_name    ?? 'L\'équipe NEXT GITAL',
+    role:    settings.sender_role    ?? 'Direction commerciale',
+    company: tenant?.name ?? 'NEXT GITAL',
+    email:   settings.sender_email   ?? 'info@nextgital.com',
+    phones:  Array.isArray(settings.sender_phones) && settings.sender_phones.length
+              ? settings.sender_phones as string[]
+              : ['+212 6 20 00 20 66', '+212 5 36 68 37 07'],
+    website: settings.sender_website ?? 'nextgital.com',
+    address: settings.sender_address ?? [
+      'Centre-ville, Rue Mohammed V (Hôtel Aswan)',
+      'Immeuble Kissi, 4ᵉ étage – Bureau N° 7',
+      'Oujda, Maroc',
+    ].join('\n'),
+    logo_url: tenant?.logo_url ?? `${publicOrigin}/logo-nextgital.png`,
+  }
+
+  /* Échantillon de corps — reproduit ce que Claude/OpenAI génèrerait, sans
+     appeler l'API IA (pour un preview instantané et gratuit). */
+  const sampleBody: Record<'fr' | 'ar' | 'en', { subject: string; body: string }> = {
+    fr: {
+      subject: `Un site pour ${sampleProspect.entreprise} en 2 semaines ?`,
+      body:
+`Bonjour ${sampleProspect.contact},
+
+En passant devant ${sampleProspect.entreprise} à ${sampleProspect.city}, j'ai remarqué que vous n'aviez pas encore de site web.
+
+Chez ${sender.company}, on livre pour les commerces d'${sampleProspect.city} un ${service.toLowerCase()} avec commande en ligne + Google Maps optimisé, en 2 semaines. Résultat : +30% de nouveaux clients dès le 1er mois.
+
+Auriez-vous 10 minutes cette semaine pour en discuter ?`,
+    },
+    ar: {
+      subject: `موقع ${sampleProspect.entreprise} فـ 15 يوم`,
+      body:
+`السلام عليكم ${sampleProspect.contact}،
+
+مررت اليوم من قدام ${sampleProspect.entreprise} فـ${sampleProspect.city}، ولاحظت باللي ما عندكمش موقع ويب.
+
+عندنا فـ${sender.company} حل خاص بالمحلات ديال ${sampleProspect.city}: ${service} مع طلبيات أونلاين + Google Maps، جاهز فـ15 يوم. النتيجة: +30% ديال الزبناء الجدد فالشهر الأول.
+
+واش عندك 10 دقايق هاد السيمانة باش نتكلمو؟`,
+    },
+    en: {
+      subject: `A website for ${sampleProspect.entreprise} in 2 weeks?`,
+      body:
+`Hi ${sampleProspect.contact},
+
+Walking past ${sampleProspect.entreprise} in ${sampleProspect.city}, I noticed you don't have a website yet.
+
+At ${sender.company}, we deliver ${service.toLowerCase()} + online ordering + Google Maps SEO for ${sampleProspect.city} businesses, in 2 weeks. Result: +30% new customers within the first month.
+
+Do you have 10 minutes this week to discuss it?`,
+    },
+  }
+  const draft = sampleBody[lang] ?? sampleBody.fr
+
+  const html = buildOutboundEmailHtml({
+    bodyText: draft.body,
+    sender: {
+      name:     sender.name,
+      role:     sender.role,
+      company:  sender.company,
+      email:    sender.email,
+      phones:   sender.phones,
+      website:  sender.website,
+      address:  sender.address,
+      logo_url: sender.logo_url,
+    },
+    prospectEmail: sampleProspect.email,
+  })
+
+  res.json({
+    subject: draft.subject,
+    body:    draft.body,
+    html,
+    sender,
+    sample:  sampleProspect,
+    lang,
+    service,
+  })
+})
+
+/* Trigger manuel — "Lancer maintenant". Bypass rate limit car protégé par RBAC
+   admin/manager + un seul run "running" à la fois par tenant (skip côté orchestrator). */
+router.post('/autopilot/run-now', async (req: Request, res: Response) => {
+  if (!canManageAll(roleOf(req))) return res.status(403).json({ error: 'Permissions insuffisantes' })
+  try {
+    /* Vérifie qu'une config existe et est activable — enabled=false autorisé
+       (l'admin peut tester avant d'activer). */
+    const cfg = await tenantQueryOne<any>(req.user!.tenantId,
+      `SELECT id FROM outbound_autopilot_config WHERE tenant_id = $1 LIMIT 1`, [req.user!.tenantId])
+    if (!cfg) return res.status(400).json({ error: 'Configure d\'abord Autopilot' })
+
+    /* On lance en fire-and-forget — le run peut durer plusieurs minutes,
+       la réponse HTTP doit revenir immédiatement. Le client suit via /runs. */
+    const promise = runAutopilotForTenantId(pool, req.user!.tenantId)
+      .catch(e => logger.error('[autopilot run-now]', e?.message))
+
+    /* On tente d'attendre 500ms pour récupérer le run_id (créé quasi-instantanément) */
+    const result = await Promise.race([
+      promise,
+      new Promise<{ run_id?: string }>(r => setTimeout(() => r({}), 500)),
+    ])
+    res.status(202).json({ started: true, run_id: (result as any)?.run_id ?? null })
+  } catch (e: any) {
+    logger.error('[autopilot POST run-now]', e?.message)
+    res.status(500).json({ error: e?.message ?? 'Erreur serveur' })
   }
 })
 

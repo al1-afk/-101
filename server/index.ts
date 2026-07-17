@@ -16,8 +16,10 @@ import vehiclesRoutes from './routes/vehicles'
 import financeAiRoutes from './routes/financeAi'
 import aiRoutes from './routes/ai'
 import publicLeadsRoutes from './routes/publicLeads'
+import emailTrackingPublicRoutes from './routes/emailTrackingPublic'
 import teamRoutes      from './routes/team'
 import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib/expiryReminderScheduler'
+import { startAutopilotScheduler } from './lib/outboundAutopilot'
 import mySpaceRoutes   from './routes/mySpace'
 import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
@@ -157,6 +159,7 @@ app.use('/api/vehicles', vehiclesRoutes)
 app.use('/api/finance-ai', financeAiRoutes)
 app.use('/api/ai',        aiRoutes)
 app.use('/api/public',    publicLeadsRoutes)
+app.use('/api/public',    emailTrackingPublicRoutes)
 app.use('/api/team',      teamRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
@@ -208,4 +211,6 @@ app.listen(PORT, () => {
   console.log(`\n NEXT GITAL API  →  http://localhost:${PORT}`)
   /* Démarre le scheduler de rappels d'expiration (domaines/hébergements) */
   startExpiryReminderScheduler(pool)
+  /* Démarre l'autopilot Outbound (check chaque heure les tenants dont run_hour = maintenant) */
+  startAutopilotScheduler(pool)
 })

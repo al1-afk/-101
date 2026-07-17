@@ -16,13 +16,25 @@ export interface OutboundEmailOpts {
     role?:     string
     company:   string
     email:     string
+    /** Téléphone principal (rétro-compat). Ignoré si `phones` fourni. */
     phone?:    string
+    /** Liste complète des téléphones — passe outre `phone`. */
+    phones?:   string[]
     website?:  string
     logo_url?: string
+    /** Adresse postale multi-lignes (chaque saut de ligne devient un <br>). */
+    address?:  string
   }
   unsubscribeUrl?: string
   /** Adresse envoyée pour le token unique dans le lien unsubscribe. */
   prospectEmail?: string
+  /** Tracking — pixel d'ouverture + wrap des liens dans le body.
+   *  Si absent, l'email est envoyé sans tracking (rétro-compat). */
+  tracking?: {
+    openPixelUrl: string
+    /** Fonction qui reçoit une URL trouvée dans le body et renvoie l'URL wrappée. */
+    wrapClickUrl: (originalUrl: string) => string
+  }
 }
 
 const BRAND_COLOR = '#4F46E5'  /* indigo-600 — cohérent avec le reste de l'app */
@@ -31,10 +43,24 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function paragraphs(text: string): string {
+/** Détecte les URLs http(s) dans un paragraphe et retourne le HTML avec des <a>.
+ *  Optionnellement wrappe chaque URL via wrap(originalUrl) → URL de tracking. */
+const URL_RE = /\bhttps?:\/\/[^\s<>"'()]+/g
+function linkifyParagraph(escaped: string, wrap?: (u: string) => string): string {
+  return escaped.replace(URL_RE, (u) => {
+    const href = wrap ? wrap(u) : u
+    return `<a href="${href}" style="color:${BRAND_COLOR};text-decoration:underline;">${u}</a>`
+  })
+}
+
+function paragraphs(text: string, wrap?: (u: string) => string): string {
   return text
     .split(/\n\n+/)
-    .map(p => `<p style="margin:0 0 16px;line-height:1.6;color:#374151;font-size:15px;">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .map(p => {
+      const escaped = escapeHtml(p).replace(/\n/g, '<br>')
+      const linked  = linkifyParagraph(escaped, wrap)
+      return `<p style="margin:0 0 16px;line-height:1.6;color:#374151;font-size:15px;">${linked}</p>`
+    })
     .join('')
 }
 
@@ -49,9 +75,12 @@ export function buildOutboundEmailHtml(opts: OutboundEmailOpts): string {
     : `<div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,${BRAND_COLOR},#7C3AED);color:#ffffff;font-weight:700;font-size:16px;line-height:40px;text-align:center;">${escapeHtml(initials)}</div>`
 
   const contactRows: string[] = []
-  if (sender.phone) {
+  const phones = (sender.phones?.length ? sender.phones : (sender.phone ? [sender.phone] : []))
+    .filter(p => !!p?.trim())
+  for (const p of phones) {
+    const tel = p.replace(/[^\d+]/g, '')
     contactRows.push(
-      `<a href="tel:${escapeHtml(sender.phone)}" style="color:#6B7280;text-decoration:none;font-size:13px;">📞 ${escapeHtml(sender.phone)}</a>`
+      `<a href="tel:${escapeHtml(tel)}" style="color:#6B7280;text-decoration:none;font-size:13px;">📞 ${escapeHtml(p)}</a>`
     )
   }
   contactRows.push(
@@ -64,6 +93,15 @@ export function buildOutboundEmailHtml(opts: OutboundEmailOpts): string {
       `<a href="${escapeHtml(url)}" style="color:${BRAND_COLOR};text-decoration:none;font-size:13px;font-weight:600;">🌐 ${escapeHtml(display)}</a>`
     )
   }
+
+  const addressBlock = sender.address?.trim()
+    ? `<div style="margin-top:12px;padding-top:12px;border-top:1px dashed #E5E7EB;">
+         <div style="font-size:12px;color:#6B7280;line-height:1.55;">
+           <span style="display:inline-block;vertical-align:top;margin-right:6px;">📍</span>
+           <span style="display:inline-block;vertical-align:top;">${escapeHtml(sender.address.trim()).replace(/\n/g, '<br>')}</span>
+         </div>
+       </div>`
+    : ''
 
   const unsubBlock = unsubscribeUrl
     ? `<p style="margin:12px 0 0;font-size:11px;color:#9CA3AF;line-height:1.5;">
@@ -103,7 +141,7 @@ export function buildOutboundEmailHtml(opts: OutboundEmailOpts): string {
           <!-- Body -->
           <tr>
             <td style="padding:24px 32px 8px;">
-              ${paragraphs(opts.bodyText)}
+              ${paragraphs(opts.bodyText, opts.tracking?.wrapClickUrl)}
             </td>
           </tr>
 
@@ -118,6 +156,7 @@ export function buildOutboundEmailHtml(opts: OutboundEmailOpts): string {
                     <div style="margin-top:10px;">
                       ${contactRows.map(r => `<div style="margin-bottom:4px;">${r}</div>`).join('')}
                     </div>
+                    ${addressBlock}
                   </td>
                 </tr>
               </table>
@@ -138,6 +177,9 @@ export function buildOutboundEmailHtml(opts: OutboundEmailOpts): string {
       </td>
     </tr>
   </table>
+  ${opts.tracking?.openPixelUrl
+    ? `<img src="${escapeHtml(opts.tracking.openPixelUrl)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;opacity:0.01;">`
+    : ''}
 </body>
 </html>`
 }

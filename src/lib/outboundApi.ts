@@ -361,4 +361,127 @@ export const outboundApi = {
   sendProspectWhatsApp: (id: string, data: { template_id: string; variables?: string[] }) =>
     api.post<{ success: boolean; wamid: string; to: string }>(
       `/api/outbound/prospects/${id}/send-whatsapp`, data),
+
+  /* ── AUTOPILOT ─────────────────────────────────────────────── */
+  autopilotGetConfig:   () => api.get<AutopilotConfig>('/api/outbound/autopilot/config'),
+  autopilotSaveConfig:  (data: Partial<AutopilotConfig>) =>
+    api.patch<AutopilotConfig>('/api/outbound/autopilot/config', data),
+  autopilotListRuns:    (limit = 20) =>
+    api.get<AutopilotRunSummary[]>(`/api/outbound/autopilot/runs?limit=${limit}`),
+  autopilotGetRun:      (id: string) =>
+    api.get<AutopilotRunDetail>(`/api/outbound/autopilot/runs/${id}`),
+  autopilotRunNow:      () =>
+    api.post<{ started: true; run_id: string | null }>('/api/outbound/autopilot/run-now', {}),
+
+  autopilotEmailPreview: (params: { lang?: 'fr'|'ar'|'en'; service?: string; company?: string; contact?: string; city?: string; to?: string }) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== '') as [string, string][]
+    ).toString()
+    return api.get<AutopilotEmailPreview>(`/api/outbound/autopilot/email-preview${qs ? '?' + qs : ''}`)
+  },
+
+  /* ── TRACKING ─────────────────────────────────────────────── */
+  trackingStats: () => api.get<TrackingStats>('/api/outbound/tracking/stats'),
+  trackingProspectEvents: (id: string) =>
+    api.get<TrackingEvent[]>(`/api/outbound/tracking/prospects/${id}/events`),
+}
+
+/* ─── AUTOPILOT types ─────────────────────────────────────────── */
+export interface AutopilotConfig {
+  tenant_id: string
+  enabled: boolean
+  sector_id: string | null
+  keyword: string | null
+  cities: string[]
+  daily_prospect_limit: number
+  daily_search_limit: number
+  send_interval_seconds: number
+  send_window_start: string
+  send_window_end: string
+  run_hour_utc: number
+  channel_email: boolean
+  channel_whatsapp: boolean
+  language: 'fr' | 'ar' | 'en'
+  tone: 'professionnel' | 'chaleureux' | 'direct'
+  service_focus: string | null
+  whatsapp_template_id: string | null
+  require_email: boolean
+  require_website: boolean
+  require_phone: boolean
+  respect_ne_plus_contacter: boolean
+  default_owner_id: string | null
+  last_run_at: string | null
+  last_run_status: 'ok' | 'error' | 'partial' | null
+  default_cities_suggestion?: string[]
+  _uninitialized?: boolean
+}
+
+export interface AutopilotRunSummary {
+  id: string
+  started_at: string
+  finished_at: string | null
+  status: 'running' | 'ok' | 'partial' | 'error' | 'cancelled'
+  keyword: string | null
+  cities: string[]
+  channels: string[]
+  searches_done: number
+  places_found: number
+  prospects_created: number
+  prospects_skipped: number
+  emails_sent: number
+  emails_failed: number
+  whatsapp_sent: number
+  whatsapp_failed: number
+  /* Tracking (migration 072) */
+  emails_opened?: number
+  emails_clicked?: number
+  emails_bounced?: number
+  emails_replied?: number
+  error_message: string | null
+}
+
+export interface TrackingStats {
+  global: {
+    sent:    number
+    opened:  number
+    clicked: number
+    bounced: number
+    replied: number
+  }
+  top_prospects: Array<{
+    id: string
+    entreprise: string
+    ville: string | null
+    email: string | null
+    email_opened_at:    string | null
+    email_opened_count: number
+    email_clicked_at:   string | null
+    email_clicked_count: number
+    email_bounced:      boolean
+    email_replied_at:   string | null
+  }>
+}
+
+export interface TrackingEvent {
+  id: string
+  event_type: 'sent' | 'opened' | 'clicked' | 'bounced' | 'replied'
+  subject:       string | null
+  target_url:    string | null
+  bounce_reason: string | null
+  user_agent:    string | null
+  created_at:    string
+}
+
+export interface AutopilotRunDetail extends AutopilotRunSummary {
+  logs: Array<{ ts: string; level: 'info' | 'warn' | 'error'; msg: string }>
+}
+
+export interface AutopilotEmailPreview {
+  subject: string
+  body:    string
+  html:    string
+  sender:  { name: string; role: string; company: string; email: string; phone: string; website: string; logo_url?: string }
+  sample:  { entreprise: string; contact: string; city: string; email: string }
+  lang:    'fr' | 'ar' | 'en'
+  service: string
 }

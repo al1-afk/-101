@@ -102,6 +102,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     title: 'Outbound Marketing',
     items: [
       { label: 'Tableau de bord',    href: '/outbound',              icon: LayoutGrid,     badge: 'New', module: 'outbound' },
+      { label: 'Autopilot',           href: '/outbound/autopilot',    icon: Bot,            badge: 'Auto', module: 'outbound' },
+      { label: 'Tracking email',      href: '/outbound/tracking',     icon: Activity,       badge: 'Live', module: 'outbound' },
       { label: 'Prospecter (Google)',href: '/outbound/enrich',       icon: MapPin,         badge: 'IA', module: 'outbound' },
       { label: 'Prospects Outbound', href: '/outbound/prospects',    icon: Radar,          module: 'outbound-prospects' },
       { label: 'Pipeline',           href: '/outbound/pipeline',     icon: Route,          module: 'outbound-pipeline' },
