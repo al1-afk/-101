@@ -4,13 +4,14 @@ import { currentTenantIdForCache } from '@/lib/authToken'
 import { toast } from 'sonner'
 
 export interface Depense {
-  id:           string
-  created_at:   string
-  description:  string
-  montant:      number
-  categorie:    string
-  type:         'personnel' | 'business'
-  date_depense: string
+  id:              string
+  created_at:      string
+  description:     string
+  montant:         number
+  categorie:       string
+  type:            'personnel' | 'business'
+  date_depense:    string
+  bank_account_id: string | null
 }
 
 const KEY = 'depenses'

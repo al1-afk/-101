@@ -1,9 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Trash2, Loader2 } from 'lucide-react'
 import { useDepenses, useCreateDepense, useDeleteDepense } from '@/hooks/useDepenses'
+import { useBankAccounts } from '@/hooks/useBankAccounts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatDate } from '@/lib/utils'
 import {
@@ -11,6 +13,7 @@ import {
 } from '@/components/ui/DateRangeFilter'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { depensesSchema } from '@/lib/importExportSchemas'
+import { BankAccountsBanner } from '@/components/finance/BankAccountsBanner'
 
 const CATEGORIES = [
   { key: 'transport', label: 'Transport', emoji: '🚗' },
@@ -54,6 +57,7 @@ function StatCard({ label, emoji, value, color, sub }: { label: string; emoji: s
 
 export default function Depenses() {
   const { data: depenses = [], isLoading } = useDepenses()
+  const { data: bankAccounts = [] } = useBankAccounts()
   const createDepense = useCreateDepense()
   const deleteDepense = useDeleteDepense()
 
@@ -68,13 +72,33 @@ export default function Depenses() {
     categorie: 'autre',
     type: 'personnel' as 'personnel' | 'business',
     description: '',
+    bank_account_id: '' as string,
   })
+
+  /* Auto-sélectionne le premier compte quand la liste arrive, pour éviter
+     que l'utilisateur enregistre une dépense sans compte assigné. */
+  const activeAccounts = useMemo(() => bankAccounts.filter(a => a.actif !== false), [bankAccounts])
+  useEffect(() => {
+    if (activeAccounts.length > 0 && !form.bank_account_id) {
+      setForm(p => ({ ...p, bank_account_id: activeAccounts[0].id }))
+    }
+  }, [activeAccounts, form.bank_account_id])
+
+  const accountsById = useMemo(() => {
+    const m = new Map<string, typeof bankAccounts[number]>()
+    bankAccounts.forEach(a => m.set(a.id, a))
+    return m
+  }, [bankAccounts])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const montant = Number(form.montant)
     if (!montant || montant <= 0) return
-    await createDepense.mutateAsync({ ...form, montant })
+    await createDepense.mutateAsync({
+      ...form,
+      montant,
+      bank_account_id: form.bank_account_id || null,
+    } as any)
     setForm(p => ({ ...p, montant: '', description: '' }))
   }
 
@@ -175,6 +199,9 @@ export default function Depenses() {
         </div>
       </div>
 
+      {/* Comptes bancaires — soldes temps réel */}
+      <BankAccountsBanner />
+
       {/* Form + Stats side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Add expense form */}
@@ -209,6 +236,32 @@ export default function Depenses() {
                 value={form.date_depense}
                 onChange={e => setForm(p => ({ ...p, date_depense: e.target.value }))}
               />
+            </div>
+
+            {/* Compte source */}
+            <div className="space-y-1.5">
+              <label className="form-label">🏦 Payé depuis</label>
+              {activeAccounts.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">
+                  Aucun compte enregistré — ajoute un compte dans la section "Mes comptes" ci-dessus pour lier la dépense.
+                </p>
+              ) : (
+                <Select
+                  value={form.bank_account_id}
+                  onValueChange={v => setForm(p => ({ ...p, bank_account_id: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir un compte" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeAccounts.map(a => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.icon || '🏦'} {a.nom}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             {/* Category */}
@@ -473,6 +526,7 @@ export default function Depenses() {
             <tr>
               <th>Note</th>
               <th>Catégorie</th>
+              <th>Compte</th>
               <th>Type</th>
               <th>Date</th>
               <th>Montant</th>
@@ -482,19 +536,20 @@ export default function Depenses() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={6} className="text-center py-12">
+                <td colSpan={7} className="text-center py-12">
                   <Loader2 className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-400 mx-auto" />
                 </td>
               </tr>
             ) : (tableDeps ?? monthData.monthDeps).length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-12 text-muted-foreground text-sm">
+                <td colSpan={7} className="text-center py-12 text-muted-foreground text-sm">
                   {tableDeps === null ? 'Aucune dépense ce mois' : 'Aucune dépense sur cette période'}
                 </td>
               </tr>
             ) : (
               (tableDeps ?? monthData.monthDeps).map(d => {
                 const cat = CATEGORIES.find(c => c.key === d.categorie)
+                const acc = d.bank_account_id ? accountsById.get(d.bank_account_id) : null
                 return (
                   <tr key={d.id} className="table-row group">
                     <td className="text-foreground font-medium">{d.description || '—'}</td>
@@ -503,6 +558,23 @@ export default function Depenses() {
                         <span>{cat?.emoji ?? '🎯'}</span>
                         <span className="text-muted-foreground text-sm">{cat?.label ?? d.categorie}</span>
                       </span>
+                    </td>
+                    <td>
+                      {acc ? (
+                        <span
+                          className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border"
+                          style={{
+                            borderColor: (acc.couleur ?? '#3b82f6') + '55',
+                            color: acc.couleur ?? '#3b82f6',
+                            backgroundColor: (acc.couleur ?? '#3b82f6') + '11',
+                          }}
+                        >
+                          <span>{acc.icon || '🏦'}</span>
+                          <span className="truncate max-w-[9rem]">{acc.nom}</span>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
                     </td>
                     <td>
                       <span
