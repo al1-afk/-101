@@ -224,22 +224,34 @@ export const memberApi = {
 }
 
 /* ── Auth API ────────────────────────────────────────────────── */
-export const authApi = {
-  /* Step 1: validate password — server emails a 6-digit code and returns
-     { needsVerification: true, email }. Tokens are NOT issued here. */
-  login: (email: string, password: string, tenantSlug?: string) =>
-    api.publicPost<{ needsVerification: true; email: string }>(
-      '/api/auth/login', { email, password, tenantSlug }
-    ),
+/* Réponse possible de /login :
+   - trusted device valide → { token, tenantSlug, tenantId, role, trustedDevice: true }
+   - 2FA requis            → { needsVerification: true, challengeId, method, email }
+*/
+export type LoginResult =
+  | { token: string; tenantSlug: string; tenantId: string; role: string; trustedDevice?: boolean }
+  | { needsVerification: true; challengeId: string; method: 'email' | 'admin_manual' | 'admin_approval'; email: string }
 
-  /* Step 2: submit the emailed code → tokens issued. */
-  verifyLogin: (email: string, code: string, tenantSlug?: string) =>
-    api.publicPost<{ token: string; tenantSlug: string; tenantId: string; role: string }>(
-      '/api/auth/verify-login', { email, code, tenantSlug }
+export const authApi = {
+  login: (email: string, password: string, tenantSlug?: string) =>
+    api.publicPost<LoginResult>('/api/auth/login', { email, password, tenantSlug }),
+
+  /* Verify : code obligatoire pour email + admin_manual, ignoré pour admin_approval.
+     Serveur pose un cookie httpOnly "gestiq_device" pour skipper le 2FA la prochaine fois. */
+  verifyLogin: (params: { email?: string; challengeId?: string; code?: string; tenantSlug?: string; rememberDevice?: boolean }) =>
+    api.publicPost<
+      | { token: string; tenantSlug: string; tenantId: string; role: string }
+      | { waitingForApproval: true; message: string; status: string }
+    >('/api/auth/verify-login', params),
+
+  /* Polling utilisé en mode admin_approval : renvoie {status, method}. */
+  twoFactorStatus: (challengeId: string) =>
+    api.publicGet<{ status: 'pending' | 'approved' | 'rejected' | 'consumed' | 'expired'; method: string; expiresAt: string }>(
+      `/api/auth/2fa/status?challengeId=${encodeURIComponent(challengeId)}`
     ),
 
   resendLoginCode: (email: string) =>
-    api.publicPost<{ success: boolean }>('/api/auth/resend-login-code', { email }),
+    api.publicPost<{ success: boolean; adminMode?: boolean }>('/api/auth/resend-login-code', { email }),
 
   register: (data: { email: string; password: string; name: string; tenantSlug: string; tenantName: string }) =>
     api.publicPost<{ token: string; tenantSlug: string; tenantId: string }>(
@@ -260,6 +272,37 @@ export const authApi = {
 
   /* Best-effort server-side logout: revokes refresh token + clears cookie */
   logout: () => api.post<{ success: boolean }>('/api/auth/logout', {}).catch(() => ({ success: false })),
+}
+
+/* ── Admin 2FA API ──────────────────────────────────────────── */
+export type Pending2FA = {
+  id: string; email: string; method: 'email' | 'admin_manual' | 'admin_approval'
+  status: string; ip_address: string; user_agent: string
+  created_at: string; expires_at: string; has_code: boolean
+  user_id: string; user_name: string
+}
+export type LoginHistoryRow = {
+  id: string; email: string; method: string; event: string; success: boolean
+  ip_address: string; user_agent: string; created_at: string
+  metadata: Record<string, any>; user_name: string | null
+}
+export type AdminUser = {
+  id: string; email: string; name: string; role: string
+  twofa_mode: 'email' | 'admin_manual' | 'admin_approval'
+  is_active: boolean; trusted_devices_count: number
+}
+
+export const admin2faApi = {
+  pending:   () => api.get<Pending2FA[]>('/api/admin/2fa/pending'),
+  history:   (limit = 100) => api.get<LoginHistoryRow[]>(`/api/admin/2fa/history?limit=${limit}`),
+  approve:   (id: string) => api.post<{ success: true; method: string }>(`/api/admin/2fa/${id}/approve`, {}),
+  reject:    (id: string) => api.post<{ success: true }>(`/api/admin/2fa/${id}/reject`, {}),
+  generateCode: (id: string) => api.post<{ code: string; expiresInMinutes: number }>(`/api/admin/2fa/${id}/generate-code`, {}),
+  users:     () => api.get<AdminUser[]>('/api/admin/2fa/users'),
+  setMode:   (userId: string, mode: 'email' | 'admin_manual' | 'admin_approval') =>
+    api.patch<{ success: true; mode: string }>(`/api/admin/2fa/users/${userId}/twofa-mode`, { mode }),
+  revokeAllDevices: (userId: string) =>
+    api.delete<{ success: true; revoked: number }>(`/api/admin/2fa/users/${userId}/devices`),
 }
 
 /* ── Tenant API ──────────────────────────────────────────────── */

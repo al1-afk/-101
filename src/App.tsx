@@ -52,6 +52,7 @@ const ProjetDetail   = lazy(() => import('@/pages/ProjetDetail'))
 const Calendrier     = lazy(() => import('@/pages/Calendrier'))
 const Planificateur  = lazy(() => import('@/pages/Planificateur'))
 const Parametres       = lazy(() => import('@/pages/Parametres'))
+const AdminSecurity    = lazy(() => import('@/pages/AdminSecurity'))
 const Automatisations     = lazy(() => import('@/pages/Automatisations'))
 const AbonnementsClients  = lazy(() => import('@/pages/AbonnementsClients'))
 const Integrations        = lazy(() => import('@/pages/Integrations'))
@@ -198,6 +199,7 @@ export default function App() {
               <Route path="activite"                   element={<ActivityLogs />} />
               <Route path="conseiller-ia"              element={<ConseillerIA />} />
               <Route path="parametres"                 element={<Parametres />} />
+              <Route path="securite"                   element={<AdminSecurity />} />
               <Route path="automatisations"            element={<Automatisations />} />
               <Route path="rapports"                   element={<Rapports />} />
               <Route path="sop"                        element={<SOP />} />

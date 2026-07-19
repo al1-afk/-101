@@ -13,6 +13,109 @@ import { logger } from '../lib/logger'
 
 const router = Router()
 
+/* ── Trusted device (skip 2FA on already-verified browsers) ─────
+   Cookie httpOnly qui contient un secret random 32 octets. Seul le
+   SHA-256 est stocké en DB — même en cas de fuite DB, aucun cookie
+   ne peut être forgé. Durée 90 jours (alignée sur refresh_token). */
+const DEVICE_COOKIE = 'gestiq_device'
+const DEVICE_TTL_MS = 90 * 24 * 60 * 60 * 1000
+const cookieBaseOpts = () => ({
+  httpOnly: true,
+  secure:   process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  path:     '/',
+})
+
+function getDeviceHash(req: Request): string | null {
+  const raw = req.cookies?.[DEVICE_COOKIE]
+  if (!raw || typeof raw !== 'string' || raw.length < 32) return null
+  return hashToken(raw)
+}
+
+async function findTrustedDevice(deviceHash: string, userId: string) {
+  return queryOne<{ id: string }>(
+    `SELECT id FROM trusted_devices
+      WHERE user_id = $1 AND device_hash = $2
+        AND revoked_at IS NULL AND expires_at > NOW()`,
+    [userId, deviceHash]
+  )
+}
+
+async function issueTrustedDevice(
+  res: Response, userId: string, tenantId: string,
+  ip: string, ua: string, label?: string,
+): Promise<string> {
+  const raw  = randomToken()
+  const hash = hashToken(raw)
+  await query(
+    `INSERT INTO trusted_devices (user_id, tenant_id, device_hash, label, user_agent, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6::inet)
+     ON CONFLICT (user_id, device_hash) WHERE revoked_at IS NULL
+     DO UPDATE SET last_used_at = NOW(), expires_at = NOW() + INTERVAL '90 days'`,
+    [userId, tenantId, hash, label ?? null, ua, ip || '0.0.0.0']
+  )
+  res.cookie(DEVICE_COOKIE, raw, { ...cookieBaseOpts(), maxAge: DEVICE_TTL_MS })
+  return hash
+}
+
+async function touchTrustedDevice(deviceHash: string, userId: string, ip: string, ua: string) {
+  await query(
+    `UPDATE trusted_devices
+        SET last_used_at = NOW(),
+            ip_address   = $3::inet,
+            user_agent   = COALESCE($4, user_agent)
+      WHERE user_id = $1 AND device_hash = $2 AND revoked_at IS NULL`,
+    [userId, deviceHash, ip || '0.0.0.0', ua]
+  )
+}
+
+/* ── Audit login history — jamais de code en clair ─────────────── */
+async function logLogin(row: {
+  userId:      string | null
+  tenantId:    string | null
+  email:       string
+  ip:          string
+  ua:          string
+  deviceHash?: string | null
+  method:      'password' | 'email' | 'admin_manual' | 'admin_approval' | 'trusted_device'
+  event:       'password_ok' | 'challenge_sent' | 'verify_success' | 'verify_failed' | 'approved' | 'rejected' | 'trusted_skip'
+  success:     boolean
+  challengeId?: string | null
+  metadata?:   Record<string, any>
+}) {
+  try {
+    await query(
+      `INSERT INTO login_history
+         (user_id, tenant_id, email, ip_address, user_agent, device_hash,
+          method, event, success, challenge_id, metadata)
+       VALUES ($1, $2, $3, $4::inet, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+      [
+        row.userId, row.tenantId, row.email, row.ip || '0.0.0.0', row.ua,
+        row.deviceHash ?? null, row.method, row.event, row.success,
+        row.challengeId ?? null, JSON.stringify(row.metadata ?? {}),
+      ]
+    )
+  } catch (e: any) {
+    logger.error('[login_history]', e?.message)
+  }
+}
+
+function labelFromUA(ua: string): string {
+  if (!ua) return 'Appareil inconnu'
+  let browser = 'Navigateur'
+  if (/Edg\//.test(ua))      browser = 'Edge'
+  else if (/Chrome/.test(ua)) browser = 'Chrome'
+  else if (/Safari/.test(ua)) browser = 'Safari'
+  else if (/Firefox/.test(ua)) browser = 'Firefox'
+  let os = 'Ordinateur'
+  if (/iPhone|iPad|iOS/.test(ua))         os = 'iOS'
+  else if (/Android/.test(ua))             os = 'Android'
+  else if (/Windows/.test(ua))             os = 'Windows'
+  else if (/Mac OS X|Macintosh/.test(ua))  os = 'macOS'
+  else if (/Linux/.test(ua))               os = 'Linux'
+  return `${browser} · ${os}`
+}
+
 async function issueTokenPair(
   res: Response,
   user: { id: string; email: string; role: string; tenant_id: string; slug: string },
@@ -110,14 +213,17 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Email et mot de passe requis' })
   }
 
+  const ip = req.ip ?? '0.0.0.0'
+  const ua = String(req.headers['user-agent'] ?? '')
+
   try {
-    /* Brute-force: count recent failures from this IP + email */
+    /* Brute-force : compte les échecs récents (IP OU email). */
     const recentFails = await queryOne<{ count: string }>(
       `SELECT COUNT(*)::int as count FROM login_attempts
        WHERE (email = $1 OR ip_address = $2::inet)
          AND success = false
          AND attempted_at > NOW() - INTERVAL '15 minutes'`,
-      [email, req.ip ?? '0.0.0.0']
+      [email, ip]
     )
     if (Number(recentFails?.count ?? 0) >= 10) {
       return res.status(429).json({
@@ -125,16 +231,20 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       })
     }
 
-    const user = await queryOne<{ id: string; password_hash: string; name: string; is_active: boolean; email_verified_at: string | null }>(
-      `SELECT id, password_hash, name, is_active, email_verified_at FROM users WHERE email = $1`, [email]
+    const user = await queryOne<{
+      id: string; password_hash: string; name: string;
+      is_active: boolean; twofa_mode: string;
+    }>(
+      `SELECT id, password_hash, name, is_active, twofa_mode
+         FROM users WHERE email = $1`,
+      [email]
     )
 
     const valid = user ? await bcrypt.compare(password, user.password_hash) : false
 
-    /* Always log attempt */
     await query(
       `INSERT INTO login_attempts (email, ip_address, success) VALUES ($1, $2::inet, $3)`,
-      [email, req.ip ?? '0.0.0.0', valid]
+      [email, ip, valid]
     )
 
     if (!user || !valid) {
@@ -144,160 +254,301 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Compte désactivé' })
     }
 
-    let memberRow: any
-    if (tenantSlug) {
-      memberRow = await queryOne(
-        `SELECT tu.tenant_id, tu.role, t.slug
-         FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
-         WHERE tu.user_id = $1 AND t.slug = $2 AND tu.status = 'active'`,
-        [user.id, tenantSlug]
-      )
-    } else {
-      memberRow = await queryOne(
-        `SELECT tu.tenant_id, tu.role, t.slug
-         FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
-         WHERE tu.user_id = $1 AND tu.status = 'active'
-         ORDER BY tu.invited_at LIMIT 1`,
-        [user.id]
-      )
-    }
+    const memberRow = tenantSlug
+      ? await queryOne<{ tenant_id: string; role: string; slug: string }>(
+          `SELECT tu.tenant_id, tu.role, t.slug
+             FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
+            WHERE tu.user_id = $1 AND t.slug = $2 AND tu.status = 'active'`,
+          [user.id, tenantSlug]
+        )
+      : await queryOne<{ tenant_id: string; role: string; slug: string }>(
+          `SELECT tu.tenant_id, tu.role, t.slug
+             FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
+            WHERE tu.user_id = $1 AND tu.status = 'active'
+            ORDER BY tu.invited_at LIMIT 1`,
+          [user.id]
+        )
 
     if (!memberRow) return res.status(403).json({ error: 'Accès refusé' })
 
-    /* 1ʳᵉ connexion (email jamais vérifié) → émet un code par email
-       et exige /verify-login avant d'émettre les tokens. */
-    if (!user.email_verified_at) {
-      /* Invalide tout code non consommé pour cet utilisateur */
-      await query(
-        `UPDATE login_verification_codes SET used = true
-         WHERE user_id = $1 AND used = false`,
-        [user.id]
-      )
-      const code     = String(Math.floor(100000 + Math.random() * 900000))
-      const codeHash = await bcrypt.hash(code, 10)
-      await query(
-        `INSERT INTO login_verification_codes
-           (user_id, tenant_id, email, code_hash, expires_at, ip_address, user_agent)
-         VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes', $5::inet, $6)`,
-        [user.id, memberRow.tenant_id, email, codeHash, req.ip ?? '0.0.0.0', req.headers['user-agent'] ?? '']
-      )
-      try {
-        const tpl = loginCodeEmail(code)
-        await sendEmail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text })
-      } catch (e: any) {
-        logger.error('[login:first-verify-email]', e?.message ?? e)
+    await logLogin({
+      userId: user.id, tenantId: memberRow.tenant_id, email,
+      ip, ua, method: 'password', event: 'password_ok', success: true,
+    })
+
+    /* ── SHORT-CIRCUIT 2FA sur appareil déjà validé ─────────────
+       Si le cookie `gestiq_device` correspond à un trusted_devices
+       actif pour ce user → session ouverte directement. */
+    const deviceHash = getDeviceHash(req)
+    if (deviceHash) {
+      const trusted = await findTrustedDevice(deviceHash, user.id)
+      if (trusted) {
+        await touchTrustedDevice(deviceHash, user.id, ip, ua)
+        const { accessToken, tenantSlug: s } = await issueTokenPair(
+          res,
+          { id: user.id, email, role: memberRow.role, tenant_id: memberRow.tenant_id, slug: memberRow.slug },
+          ip, ua,
+        )
+        await logLogin({
+          userId: user.id, tenantId: memberRow.tenant_id, email,
+          ip, ua, deviceHash, method: 'trusted_device',
+          event: 'trusted_skip', success: true,
+        })
+        return res.json({
+          token: accessToken, tenantSlug: s,
+          tenantId: memberRow.tenant_id, role: memberRow.role,
+          trustedDevice: true,
+        })
       }
-      return res.json({ needsVerification: true, email })
     }
 
-    const { accessToken, tenantSlug: s } = await issueTokenPair(
-      res,
-      { id: user.id, email, role: memberRow.role, tenant_id: memberRow.tenant_id, slug: memberRow.slug },
-      req.ip ?? '',
-      req.headers['user-agent'] ?? '',
+    /* ── 2FA obligatoire ──────────────────────────────────────── */
+    /* Invalide les challenges pending pour ce user (un seul actif). */
+    await query(
+      `UPDATE login_verification_codes
+          SET status = 'expired'
+        WHERE user_id = $1 AND status = 'pending'`,
+      [user.id]
     )
 
-    res.json({ token: accessToken, tenantSlug: s, tenantId: memberRow.tenant_id, role: memberRow.role })
+    const method = (['email','admin_manual','admin_approval'] as const)
+      .includes(user.twofa_mode as any) ? user.twofa_mode : 'email'
+
+    let codeHash: string | null = null
+    let clearCode: string | null = null
+    if (method === 'email' || method === 'admin_manual') {
+      /* admin_manual : le code est généré maintenant mais NE SORT PAS
+         du serveur — l'admin le retirera via /admin/2fa/:id/reveal-code
+         (une seule fois). Ici on le pré-calcule pour email uniquement. */
+      if (method === 'email') {
+        clearCode = String(Math.floor(100000 + Math.random() * 900000))
+        codeHash  = await bcrypt.hash(clearCode, 10)
+      }
+    }
+
+    const challenge = await queryOne<{ id: string }>(
+      `INSERT INTO login_verification_codes
+         (user_id, tenant_id, email, code_hash, method, status,
+          expires_at, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, 'pending',
+               NOW() + INTERVAL '10 minutes', $6::inet, $7)
+       RETURNING id`,
+      [user.id, memberRow.tenant_id, email, codeHash, method, ip, ua]
+    )
+
+    if (method === 'email' && clearCode) {
+      try {
+        const tpl = loginCodeEmail(clearCode)
+        await sendEmail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text })
+      } catch (e: any) {
+        logger.error('[login:2fa-email]', e?.message ?? e)
+      }
+    }
+
+    await logLogin({
+      userId: user.id, tenantId: memberRow.tenant_id, email,
+      ip, ua, method, event: 'challenge_sent', success: true,
+      challengeId: challenge?.id ?? null,
+    })
+
+    return res.json({
+      needsVerification: true,
+      challengeId: challenge?.id ?? null,
+      method,
+      email,
+    })
   } catch (err: any) {
     logger.error('[login]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 
-/* ── POST /api/auth/verify-login — Finalise sign-in with the code ─ */
+/* ── POST /api/auth/verify-login — Finalise sign-in with the code ─
+   Fonctionne pour les 3 modes :
+     • email          : body.code obligatoire, bcrypt.compare(code, code_hash)
+     • admin_manual   : idem — admin a communiqué le code hors-ligne
+     • admin_approval : body.code ignoré, on vérifie status='approved'
+*/
 router.post('/verify-login', authLimiter, async (req: Request, res: Response) => {
-  const { email, code, tenantSlug } = req.body
-  if (!email || !code) {
-    return res.status(400).json({ error: 'Email et code requis' })
+  const { email, code, challengeId, tenantSlug, rememberDevice } = req.body
+  if (!email && !challengeId) {
+    return res.status(400).json({ error: 'Email ou challengeId requis' })
   }
 
+  const ip = req.ip ?? '0.0.0.0'
+  const ua = String(req.headers['user-agent'] ?? '')
+
   try {
-    const row = await queryOne<{ id: string; user_id: string; tenant_id: string; code_hash: string; attempts: number }>(
-      `SELECT id, user_id, tenant_id, code_hash, attempts FROM login_verification_codes
-       WHERE email = $1 AND used = false AND expires_at > NOW()
-       ORDER BY created_at DESC LIMIT 1`,
-      [email]
+    const row = await queryOne<{
+      id: string; user_id: string; tenant_id: string;
+      code_hash: string | null; attempts: number;
+      method: string; status: string; expires_at: string;
+    }>(
+      challengeId
+        ? `SELECT id, user_id, tenant_id, code_hash, attempts, method, status, expires_at
+             FROM login_verification_codes
+            WHERE id = $1 LIMIT 1`
+        : `SELECT id, user_id, tenant_id, code_hash, attempts, method, status, expires_at
+             FROM login_verification_codes
+            WHERE email = $1 AND status = 'pending' AND expires_at > NOW()
+            ORDER BY created_at DESC LIMIT 1`,
+      [challengeId ?? email]
     )
 
-    if (!row) {
-      return res.status(400).json({ error: 'Code invalide ou expiré' })
+    if (!row) return res.status(400).json({ error: 'Demande introuvable ou expirée' })
+    if (row.status === 'rejected') return res.status(403).json({ error: 'Connexion refusée par l\'administrateur' })
+    if (row.status === 'consumed') return res.status(400).json({ error: 'Code déjà utilisé' })
+    if (row.status === 'expired' || new Date(row.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'Code expiré, redemandez-en un' })
     }
 
     if (row.attempts >= 5) {
-      await query(`UPDATE login_verification_codes SET used = true WHERE id = $1`, [row.id])
-      return res.status(429).json({ error: 'Trop de tentatives. Reconnectez-vous pour recevoir un nouveau code.' })
+      await query(`UPDATE login_verification_codes SET status = 'expired' WHERE id = $1`, [row.id])
+      await logLogin({
+        userId: row.user_id, tenantId: row.tenant_id, email,
+        ip, ua, method: row.method as any, event: 'verify_failed',
+        success: false, challengeId: row.id,
+        metadata: { reason: 'too_many_attempts' },
+      })
+      return res.status(429).json({ error: 'Trop de tentatives. Reconnectez-vous.' })
     }
 
-    const valid = await bcrypt.compare(String(code), row.code_hash)
-    if (!valid) {
-      await query(
-        `UPDATE login_verification_codes SET attempts = attempts + 1 WHERE id = $1`,
-        [row.id]
-      )
-      return res.status(400).json({ error: 'Code incorrect' })
+    /* Selon le mode, la vérification diffère. */
+    if (row.method === 'admin_approval') {
+      if (row.status !== 'approved') {
+        return res.status(202).json({
+          waitingForApproval: true,
+          message: 'En attente d\'approbation par l\'administrateur.',
+          status:  row.status,
+        })
+      }
+    } else {
+      /* email OU admin_manual : code obligatoire, comparé au hash. */
+      if (!code) return res.status(400).json({ error: 'Code requis' })
+      if (!row.code_hash) {
+        return res.status(400).json({ error: 'Aucun code n\'a encore été généré. Contactez l\'administrateur.' })
+      }
+      const valid = await bcrypt.compare(String(code), row.code_hash)
+      if (!valid) {
+        await query(
+          `UPDATE login_verification_codes SET attempts = attempts + 1 WHERE id = $1`,
+          [row.id]
+        )
+        await logLogin({
+          userId: row.user_id, tenantId: row.tenant_id, email,
+          ip, ua, method: row.method as any, event: 'verify_failed',
+          success: false, challengeId: row.id,
+        })
+        return res.status(400).json({ error: 'Code incorrect' })
+      }
     }
 
-    /* Mark code consumed + user email vérifié (idempotent). */
-    await query(`UPDATE login_verification_codes SET used = true WHERE id = $1`, [row.id])
+    await query(`UPDATE login_verification_codes SET status = 'consumed' WHERE id = $1`, [row.id])
     await query(
       `UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $1`,
       [row.user_id]
     )
 
-    /* Resolve the user + (optional) requested tenant — same logic as /login */
     const memberRow = tenantSlug
       ? await queryOne<{ tenant_id: string; role: string; slug: string }>(
           `SELECT tu.tenant_id, tu.role, t.slug
-           FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
-           WHERE tu.user_id = $1 AND t.slug = $2 AND tu.status = 'active'`,
+             FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
+            WHERE tu.user_id = $1 AND t.slug = $2 AND tu.status = 'active'`,
           [row.user_id, tenantSlug]
         )
       : await queryOne<{ tenant_id: string; role: string; slug: string }>(
           `SELECT tu.tenant_id, tu.role, t.slug
-           FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
-           WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active'
-           LIMIT 1`,
+             FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id
+            WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active'
+            LIMIT 1`,
           [row.user_id, row.tenant_id]
         )
 
     if (!memberRow) return res.status(403).json({ error: 'Accès refusé' })
 
+    /* Marque l'appareil comme trusted sauf si le client demande explicitement
+       le contraire (rememberDevice === false). Par défaut → oui. */
+    let deviceHash: string | null = null
+    if (rememberDevice !== false) {
+      deviceHash = await issueTrustedDevice(
+        res, row.user_id, memberRow.tenant_id, ip, ua, labelFromUA(ua)
+      )
+    }
+
+    const emailForToken = email || (await queryOne<{ email: string }>(
+      `SELECT email FROM users WHERE id = $1`, [row.user_id]
+    ))?.email || ''
+
     const { accessToken, tenantSlug: s } = await issueTokenPair(
       res,
-      { id: row.user_id, email, role: memberRow.role, tenant_id: memberRow.tenant_id, slug: memberRow.slug },
-      req.ip ?? '',
-      req.headers['user-agent'] ?? '',
+      { id: row.user_id, email: emailForToken, role: memberRow.role, tenant_id: memberRow.tenant_id, slug: memberRow.slug },
+      ip, ua,
     )
 
-    res.json({ token: accessToken, tenantSlug: s, tenantId: memberRow.tenant_id, role: memberRow.role })
+    await logLogin({
+      userId: row.user_id, tenantId: memberRow.tenant_id, email: emailForToken,
+      ip, ua, deviceHash, method: row.method as any,
+      event: 'verify_success', success: true, challengeId: row.id,
+    })
+
+    res.json({
+      token: accessToken, tenantSlug: s,
+      tenantId: memberRow.tenant_id, role: memberRow.role,
+    })
   } catch (err: any) {
     logger.error('[verify-login]', err.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 
-/* ── POST /api/auth/resend-login-code — Re-issue a code ─────────── */
+/* ── GET /api/auth/2fa/status — polling pour admin_approval ─────
+   Le client ping cette route toutes les 3-5s pendant qu'il attend
+   l'admin. On renvoie {status, method} et rien d'autre. */
+router.get('/2fa/status', authLimiter, async (req: Request, res: Response) => {
+  const challengeId = String(req.query.challengeId || '')
+  if (!challengeId) return res.status(400).json({ error: 'challengeId requis' })
+  const row = await queryOne<{ status: string; method: string; expires_at: string }>(
+    `SELECT status, method, expires_at FROM login_verification_codes WHERE id = $1`,
+    [challengeId]
+  )
+  if (!row) return res.status(404).json({ error: 'Introuvable' })
+  const expired = new Date(row.expires_at) < new Date()
+  res.json({
+    status: expired && row.status === 'pending' ? 'expired' : row.status,
+    method: row.method,
+    expiresAt: row.expires_at,
+  })
+})
+
+/* ── POST /api/auth/resend-login-code — Ré-émet un code (mode email
+   uniquement — pour admin_manual/admin_approval, il faut passer par
+   l'admin). Rate limit implicite : impossible sans challenge récent. */
 router.post('/resend-login-code', authLimiter, async (req: Request, res: Response) => {
   const { email } = req.body
   if (!email) return res.status(400).json({ error: 'Email requis' })
 
   try {
-    /* Must have a recent (within 30 min) pending code — prevents
-       cold-start abuse of this endpoint without a real login attempt. */
-    const recent = await queryOne<{ user_id: string; tenant_id: string }>(
-      `SELECT user_id, tenant_id FROM login_verification_codes
-       WHERE email = $1 AND created_at > NOW() - INTERVAL '30 minutes'
-       ORDER BY created_at DESC LIMIT 1`,
+    /* Doit y avoir un challenge récent (30 min) pour ce mail — sinon
+       endpoint inutilisable en cold-start (anti-abuse). */
+    const recent = await queryOne<{ user_id: string; tenant_id: string; method: string }>(
+      `SELECT user_id, tenant_id, method FROM login_verification_codes
+        WHERE email = $1 AND created_at > NOW() - INTERVAL '30 minutes'
+        ORDER BY created_at DESC LIMIT 1`,
       [email]
     )
     if (!recent) {
-      /* Same opaque success as forgot-password to avoid enumeration */
+      /* Réponse opaque pour éviter l'énumération */
       return res.json({ success: true })
+    }
+    if (recent.method !== 'email') {
+      /* Sur admin_manual/admin_approval, l'utilisateur ne peut PAS
+         forcer l'envoi d'un nouveau code — c'est l'admin qui décide. */
+      return res.json({ success: true, adminMode: true })
     }
 
     await query(
-      `UPDATE login_verification_codes SET used = true
-       WHERE user_id = $1 AND used = false`,
+      `UPDATE login_verification_codes SET status = 'expired'
+        WHERE user_id = $1 AND status = 'pending'`,
       [recent.user_id]
     )
 
@@ -306,9 +557,12 @@ router.post('/resend-login-code', authLimiter, async (req: Request, res: Respons
 
     await query(
       `INSERT INTO login_verification_codes
-         (user_id, tenant_id, email, code_hash, expires_at, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes', $5::inet, $6)`,
-      [recent.user_id, recent.tenant_id, email, codeHash, req.ip ?? '0.0.0.0', req.headers['user-agent'] ?? '']
+         (user_id, tenant_id, email, code_hash, method, status,
+          expires_at, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, 'email', 'pending',
+               NOW() + INTERVAL '10 minutes', $5::inet, $6)`,
+      [recent.user_id, recent.tenant_id, email, codeHash,
+       req.ip ?? '0.0.0.0', req.headers['user-agent'] ?? '']
     )
 
     try {

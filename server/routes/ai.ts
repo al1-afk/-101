@@ -26,7 +26,9 @@ const limiter = rateLimit({
   max:      60,
   standardHeaders: true,
   legacyHeaders:   false,
-  keyGenerator: (req: Request) => req.user?.userId ?? req.ip ?? 'anon',
+  /* IPv6-safe key : préfixer par uid quand connu pour éviter le partage
+     entre users derrière la même IP, sinon fallback à l'IP normalisée. */
+  keyGenerator: (req: Request) => req.user?.userId ? `u:${req.user.userId}` : `ip:${req.ip ?? 'anon'}`,
   message: { error: 'Trop de requêtes IA — réessaie dans une minute.' },
 })
 

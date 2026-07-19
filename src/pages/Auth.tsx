@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Eye, EyeOff, Lock, Mail, ArrowRight, Loader2, X, KeyRound,
   CheckCircle, ShieldCheck, ArrowLeft, Sparkles, Zap, Shield, Cable,
+  UserCheck, Hourglass,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { authApi } from '@/lib/api'
@@ -11,7 +12,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-type AuthStage = 'credentials' | 'verify'
+type AuthStage    = 'credentials' | 'verify'
+type TwoFAMethod  = 'email' | 'admin_manual' | 'admin_approval'
 
 export default function Auth() {
   const { isAuthorized, signIn, verifyLogin, resendLoginCode } = useAuth()
@@ -22,16 +24,48 @@ export default function Auth() {
   const [error, setError] = useState<string | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
 
-  const [stage,    setStage]    = useState<AuthStage>('credentials')
-  const [code,     setCode]     = useState('')
-  const [resendIn, setResendIn] = useState(0)
-  const [resending, setResending] = useState(false)
+  const [stage,      setStage]      = useState<AuthStage>('credentials')
+  const [challengeId, setChallengeId] = useState<string | null>(null)
+  const [method,     setMethod]     = useState<TwoFAMethod>('email')
+  const [code,       setCode]       = useState('')
+  const [resendIn,   setResendIn]   = useState(0)
+  const [resending,  setResending]  = useState(false)
+  const [approvalStatus, setApprovalStatus] = useState<'pending'|'approved'|'rejected'|'expired'>('pending')
 
   useEffect(() => {
     if (resendIn <= 0) return
     const t = setTimeout(() => setResendIn(v => v - 1), 1000)
     return () => clearTimeout(t)
   }, [resendIn])
+
+  /* Polling status en mode admin_approval — dès que status='approved', on
+     finalise la connexion en appelant verifyLogin(challengeId) (sans code). */
+  useEffect(() => {
+    if (stage !== 'verify' || method !== 'admin_approval' || !challengeId) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const r = await authApi.twoFactorStatus(challengeId)
+        if (cancelled) return
+        setApprovalStatus(r.status as any)
+        if (r.status === 'approved') {
+          setLoading(true)
+          try {
+            await verifyLogin({ email, challengeId })
+          } catch (err: any) {
+            setError(err?.message ?? 'Erreur lors de la finalisation')
+          } finally { setLoading(false) }
+        } else if (r.status === 'rejected') {
+          setError('Connexion refusée par l\'administrateur.')
+        } else if (r.status === 'expired') {
+          setError('La demande a expiré. Reconnectez-vous.')
+        }
+      } catch { /* transient, on retentera */ }
+    }
+    tick()
+    const t = setInterval(tick, 4000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [stage, method, challengeId, email, verifyLogin])
 
   if (isAuthorized) {
     const slug = sessionStorage.getItem('gestiq_tenant_slug') ?? 'demo'
@@ -45,7 +79,13 @@ export default function Auth() {
     setError(null); setLoading(true)
     try {
       const res: any = await signIn(email, password)
-      if (res?.needsVerification) { setStage('verify'); setResendIn(30) }
+      if (res?.needsVerification) {
+        setChallengeId(res.challengeId ?? null)
+        setMethod(res.method ?? 'email')
+        setApprovalStatus('pending')
+        setStage('verify')
+        if (res.method === 'email') setResendIn(30)
+      }
     } catch (err: any) {
       if (!isRateLimit(err?.message)) setError(err.message || 'Identifiants incorrects')
     } finally { setLoading(false) }
@@ -55,7 +95,7 @@ export default function Auth() {
     e.preventDefault()
     setError(null); setLoading(true)
     try {
-      await verifyLogin(email, code.trim())
+      await verifyLogin({ email, code: code.trim(), challengeId: challengeId ?? undefined })
     } catch (err: any) {
       if (!isRateLimit(err?.message)) setError(err.message || 'Code incorrect')
     } finally { setLoading(false) }
@@ -74,6 +114,7 @@ export default function Auth() {
 
   const backToCredentials = () => {
     setStage('credentials'); setCode(''); setError(null)
+    setChallengeId(null); setMethod('email'); setApprovalStatus('pending')
   }
 
   return (
@@ -260,17 +301,19 @@ export default function Auth() {
                 <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-white/25 blur-md" />
               </div>
               <h1 className="text-[24px] font-black tracking-[-0.02em] text-foreground leading-none">
-                {stage === 'verify' ? 'Confirmation' : 'Bienvenue'}
+                {stage === 'verify' ? verifyTitle(method) : 'Bienvenue'}
               </h1>
               <p className="text-[13px] text-muted-foreground mt-2">
                 {stage === 'verify'
-                  ? <>Code envoyé à <span className="text-electric-600 dark:text-cyan-400 font-semibold">{email}</span></>
+                  ? verifySubtitle(method, email)
                   : 'Connectez-vous à votre espace de gestion'}
               </p>
             </div>
 
             {stage === 'verify' ? (
               <VerifyStep
+                method={method}
+                approvalStatus={approvalStatus}
                 code={code}
                 setCode={setCode}
                 loading={loading}
@@ -394,26 +437,107 @@ export default function Auth() {
   )
 }
 
+/* ─── Titre/sous-titre selon le mode 2FA ─────────────────────────── */
+function verifyTitle(method: TwoFAMethod): string {
+  if (method === 'admin_approval') return 'En attente d\'approbation'
+  if (method === 'admin_manual')   return 'Code administrateur'
+  return 'Confirmation'
+}
+function verifySubtitle(method: TwoFAMethod, email: string): React.ReactNode {
+  if (method === 'admin_approval') {
+    return <>L'administrateur doit valider votre connexion pour <span className="text-electric-600 dark:text-cyan-400 font-semibold">{email}</span></>
+  }
+  if (method === 'admin_manual') {
+    return <>Demandez le code à votre administrateur pour <span className="text-electric-600 dark:text-cyan-400 font-semibold">{email}</span></>
+  }
+  return <>Code envoyé à <span className="text-electric-600 dark:text-cyan-400 font-semibold">{email}</span></>
+}
+
 /* ─── Verify step ─────────────────────────────────────────────────── */
 function VerifyStep({
+  method, approvalStatus,
   code, setCode, loading, error, resendIn, resending,
   onSubmit, onResend, onBack,
 }: {
-  code:      string
-  setCode:   (v: string) => void
-  loading:   boolean
-  error:     string | null
-  resendIn:  number
-  resending: boolean
-  onSubmit:  (e: React.FormEvent) => void
-  onResend:  () => void
-  onBack:    () => void
+  method:          TwoFAMethod
+  approvalStatus:  'pending'|'approved'|'rejected'|'expired'
+  code:            string
+  setCode:         (v: string) => void
+  loading:         boolean
+  error:           string | null
+  resendIn:        number
+  resending:       boolean
+  onSubmit:        (e: React.FormEvent) => void
+  onResend:        () => void
+  onBack:          () => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => { inputRef.current?.focus() }, [])
+  useEffect(() => { if (method !== 'admin_approval') inputRef.current?.focus() }, [method])
 
+  /* ── Mode admin_approval : pas de champ code, juste un état ───── */
+  if (method === 'admin_approval') {
+    const isFinal = approvalStatus === 'approved' || approvalStatus === 'rejected' || approvalStatus === 'expired'
+    return (
+      <div className="space-y-5">
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border border-blue-200 dark:border-blue-800/40 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+            {approvalStatus === 'approved'
+              ? <CheckCircle className="w-5 h-5 text-emerald-500" />
+              : approvalStatus === 'rejected' || approvalStatus === 'expired'
+                ? <X className="w-5 h-5 text-red-500" />
+                : <Hourglass className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-pulse" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-foreground">
+              {approvalStatus === 'approved' && 'Approbation reçue — connexion…'}
+              {approvalStatus === 'rejected' && 'Connexion refusée'}
+              {approvalStatus === 'expired'  && 'La demande a expiré'}
+              {approvalStatus === 'pending'  && 'En attente…'}
+            </p>
+            <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed">
+              {approvalStatus === 'pending'
+                ? 'Votre administrateur reçoit la notification. Cette page se rafraîchit automatiquement dès qu\'il approuve.'
+                : approvalStatus === 'approved'
+                  ? 'Votre session s\'ouvre…'
+                  : 'Contactez votre administrateur.'}
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/25 text-[13px] text-red-700 dark:text-red-300">
+            <span className="w-4 h-4 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <span className="w-1 h-1 rounded-full bg-red-500" />
+            </span>
+            <span className="leading-snug">{error}</span>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={onBack}
+          className="w-full flex items-center justify-center gap-1 text-muted-foreground hover:text-foreground text-[12.5px] font-medium transition-colors"
+          disabled={loading}
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> {isFinal ? 'Réessayer' : 'Annuler'}
+        </button>
+      </div>
+    )
+  }
+
+  /* ── Modes email + admin_manual : champ code 6 chiffres ───────── */
+  const isManual = method === 'admin_manual'
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      {isManual && (
+        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[12.5px] text-amber-700 dark:text-amber-300">
+          <UserCheck className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span className="leading-snug">
+            Votre administrateur va générer un code et vous le communiquera (WhatsApp, téléphone, en personne).
+          </span>
+        </div>
+      )}
+
       <div>
         <label className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
           Code de vérification
@@ -434,7 +558,9 @@ function VerifyStep({
           />
         </div>
         <p className="text-[11.5px] text-muted-foreground mt-2 leading-relaxed">
-          Entrez le code à 6 chiffres reçu par email. Il expire dans <span className="font-semibold text-foreground">10 minutes</span>.
+          {isManual
+            ? 'Le code fourni par votre administrateur expire dans 10 minutes.'
+            : <>Entrez le code à 6 chiffres reçu par email. Il expire dans <span className="font-semibold text-foreground">10 minutes</span>.</>}
         </p>
       </div>
 
@@ -472,17 +598,19 @@ function VerifyStep({
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Retour
         </button>
-        {resendIn > 0 ? (
-          <span className="text-muted-foreground">Renvoi dans <span className="font-semibold text-foreground tabular-nums">{resendIn}s</span></span>
-        ) : (
-          <button
-            type="button"
-            onClick={onResend}
-            disabled={resending}
-            className="text-electric-600 dark:text-cyan-400 hover:underline disabled:opacity-50 font-medium"
-          >
-            {resending ? 'Envoi…' : 'Renvoyer le code'}
-          </button>
+        {!isManual && (
+          resendIn > 0 ? (
+            <span className="text-muted-foreground">Renvoi dans <span className="font-semibold text-foreground tabular-nums">{resendIn}s</span></span>
+          ) : (
+            <button
+              type="button"
+              onClick={onResend}
+              disabled={resending}
+              className="text-electric-600 dark:text-cyan-400 hover:underline disabled:opacity-50 font-medium"
+            >
+              {resending ? 'Envoi…' : 'Renvoyer le code'}
+            </button>
+          )
         )}
       </div>
     </form>

@@ -110,9 +110,17 @@ export function useAuth() {
   ) => {
     await purgeClientSession()
     const data: any = await authApi.login(email, password, tenantSlug)
-    /* 1ʳᵉ connexion : le serveur exige la vérif email avant les tokens.
-       Retourne l'info à Auth.tsx pour basculer sur l'étape "code". */
-    if (data?.needsVerification) return { needsVerification: true as const, email }
+    /* 2FA : si le serveur exige une vérification, on renvoie tous les
+       éléments utiles au composant Auth pour piloter la bonne UI selon
+       le mode (email / admin_manual / admin_approval). */
+    if (data?.needsVerification) {
+      return {
+        needsVerification: true as const,
+        challengeId: data.challengeId as string,
+        method:      data.method as 'email' | 'admin_manual' | 'admin_approval',
+        email,
+      }
+    }
     tokenStore.set(data.token)
     const payload = parseJwt(data.token)
     let allowedModules: string[] | null = null
@@ -135,14 +143,23 @@ export function useAuth() {
     return data
   }, [navigate])
 
-  /* Step 2 — submit the emailed code, receive tokens, finalise. */
-  const verifyLogin = useCallback(async (
-    email:       string,
-    code:        string,
-    tenantSlug?: string,
-  ) => {
-    const data = await authApi.verifyLogin(email, code, tenantSlug)
+  /* Step 2 — submit the emailed/manual code (ou juste le challengeId pour
+     admin_approval), receive tokens, finalise. */
+  const verifyLogin = useCallback(async (params: {
+    email?:       string
+    code?:        string
+    challengeId?: string
+    tenantSlug?:  string
+    rememberDevice?: boolean
+  }) => {
+    const data: any = await authApi.verifyLogin(params)
+    /* Mode admin_approval : le serveur peut renvoyer 202 waitingForApproval.
+       Dans ce cas, on remonte l'info sans écrire de token. */
+    if (data?.waitingForApproval) {
+      return { waitingForApproval: true as const, status: data.status as string }
+    }
     tokenStore.set(data.token)
+    const email = params.email ?? ''
     const payload = parseJwt(data.token)
     let allowedModules: string[] | null = null
     try {

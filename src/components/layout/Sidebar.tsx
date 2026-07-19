@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, UserCheck, FileText, Receipt, FileSignature,
   CreditCard, DollarSign, TrendingUp, Globe, Server, Package, ShoppingCart,
   Repeat, BarChart3, CheckSquare, Building2, ChevronDown, ChevronsLeft,
-  Settings, Briefcase, Banknote, Wallet, Activity,
+  Settings, Briefcase, Banknote, Wallet, Activity, ShieldCheck,
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
   Plus, Star, Command, Search, GripVertical,
@@ -644,6 +644,14 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
           </div>
         )}
+        <NavLink
+          to={`${base}/securite`}
+          className={cn('sidebar-item', location.pathname === `${base}/securite` && 'active', collapsed && 'justify-center px-0')}
+          title={collapsed ? 'Sécurité' : undefined}
+        >
+          <ShieldCheck className={cn('sidebar-icon-el flex-shrink-0', collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
+          {!collapsed && <span>Sécurité</span>}
+        </NavLink>
         <NavLink
           to={`${base}/parametres`}
           className={cn('sidebar-item', location.pathname === `${base}/parametres` && 'active', collapsed && 'justify-center px-0')}

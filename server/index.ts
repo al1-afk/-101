@@ -25,6 +25,7 @@ import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
 import outboundRoutes  from './routes/outbound'
 import paiementsRecoveryRoutes from './routes/paiementsRecovery'
+import admin2faRoutes from './routes/admin2fa'
 
 dotenv.config({ path: '.env.local' })
 
@@ -166,6 +167,7 @@ app.use('/api/send-document', sendDocumentRoutes)
 app.use('/api/activity',  activityRoutes)
 app.use('/api/outbound',  outboundRoutes)
 app.use('/api/paiements-recovery', paiementsRecoveryRoutes)
+app.use('/api/admin/2fa', admin2faRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */
