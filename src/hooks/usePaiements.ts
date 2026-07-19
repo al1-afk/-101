@@ -8,19 +8,20 @@ export type PaiementStatus  = 'paye' | 'en_attente'
 export type PaiementType    = 'domaine' | 'hebergement' | 'site_web' | 'seo' | 'ads' | 'renouvellement' | 'autre'
 
 export interface Paiement {
-  id:            string
-  reference:     string
-  facture_id:    string | null
-  contrat_id:    string | null
-  client_id:     string | null
-  date:          string
-  montant:       number
-  type_paiement: PaiementType
-  methode:       PaiementMethode
-  status:        PaiementStatus
-  notes:         string | null
-  created_at:    string
-  updated_at:    string
+  id:              string
+  reference:       string
+  facture_id:      string | null
+  contrat_id:      string | null
+  client_id:       string | null
+  date:            string
+  montant:         number
+  type_paiement:   PaiementType
+  methode:         PaiementMethode
+  status:          PaiementStatus
+  notes:           string | null
+  bank_account_id: string | null
+  created_at:      string
+  updated_at:      string
 }
 
 const KEY = 'paiements'

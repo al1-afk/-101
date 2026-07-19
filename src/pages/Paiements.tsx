@@ -37,6 +37,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { usePaiements, useCreatePaiement, useDeletePaiement, type Paiement, type PaiementMethode, type PaiementStatus, type PaiementType } from '@/hooks/usePaiements'
 import { useClients, useCreateClient } from '@/hooks/useClients'
+import { useBankAccounts } from '@/hooks/useBankAccounts'
 import {
   DateRangeFilter, DEFAULT_RANGE, makeDatePredicate, type DateRange,
 } from '@/components/ui/DateRangeFilter'
@@ -273,26 +274,28 @@ const genRef = (methode: PaiementMethode) => {
 }
 
 type PaiementForm = {
-  client_id:     string
-  reference:     string
-  date:          string
-  montant:       number
-  type_paiement: PaiementType
-  methode:       PaiementMethode
-  status:        PaiementStatus
-  notes:         string
+  client_id:       string
+  reference:       string
+  date:            string
+  montant:         number
+  type_paiement:   PaiementType
+  methode:         PaiementMethode
+  status:          PaiementStatus
+  notes:           string
+  bank_account_id: string
 }
 
 const EMPTY_PAIEMENT: PaiementForm & { contrat_id: string } = {
-  client_id:     '',
-  reference:     '',
-  date:          new Date().toISOString().slice(0, 10),
-  montant:       0,
-  type_paiement: 'autre',
-  methode:       'virement',
-  status:        'paye',
-  notes:         '',
-  contrat_id:    '',
+  client_id:       '',
+  reference:       '',
+  date:            new Date().toISOString().slice(0, 10),
+  montant:         0,
+  type_paiement:   'autre',
+  methode:         'virement',
+  status:          'paye',
+  notes:           '',
+  contrat_id:      '',
+  bank_account_id: '',
 }
 
 interface Contrat {
@@ -358,6 +361,13 @@ export default function Paiements() {
   })
   const deleteP = useDeletePaiement()
   const createP = useCreatePaiement()
+  const { data: bankAccounts = [] } = useBankAccounts()
+  const activeAccounts = useMemo(() => bankAccounts.filter(a => a.actif !== false), [bankAccounts])
+  const accountsById = useMemo(() => {
+    const m = new Map<string, typeof bankAccounts[number]>()
+    bankAccounts.forEach(a => m.set(a.id, a))
+    return m
+  }, [bankAccounts])
 
   const createContrat = useMutation({
     mutationFn: (data: typeof EMPTY_CONTRAT) => contratsApi.create(data),
@@ -391,6 +401,14 @@ export default function Paiements() {
   const [view, setView] = useState<'paiements' | 'contrats'>('paiements')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<PaiementForm & { contrat_id: string }>(EMPTY_PAIEMENT)
+
+  /* Auto-sélectionne le 1er compte quand on ouvre le formulaire, pour éviter
+     d'enregistrer un encaissement sans destination. */
+  useEffect(() => {
+    if (showForm && activeAccounts.length > 0 && !form.bank_account_id) {
+      setForm(p => ({ ...p, bank_account_id: activeAccounts[0].id }))
+    }
+  }, [showForm, activeAccounts, form.bank_account_id])
   const [showContratForm, setShowContratForm] = useState(false)
   const [contratForm, setContratForm] = useState(EMPTY_CONTRAT)
   const [editingContratId, setEditingContratId] = useState<string | null>(null)
@@ -457,14 +475,15 @@ export default function Paiements() {
     if (!form.client_id || !form.montant) return
     createP.mutate(
       {
-        client_id:     form.client_id,
-        reference:     form.reference || genRef(form.methode),
-        date:          form.date,
-        montant:       Number(form.montant),
-        type_paiement: form.type_paiement,
-        methode:       form.methode,
-        status:        form.status,
-        notes:         form.notes || null,
+        client_id:       form.client_id,
+        reference:       form.reference || genRef(form.methode),
+        date:            form.date,
+        montant:         Number(form.montant),
+        type_paiement:   form.type_paiement,
+        methode:         form.methode,
+        status:          form.status,
+        notes:           form.notes || null,
+        bank_account_id: form.bank_account_id || null,
         facture_id:    null,
         contrat_id:    form.contrat_id || null,
       },
@@ -879,6 +898,7 @@ export default function Paiements() {
                               const MethIcon = methConf.icon
                               const StatIcon = statConf.icon
                               const nom = (p.client_id && clientMap.get(p.client_id)) || 'Sans client'
+                              const acc = p.bank_account_id ? accountsById.get(p.bank_account_id) : null
                               return (
                                 <div key={p.id} className="flex items-center gap-4 px-5 py-3 hover:bg-muted/20 transition-colors">
                                   <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${methConf.bg}`}>
@@ -890,6 +910,19 @@ export default function Paiements() {
                                       <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${statConf.bg} ${statConf.color}`}>
                                         <StatIcon className="w-2.5 h-2.5" />{statConf.label}
                                       </span>
+                                      {acc && (
+                                        <span
+                                          className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border"
+                                          style={{
+                                            borderColor: (acc.couleur ?? '#3b82f6') + '55',
+                                            color:       acc.couleur ?? '#3b82f6',
+                                            backgroundColor: (acc.couleur ?? '#3b82f6') + '11',
+                                          }}
+                                        >
+                                          <span>{acc.icon || '🏦'}</span>
+                                          <span className="truncate max-w-[7rem]">{acc.nom}</span>
+                                        </span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                                       <span className="font-mono">{p.reference}</span>
@@ -1457,6 +1490,34 @@ export default function Paiements() {
                     <SelectItem value="en_attente">En attente</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-1.5 col-span-2">
+                <label className="form-label">🏦 Reçu sur le compte</label>
+                {activeAccounts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    Aucun compte enregistré. Ajoute un compte dans la page Dépenses ({'>'} "Mes comptes") pour lier l'encaissement.
+                  </p>
+                ) : (
+                  <Select
+                    value={form.bank_account_id}
+                    onValueChange={v => setForm(p => ({ ...p, bank_account_id: v }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Choisir un compte" /></SelectTrigger>
+                    <SelectContent>
+                      {activeAccounts.map(a => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.icon || '🏦'} {a.nom}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {form.status === 'en_attente' && form.bank_account_id && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                    ⚠️ Statut "En attente" — l'argent n'impacte le solde du compte qu'après passage à "Payé".
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5 col-span-2">
