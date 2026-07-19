@@ -14,21 +14,26 @@
  * uniquement — jamais exposée au client.
  */
 import { Router, Request, Response } from 'express'
-import rateLimit from 'express-rate-limit'
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import { requireAuth } from '../middleware/auth'
 
 const router = Router()
 
 /* Limite : 60 requêtes / minute / utilisateur — protège contre l'abus
-   et contre les boucles infinies front-end. */
+   et contre les boucles infinies front-end.
+   IPv6-safe : utilise ipKeyGenerator de la lib pour normaliser les /64,
+   sinon les IPv6 pouvaient bypasser la limite (chaque adresse est unique
+   dans un /64 énorme). Préfixe uid: quand l'utilisateur est connu pour
+   éviter le partage entre users derrière une même IP (bureau, VPN). */
 const limiter = rateLimit({
   windowMs: 60_000,
   max:      60,
   standardHeaders: true,
   legacyHeaders:   false,
-  /* IPv6-safe key : préfixer par uid quand connu pour éviter le partage
-     entre users derrière la même IP, sinon fallback à l'IP normalisée. */
-  keyGenerator: (req: Request) => req.user?.userId ? `u:${req.user.userId}` : `ip:${req.ip ?? 'anon'}`,
+  keyGenerator: (req: Request) =>
+    req.user?.userId
+      ? `u:${req.user.userId}`
+      : `ip:${ipKeyGenerator(req.ip ?? '')}`,
   message: { error: 'Trop de requêtes IA — réessaie dans une minute.' },
 })
 

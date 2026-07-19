@@ -589,8 +589,17 @@ async function recordFatal(pool: Pool, cfg: AutopilotConfig, reason: string): Pr
 ───────────────────────────────────────────────────────────────── */
 export function startAutopilotScheduler(pool: Pool): void {
   const ONE_HOUR = 60 * 60 * 1000
+  /* Guard : swallow rejections avec .catch() pour éviter que Node.js exit
+     sur unhandledRejection si un tick échoue (SQL erreur, réseau…). Sans
+     ce guard, un incident passager (table manquante, migration retardée)
+     causait un crash-loop qui rendait TOUTE l'API indisponible pendant
+     les fenêtres de restart Swarm. */
+  const safeTick = () =>
+    runAutopilotForCurrentHour(pool).catch(err => {
+      logger.error('[autopilotScheduler] tick échoué (ignoré) :', err?.message ?? err)
+    })
   /* Premier tick 90s après boot (laisse DB + integrations se stabiliser) */
-  setTimeout(() => { void runAutopilotForCurrentHour(pool) }, 90_000)
-  setInterval(() => { void runAutopilotForCurrentHour(pool) }, ONE_HOUR)
+  setTimeout(safeTick, 90_000)
+  setInterval(safeTick, ONE_HOUR)
   logger.info('[autopilotScheduler] démarré (1er check dans 90s, puis toutes les 60min)')
 }
