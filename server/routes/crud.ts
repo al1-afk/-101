@@ -155,7 +155,8 @@ router.post('/:table', async (req: Request, res: Response) => {
     }
   } catch (err: any) {
     logger.error(`[POST /api/${table}]`, err?.code, err?.message, err?.detail, { keys })
-    res.status(500).json({ error: 'Erreur serveur' })
+    const code = typeof err?.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : null
+    res.status(500).json({ error: code ? `Erreur serveur (${code})` : 'Erreur serveur' })
   }
 })
 
@@ -193,7 +194,8 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
     }
   } catch (err: any) {
     logger.error(`[PATCH /api/${table}/${id}]`, err?.code, err?.message, err?.detail, { keys })
-    res.status(500).json({ error: 'Erreur serveur' })
+    const code = typeof err?.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : null
+    res.status(500).json({ error: code ? `Erreur serveur (${code})` : 'Erreur serveur' })
   }
 })
 
