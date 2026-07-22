@@ -219,6 +219,37 @@ router.post('/complete', async (req: Request, res: Response) => {
 })
 
 /* ═══════════════════════════════════════════════════════════════════
+   POST /api/ai/translate
+   Traduit vers le français (depuis n'importe quelle langue : arabe,
+   anglais, darija, etc.) en corrigeant les fautes de frappe. Idéal
+   pour un utilisateur qui écrit vite dans sa langue et veut un texte
+   professionnel en français.
+═══════════════════════════════════════════════════════════════════ */
+router.post('/translate', async (req: Request, res: Response) => {
+  const text = String(req.body?.text ?? '').trim()
+  if (!text)              return res.status(400).json({ error: 'Texte requis' })
+  if (text.length > 3000) return res.status(400).json({ error: 'Texte trop long (max 3000 caractères)' })
+  if (!hasKey())          return res.status(503).json({ error: 'Module IA non configuré (OPENAI_API_KEY manquant)' })
+
+  try {
+    const system = [
+      'Tu traduis en français correct et professionnel.',
+      'La source peut être en arabe, darija (arabe marocain), anglais, français avec fautes, ou un mélange.',
+      'Corrige d\'abord les fautes de frappe évidentes, devine le sens voulu, puis produis un français impeccable.',
+      'Applique la typographie française : apostrophe ’, espace insécable avant : ; ! ?, guillemets « … ».',
+      'Garde le sens, le ton et le registre d\'origine (concis reste concis, poli reste poli).',
+      'Si le texte est déjà en français correct, corrige uniquement les fautes sans le reformuler.',
+      'Réponds UNIQUEMENT par la traduction, sans introduction, sans commentaire, sans guillemets autour.',
+    ].join(' ')
+    const translated = await callOpenAI(system, text, { temperature: 0.2, maxTokens: 1200 })
+    res.json({ text: translated })
+  } catch (e: any) {
+    console.error('[ai:translate]', e?.message ?? e)
+    res.status(502).json({ error: 'Erreur du service IA' })
+  }
+})
+
+/* ═══════════════════════════════════════════════════════════════════
    GET /api/ai/status — health check pour le front
 ═══════════════════════════════════════════════════════════════════ */
 router.get('/status', (_req: Request, res: Response) => {

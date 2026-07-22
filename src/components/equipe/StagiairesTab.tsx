@@ -605,7 +605,7 @@ function StagiaireForm({
           </Select>
         </Field>
         <Field label="Notes (interne)" full action={
-          <AIButton value={form.notes ?? ''} onChange={v => update('notes', v)} />
+          <AIButton value={form.notes ?? ''} onChange={v => update('notes', v)} kinds={['correct', 'translate', 'rewrite']} />
         }>
           <AutocorrectTextarea
             value={form.notes ?? ''}

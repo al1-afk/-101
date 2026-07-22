@@ -652,7 +652,7 @@ export default function Projets() {
                   <AIButton
                     value={form.description ?? ''}
                     onChange={v => setForm(p => ({ ...p, description: v }))}
-                    kinds={['correct', 'rewrite', 'generate']}
+                    kinds={['correct', 'translate', 'rewrite', 'generate']}
                     generationKind="projet"
                   />
                 </div>
@@ -751,6 +751,7 @@ export default function Projets() {
                   <AIButton
                     value={form.notes ?? ''}
                     onChange={v => setForm(p => ({ ...p, notes: v }))}
+                    kinds={['correct', 'translate', 'rewrite']}
                   />
                 </div>
                 <AutocorrectTextarea

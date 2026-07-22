@@ -29,6 +29,9 @@ export const aiApi = {
   generate: (subject: string, kind: string) =>
     api.post<{ text: string }>('/api/ai/generate', { subject, kind }),
 
+  translate: (text: string) =>
+    api.post<{ text: string }>('/api/ai/translate', { text }),
+
   complete: (partial: string, context?: string) =>
     api.post<{ suggestions: string[] }>('/api/ai/complete', { partial, context }),
 }

@@ -11,7 +11,7 @@
  *   <AIButton value={text} onChange={setText} kinds={['correct','rewrite']} />
  */
 import { useEffect, useState } from 'react'
-import { Sparkles, Check, Wand2, PenLine, Loader2 } from 'lucide-react'
+import { Sparkles, Check, Wand2, PenLine, Languages, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   correctText, rewriteText, generateText, diffCount,
@@ -21,7 +21,7 @@ import { aiApi, aiStatus } from '@/lib/aiApi'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
-type Kind = 'correct' | 'rewrite' | 'generate'
+type Kind = 'correct' | 'rewrite' | 'generate' | 'translate'
 
 interface Props {
   /** Valeur actuelle du champ. */
@@ -126,6 +126,25 @@ export default function AIButton({
     toast.success(`Reformulé — ${style}${usedAi ? ' (IA)' : ''}`)
   }
 
+  const applyTranslate = async () => {
+    if (empty) { toast.error('Le champ est vide'); return }
+    if (!openAiReady) {
+      toast.error('Traduction indisponible en local — configure OPENAI_API_KEY côté serveur')
+      return
+    }
+    setBusy('translate')
+    try {
+      const r = await aiApi.translate(value)
+      onChange(r.text)
+      toast.success('Traduit en français (IA)')
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erreur de traduction')
+    } finally {
+      setBusy(null)
+      setOpen(false)
+    }
+  }
+
   const applyGenerate = async () => {
     if (empty) { toast.error('Écris d’abord un sujet court'); return }
     setBusy('generate')
@@ -208,6 +227,24 @@ export default function AIButton({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold">Corriger</p>
                     <p className="text-[10px] text-muted-foreground">Fautes, ponctuation, typographie</p>
+                  </div>
+                </button>
+              )}
+
+              {kinds.includes('translate') && (
+                <button
+                  type="button"
+                  onClick={applyTranslate}
+                  disabled={!openAiReady}
+                  title={openAiReady ? '' : 'Traduction indisponible en mode local'}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 text-left transition-colors border-t border-border disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  <Languages className="w-4 h-4 text-fuchsia-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">Traduire en français</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {openAiReady ? 'Arabe, darija, anglais → français correct' : 'Nécessite l\'IA distante'}
+                    </p>
                   </div>
                 </button>
               )}

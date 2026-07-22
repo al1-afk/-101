@@ -1013,7 +1013,7 @@ function TasksTab({
               <AIButton
                 value={taskForm.title}
                 onChange={v => setTaskForm(p => ({ ...p, title: v }))}
-                kinds={['correct', 'rewrite', 'generate']}
+                kinds={['correct', 'translate', 'rewrite', 'generate']}
                 generationKind="tache"
               />
             </div>
