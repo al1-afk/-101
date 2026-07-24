@@ -54,13 +54,19 @@ function toDateInput(v: string | null | undefined): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
-/* Formate un timestamp (ou date) en valeur d'input datetime-local ('YYYY-MM-DDTHH:MM'), heure locale. */
-function toLocalDatetimeInput(v: string | null | undefined): string {
+/* Timestamp → 'HH:MM' local (pour un <input type="time">). '' si null/absent. */
+function toTimeInput(v: string | null | undefined): string {
   if (!v) return ''
   const d = new Date(v)
   if (isNaN(d.getTime())) return ''
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+  return `${p(d.getHours())}:${p(d.getMinutes())}`
+}
+/* Combine 'YYYY-MM-DD' + 'HH:MM' (heure optionnelle) → ISO, ou null si pas de date/heure. */
+function combineRelance(dateStr: string, timeStr: string): string | null {
+  if (!dateStr || !timeStr) return null
+  const d = new Date(`${dateStr}T${timeStr}`)
+  return isNaN(d.getTime()) ? null : d.toISOString()
 }
 /* Affichage lisible « 25/07/2026 à 14:30 » (ou juste la date si minuit). */
 function formatRelance(v: string | null | undefined): string | null {
@@ -244,7 +250,8 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
     notes:          prospect.notes ?? '',
     responsable:    prospect.responsable ?? '',
     date_contact:   toDateInput(prospect.date_contact),
-    relance_at:     toLocalDatetimeInput(prospect.relance_at ?? prospect.date_relance),
+    relance_date:   toDateInput(prospect.date_relance),
+    relance_time:   toTimeInput(prospect.relance_at),
   })
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -264,8 +271,8 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
       notes:          form.notes.trim() || null,
       responsable:    form.responsable.trim() || null,
       date_contact:   form.date_contact || null,
-      relance_at:     form.relance_at ? new Date(form.relance_at).toISOString() : null,
-      date_relance:   form.relance_at ? form.relance_at.slice(0, 10) : null,
+      date_relance:   form.relance_date || null,
+      relance_at:     combineRelance(form.relance_date, form.relance_time),
     }
     update.mutate({ id: prospect.id, ...payload }, {
       onSuccess: () => {
@@ -330,8 +337,11 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
           <Input type="date" value={form.date_contact} onChange={set('date_contact')} />
         </div>
         <div className="space-y-1.5">
-          <label className="form-label">Relance (date + heure)</label>
-          <Input type="datetime-local" value={form.relance_at} onChange={set('relance_at')} />
+          <label className="form-label">Relance (heure facultative)</label>
+          <div className="flex gap-2">
+            <Input type="date" value={form.relance_date} onChange={set('relance_date')} className="flex-1" />
+            <Input type="time" value={form.relance_time} onChange={set('relance_time')} disabled={!form.relance_date} className="w-28" title="Heure (facultative)" />
+          </div>
         </div>
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Notes</label>
@@ -474,18 +484,21 @@ export default function ProspectDetail() {
     })
   }
 
-  /* Relance date + heure (datetime-local). On stocke relance_at (complet) et on
-     garde date_relance (partie jour) pour la liste / le filtre « aujourd'hui ». */
-  const saveRelance = (value: string) => {
-    if (!value) {
+  /* Relance : date (obligatoire) + heure (FACULTATIVE).
+     - pas de date → relance supprimée
+     - date seule  → date_relance = jour, relance_at = null (« à rappeler ce jour »)
+     - date+heure  → relance_at = rendez-vous précis
+     date_relance garde toujours la partie jour (liste / filtre / surlignage). */
+  const saveRelanceParts = (dateStr: string, timeStr: string) => {
+    if (!dateStr) {
       update.mutate({ id: prospect.id, relance_at: null, date_relance: null }, {
         onSuccess: () => toast.success('Relance supprimée'),
       })
       return
     }
     update.mutate(
-      { id: prospect.id, relance_at: new Date(value).toISOString(), date_relance: value.slice(0, 10) },
-      { onSuccess: () => toast.success('Relance programmée') },
+      { id: prospect.id, date_relance: dateStr, relance_at: combineRelance(dateStr, timeStr) },
+      { onSuccess: () => toast.success(timeStr ? 'Relance programmée' : 'Date de relance mise à jour') },
     )
   }
 
@@ -605,14 +618,25 @@ export default function ProspectDetail() {
               <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">{label}</p>
                 {dateField === 'date_relance' ? (
-                  <input
-                    type="datetime-local"
-                    value={toLocalDatetimeInput(prospect.relance_at ?? prospect.date_relance)}
-                    onChange={e => saveRelance(e.target.value)}
-                    title="Cliquer pour définir la date et l'heure de relance"
-                    className="w-full text-sm font-bold text-foreground bg-transparent outline-none cursor-pointer -ml-0.5"
-                    style={{ colorScheme: 'light dark' }}
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={toDateInput(prospect.date_relance)}
+                      onChange={e => saveRelanceParts(e.target.value, toTimeInput(prospect.relance_at))}
+                      title="Date de relance"
+                      className="text-sm font-bold text-foreground bg-transparent outline-none cursor-pointer -ml-0.5 min-w-0"
+                      style={{ colorScheme: 'light dark' }}
+                    />
+                    <input
+                      type="time"
+                      value={toTimeInput(prospect.relance_at)}
+                      onChange={e => saveRelanceParts(toDateInput(prospect.date_relance), e.target.value)}
+                      title="Heure (facultative)"
+                      disabled={!prospect.date_relance}
+                      className="text-xs font-semibold text-muted-foreground bg-transparent outline-none cursor-pointer w-[52px] disabled:opacity-40"
+                      style={{ colorScheme: 'light dark' }}
+                    />
+                  </div>
                 ) : dateField === 'date_contact' ? (
                   <input
                     type="date"
