@@ -325,9 +325,6 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
             <SelectTrigger><SelectValue placeholder="Origine…" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">—</SelectItem>
-              {form.source && !PROSPECT_SOURCES.includes(form.source) && (
-                <SelectItem value={form.source}>{form.source}</SelectItem>
-              )}
               {PROSPECT_SOURCES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>

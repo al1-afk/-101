@@ -39,10 +39,6 @@ export const PROSPECT_SOURCES = [
   'Google Ads',
   'SEO',
   'Recommandation',
-  'Site web',
-  'Instagram',
-  'LinkedIn',
-  'Appel entrant',
   'Autre',
 ]
 
