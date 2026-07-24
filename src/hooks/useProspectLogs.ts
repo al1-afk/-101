@@ -30,6 +30,16 @@ export function useProspectLogs(prospectId: string | null) {
   })
 }
 
+/* Tous les logs du tenant (triés du plus récent au plus ancien) — sert à afficher
+   le dernier suivi/appel de chaque prospect dans la liste, d'un coup d'œil. */
+export function useAllProspectLogs() {
+  return useQuery<ProspectLog[]>({
+    queryKey: [TABLE, 'all'],
+    queryFn:  () => api.get<ProspectLog[]>(`/api/prospect_logs?orderBy=created_at&order=desc&limit=1000`),
+    staleTime: 1000 * 30,
+  })
+}
+
 export function useAddProspectLog() {
   const qc = useQueryClient()
   return useMutation({
@@ -41,6 +51,8 @@ export function useAddProspectLog() {
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
       )
+      /* Rafraîchit le badge « dernier appel » de la liste des prospects. */
+      qc.invalidateQueries({ queryKey: [TABLE, 'all'] })
       toast.success('Note ajoutée')
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),

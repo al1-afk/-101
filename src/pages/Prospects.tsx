@@ -25,7 +25,7 @@ import {
   type Prospect, type ProspectStatut,
 } from '@/hooks/useProspects'
 import {
-  useProspectLogs, useAddProspectLog,
+  useProspectLogs, useAddProspectLog, useAllProspectLogs,
   type ProspectLog, type LogType,
 } from '@/hooks/useProspectLogs'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
@@ -73,6 +73,20 @@ const LOG_CONFIG: Record<LogType, { icon: React.ElementType; color: string; bg: 
   edit:     { icon: Edit2,           color: 'text-amber-600 dark:text-amber-600 dark:text-amber-400',     bg: 'bg-amber-500/20'   },
   appel:    { icon: PhoneCall,       color: 'text-cyan-600 dark:text-cyan-400',       bg: 'bg-cyan-500/20'    },
   email:    { icon: Mail,            color: 'text-pink-600 dark:text-pink-400',       bg: 'bg-pink-500/20'    },
+}
+
+/* ─── Styles des résultats d'appel (badge « dernier appel » dans la liste) ── */
+const OUTCOME_STYLE: Record<string, string> = {
+  'Pas de réponse': 'bg-slate-500/15 text-slate-600 dark:text-slate-300',
+  'À rappeler':     'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  'Occupé':         'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  'Faux numéro':    'bg-red-500/15 text-red-600 dark:text-red-400',
+  'Intéressé':      'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  'Pas intéressé':  'bg-rose-500/15 text-rose-600 dark:text-rose-400',
+}
+function outcomeBadgeClass(msg: string): string {
+  const key = Object.keys(OUTCOME_STYLE).find(k => msg.startsWith(k))
+  return key ? OUTCOME_STYLE[key] : 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
 }
 
 /* ─── Timeline component ──────────────────────────────────────────── */
@@ -738,12 +752,13 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
 
 /* ─── ProspectRow (table) ─────────────────────────────────────────── */
 function ProspectRow({
-  p, onEdit, selected, onToggle,
+  p, onEdit, selected, onToggle, lastCall,
 }: {
   p: Prospect
   onEdit:   (p: Prospect) => void
   selected: boolean
   onToggle: (id: string) => void
+  lastCall?: ProspectLog
 }) {
   const accent  = stageAccent(p.statut)
   const dot     = stageDot(p.statut)
@@ -787,13 +802,24 @@ function ProspectRow({
         </div>
       </td>
       <td className="px-4 py-3">
-        <span
-          className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium"
-          style={{ backgroundColor: `${accent}22`, color: accent }}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-          {label}
-        </span>
+        <div className="flex flex-col items-start gap-1">
+          <span
+            className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium"
+            style={{ backgroundColor: `${accent}22`, color: accent }}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+            {label}
+          </span>
+          {lastCall && (
+            <span
+              className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium max-w-[160px] ${outcomeBadgeClass(lastCall.message)}`}
+              title={`Dernier appel : ${lastCall.message}`}
+            >
+              <PhoneCall className="w-2.5 h-2.5 flex-shrink-0" />
+              <span className="truncate">{lastCall.message}</span>
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 text-sm text-foreground">
         {p.valeur_estimee != null
@@ -830,12 +856,13 @@ function ProspectRow({
 
 /* ─── KanbanCard ──────────────────────────────────────────────────── */
 function KanbanCard({
-  p, index, onEdit, accent,
+  p, index, onEdit, accent, lastCall,
 }: {
   p: Prospect
   index: number
   onEdit: (p: Prospect) => void
   accent: string
+  lastCall?: ProspectLog
 }) {
   const isToday = p.date_relance === TODAY
   return (
@@ -895,6 +922,15 @@ function KanbanCard({
             {p.source && (
               <p className="text-xs text-muted-foreground mt-1.5 truncate">{p.source}</p>
             )}
+            {lastCall && (
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium mt-2 max-w-full ${outcomeBadgeClass(lastCall.message)}`}
+                title={`Dernier appel : ${lastCall.message}`}
+              >
+                <PhoneCall className="w-2.5 h-2.5 flex-shrink-0" />
+                <span className="truncate">{lastCall.message}</span>
+              </span>
+            )}
           </div>
         )
       }}
@@ -908,11 +944,21 @@ export default function Prospects() {
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const base = tenantSlug ? `/${tenantSlug}` : ''
   const { data: prospects = [], isLoading, isError } = useProspects()
+  const { data: allLogs = [] } = useAllProspectLogs()
   const createProspect  = useCreateProspect()
   const updateProspect  = useUpdateProspect()
   const deleteProspect  = useDeleteProspect()
   const addLog          = useAddProspectLog()
   const qc              = useQueryClient()
+
+  /* Dernier appel enregistré par prospect (allLogs est trié du + récent au + ancien). */
+  const lastCallByProspect = useMemo(() => {
+    const m = new Map<string, ProspectLog>()
+    for (const log of allLogs) {
+      if (log.type === 'appel' && !m.has(log.prospect_id)) m.set(log.prospect_id, log)
+    }
+    return m
+  }, [allLogs])
 
   const [view,         setView]         = useState<'table' | 'pipeline'>('table')
   const [search,       setSearch]       = useState('')
@@ -1264,6 +1310,7 @@ export default function Prospects() {
                         onEdit={openEdit}
                         selected={selectedIds.has(p.id)}
                         onToggle={toggleSelect}
+                        lastCall={lastCallByProspect.get(p.id)}
                       />
                     ))}
                   </AnimatePresence>
@@ -1383,6 +1430,7 @@ export default function Prospects() {
                             index={i}
                             onEdit={openEdit}
                             accent={stage.accent}
+                            lastCall={lastCallByProspect.get(p.id)}
                           />
                         ))}
                         {provided.placeholder}
