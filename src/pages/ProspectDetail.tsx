@@ -46,6 +46,16 @@ function waLink(phone: string, text?: string): string {
   return text ? `${base}?text=${encodeURIComponent(text)}` : base
 }
 
+/* Issues d'appel fréquentes — enregistrées en 1 clic (type='appel'). */
+const CALL_OUTCOMES = [
+  'Pas de réponse',
+  'À rappeler',
+  'Occupé',
+  'Faux numéro',
+  'Intéressé',
+  'Pas intéressé',
+]
+
 function formatDateTime(iso: string) {
   return new Intl.DateTimeFormat('fr-FR', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -396,6 +406,21 @@ export default function ProspectDetail() {
     )
   }
 
+  /* Issue d'appel en 1 clic : log immédiat (message = outcome, + durée si saisie).
+     Le texte libre éventuel est ajouté après « — ». */
+  const quickLogCall = (outcome: string) => {
+    const dur = callDuration ? parseInt(callDuration, 10) : null
+    const extra = noteText.trim()
+    addLog.mutate(
+      {
+        prospect_id: prospect.id, type: 'appel', auteur: 'Said',
+        message: extra ? `${outcome} — ${extra}` : outcome,
+        duration_minutes: dur && dur > 0 ? dur : null,
+      },
+      { onSuccess: () => { setNoteText(''); setCallDuration(''); toast.success(`Appel enregistré : ${outcome}`) } },
+    )
+  }
+
   const handleSaveNotes = () => {
     const next = notesDraft.trim()
     if (next === (prospect.notes ?? '').trim()) { toast('Aucun changement'); return }
@@ -623,6 +648,24 @@ export default function ProspectDetail() {
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">min</span>
                   </div>
                   <span className="text-[11px] text-muted-foreground">Durée de l'appel (optionnel)</span>
+                </div>
+              )}
+              {/* Issues d'appel — 1 clic pour enregistrer le résultat de l'appel */}
+              {noteType === 'appel' && (
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1.5">Résultat de l'appel (1 clic) :</p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {CALL_OUTCOMES.map(o => (
+                      <button
+                        key={o}
+                        onClick={() => quickLogCall(o)}
+                        disabled={addLog.isPending}
+                        className="px-2.5 py-1 rounded-full text-xs font-medium border border-border text-foreground hover:bg-cyan-500/10 hover:border-cyan-500/40 hover:text-cyan-600 dark:hover:text-cyan-400 transition-all disabled:opacity-50"
+                      >
+                        {o}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               <AutocorrectTextarea
