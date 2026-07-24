@@ -35,7 +35,18 @@ import {
 } from '@/components/ui/DateRangeFilter'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
-const TODAY = new Date().toISOString().slice(0, 10)
+/* Les colonnes DATE reviennent de l'API en timestamp décalé au fuseau
+   (ex. '2026-07-23T23:00:00.000Z' pour une date locale du 2026-07-24).
+   ymd() ramène toute valeur date à 'YYYY-MM-DD' en heure LOCALE, pour comparer
+   les jours de façon fiable. */
+function ymd(v: string | null | undefined): string {
+  if (!v) return ''
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const TODAY = ymd(new Date().toISOString())
+const isRelanceToday = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) === TODAY
 
 /* Filtre par défaut : prospects du mois en cours (au lieu de "Toute la période"). */
 const DEFAULT_MONTH_RANGE: DateRange = (() => {
@@ -763,7 +774,7 @@ function ProspectRow({
   const accent  = stageAccent(p.statut)
   const dot     = stageDot(p.statut)
   const label   = stageLabel(p.statut)
-  const isToday = p.date_relance === TODAY
+  const isToday = isRelanceToday(p)
 
   return (
     <motion.tr
@@ -771,7 +782,11 @@ function ProspectRow({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -16 }}
-      className={`table-row cursor-pointer group ${selected ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+      className={`table-row cursor-pointer group ${
+        selected ? 'bg-blue-50/50 dark:bg-blue-900/10'
+        : isToday ? 'bg-amber-50/70 dark:bg-amber-500/10 shadow-[inset_3px_0_0_0_#f59e0b]'
+        : ''
+      }`}
       onClick={() => onEdit(p)}
     >
       {/* Checkbox */}
@@ -864,7 +879,7 @@ function KanbanCard({
   accent: string
   lastCall?: ProspectLog
 }) {
-  const isToday = p.date_relance === TODAY
+  const isToday = isRelanceToday(p)
   return (
     <Draggable draggableId={p.id} index={index}>
       {(provided, snapshot) => {
@@ -973,7 +988,7 @@ export default function Prospects() {
   const [deleting,     setDeleting]     = useState(false)
 
   const todayCount = useMemo(
-    () => prospects.filter(p => p.date_relance === TODAY).length,
+    () => prospects.filter(isRelanceToday).length,
     [prospects]
   )
 
@@ -985,7 +1000,7 @@ export default function Prospects() {
           || p.nom.toLowerCase().includes(search.toLowerCase())
           || (p.entreprise ?? '').toLowerCase().includes(search.toLowerCase())
         const matchStatut  = filterStatut === 'all' || p.statut === filterStatut
-        const matchToday   = !todayOnly || p.date_relance === TODAY
+        const matchToday   = !todayOnly || isRelanceToday(p)
         const matchDate    = dateMatch(p.created_at)
         return matchSearch && matchStatut && matchToday && matchDate
       })
