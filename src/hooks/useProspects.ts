@@ -33,8 +33,17 @@ export const PROSPECT_STAGES: { id: ProspectStatut; label: string; accent: strin
 ]
 
 export const PROSPECT_SOURCES = [
-  'LinkedIn', 'Référence', 'Site web', 'Instagram',
-  'Google Ads', 'Salon professionnel', 'Appel entrant', 'Autre',
+  'Facebook Ads',
+  'Instagram Ads',
+  'WhatsApp Ads',
+  'Google Ads',
+  'SEO',
+  'Recommandation',
+  'Site web',
+  'Instagram',
+  'LinkedIn',
+  'Appel entrant',
+  'Autre',
 ]
 
 const KEY = 'prospects'

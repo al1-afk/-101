@@ -614,6 +614,9 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                         <SelectTrigger><SelectValue placeholder="Origine du prospect..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none__">—</SelectItem>
+                          {form.source && !PROSPECT_SOURCES.includes(form.source) && (
+                            <SelectItem value={form.source}>{form.source}</SelectItem>
+                          )}
                           {PROSPECT_SOURCES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                         </SelectContent>
                       </Select>
