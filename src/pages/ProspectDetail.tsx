@@ -46,6 +46,33 @@ function waLink(phone: string, text?: string): string {
   return text ? `${base}?text=${encodeURIComponent(text)}` : base
 }
 
+/* Timestamp/date → 'YYYY-MM-DD' local (pour un <input type="date">). */
+function toDateInput(v: string | null | undefined): string {
+  if (!v) return ''
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+/* Formate un timestamp (ou date) en valeur d'input datetime-local ('YYYY-MM-DDTHH:MM'), heure locale. */
+function toLocalDatetimeInput(v: string | null | undefined): string {
+  if (!v) return ''
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+/* Affichage lisible « 25/07/2026 à 14:30 » (ou juste la date si minuit). */
+function formatRelance(v: string | null | undefined): string | null {
+  if (!v) return null
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return null
+  const p = (n: number) => String(n).padStart(2, '0')
+  const date = `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`
+  const time = `${p(d.getHours())}:${p(d.getMinutes())}`
+  return time === '00:00' ? date : `${date} à ${time}`
+}
+
 /* Issues d'appel fréquentes — enregistrées en 1 clic (type='appel'). */
 const CALL_OUTCOMES = [
   'Pas de réponse',
@@ -216,8 +243,8 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
     source:         prospect.source ?? '',
     notes:          prospect.notes ?? '',
     responsable:    prospect.responsable ?? '',
-    date_contact:   prospect.date_contact ?? '',
-    date_relance:   prospect.date_relance ?? '',
+    date_contact:   toDateInput(prospect.date_contact),
+    relance_at:     toLocalDatetimeInput(prospect.relance_at ?? prospect.date_relance),
   })
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -237,7 +264,8 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
       notes:          form.notes.trim() || null,
       responsable:    form.responsable.trim() || null,
       date_contact:   form.date_contact || null,
-      date_relance:   form.date_relance || null,
+      relance_at:     form.relance_at ? new Date(form.relance_at).toISOString() : null,
+      date_relance:   form.relance_at ? form.relance_at.slice(0, 10) : null,
     }
     update.mutate({ id: prospect.id, ...payload }, {
       onSuccess: () => {
@@ -299,8 +327,8 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
           <Input type="date" value={form.date_contact} onChange={set('date_contact')} />
         </div>
         <div className="space-y-1.5">
-          <label className="form-label">Relance</label>
-          <Input type="date" value={form.date_relance} onChange={set('date_relance')} />
+          <label className="form-label">Relance (date + heure)</label>
+          <Input type="datetime-local" value={form.relance_at} onChange={set('relance_at')} />
         </div>
         <div className="space-y-1.5 col-span-2">
           <label className="form-label">Notes</label>
@@ -434,13 +462,28 @@ export default function ProspectDetail() {
     })
   }
 
-  /* Édition inline des dates (1er contact / relance) — sauvegarde au changement. */
+  /* Édition inline du 1er contact (date simple) — sauvegarde au changement. */
   const saveDate = (field: 'date_contact' | 'date_relance', value: string) => {
     const current = (field === 'date_relance' ? prospect.date_relance : prospect.date_contact) ?? ''
     if (value === current) return
     update.mutate({ id: prospect.id, [field]: value || null }, {
       onSuccess: () => toast.success(field === 'date_relance' ? 'Date de relance mise à jour' : 'Date de 1er contact mise à jour'),
     })
+  }
+
+  /* Relance date + heure (datetime-local). On stocke relance_at (complet) et on
+     garde date_relance (partie jour) pour la liste / le filtre « aujourd'hui ». */
+  const saveRelance = (value: string) => {
+    if (!value) {
+      update.mutate({ id: prospect.id, relance_at: null, date_relance: null }, {
+        onSuccess: () => toast.success('Relance supprimée'),
+      })
+      return
+    }
+    update.mutate(
+      { id: prospect.id, relance_at: new Date(value).toISOString(), date_relance: value.slice(0, 10) },
+      { onSuccess: () => toast.success('Relance programmée') },
+    )
   }
 
   const handleDelete = () => {
@@ -558,11 +601,20 @@ export default function ProspectDetail() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">{label}</p>
-                {dateField ? (
+                {dateField === 'date_relance' ? (
+                  <input
+                    type="datetime-local"
+                    value={toLocalDatetimeInput(prospect.relance_at ?? prospect.date_relance)}
+                    onChange={e => saveRelance(e.target.value)}
+                    title="Cliquer pour définir la date et l'heure de relance"
+                    className="w-full text-sm font-bold text-foreground bg-transparent outline-none cursor-pointer -ml-0.5"
+                    style={{ colorScheme: 'light dark' }}
+                  />
+                ) : dateField === 'date_contact' ? (
                   <input
                     type="date"
-                    value={(dateField === 'date_relance' ? prospect.date_relance : prospect.date_contact) ?? ''}
-                    onChange={e => saveDate(dateField, e.target.value)}
+                    value={toDateInput(prospect.date_contact)}
+                    onChange={e => saveDate('date_contact', e.target.value)}
                     title="Cliquer pour définir la date"
                     className="w-full text-sm font-bold text-foreground bg-transparent outline-none cursor-pointer -ml-0.5"
                     style={{ colorScheme: 'light dark' }}
@@ -767,7 +819,7 @@ export default function ProspectDetail() {
               <InfoRow icon={Tag}       label="Source"      value={prospect.source} />
               <InfoRow icon={DollarSign} label="Valeur"     value={prospect.valeur_estimee != null ? formatCurrency(prospect.valeur_estimee) : null} />
               <InfoRow icon={Calendar}  label="1er contact" value={prospect.date_contact ? formatDate(prospect.date_contact) : null} />
-              <InfoRow icon={Bell}      label="Relance"     value={prospect.date_relance ? formatDate(prospect.date_relance) : null} />
+              <InfoRow icon={Bell}      label="Relance"     value={formatRelance(prospect.relance_at ?? prospect.date_relance)} />
               <InfoRow icon={Clock}     label="Créé le"     value={formatDate(prospect.created_at)} />
             </div>
           </div>

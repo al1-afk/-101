@@ -48,6 +48,16 @@ function ymd(v: string | null | undefined): string {
 const TODAY = ymd(new Date().toISOString())
 const isRelanceToday = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) === TODAY
 
+/* Heure de relance 'HH:MM' (depuis relance_at) — vide si minuit / non renseignée. */
+function relanceTime(v: string | null | undefined): string {
+  if (!v) return ''
+  const d = new Date(v)
+  if (isNaN(d.getTime())) return ''
+  const hh = d.getHours(), mm = d.getMinutes()
+  if (hh === 0 && mm === 0) return ''
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
 /* Filtre par défaut : prospects du mois en cours (au lieu de "Toute la période"). */
 const DEFAULT_MONTH_RANGE: DateRange = (() => {
   const r = computeRange('month')
@@ -848,6 +858,7 @@ function ProspectRow({
             {isToday && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
             <Calendar className="w-3 h-3" />
             {isToday ? "Aujourd'hui" : formatDate(p.date_relance)}
+            {relanceTime(p.relance_at) && <span className="font-semibold">· {relanceTime(p.relance_at)}</span>}
           </span>
         ) : (
           <span className="text-muted-foreground text-xs">—</span>

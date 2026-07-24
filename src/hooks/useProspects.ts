@@ -19,6 +19,8 @@ export interface Prospect {
   responsable:    string | null
   date_contact:   string | null
   date_relance:   string | null
+  /* Date + heure de relance (rappel planifié). date_relance garde la partie jour. */
+  relance_at?:    string | null
 }
 
 export const PROSPECT_STAGES: { id: ProspectStatut; label: string; accent: string; dot: string }[] = [
