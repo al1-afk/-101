@@ -45,6 +45,9 @@ function matrix(
 const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   clients:              matrix(ALL,                             ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
   prospects:            matrix(ALL,                             ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
+  /* Journal d'activité prospect (notes, appels, emails, changements de statut) —
+     création ouverte à qui travaille les prospects ; édition/suppression admin/manager. */
+  prospect_logs:        matrix(ALL,                             ['admin','manager','commercial'], ['admin','manager'],              ['admin','manager']),
   devis:                matrix(ALL,                             ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
   factures:             matrix(ALL,                             ['admin','manager','commercial','comptable'], ['admin','manager','comptable'], ['admin','manager','comptable']),
   paiements:            matrix(ALL,                             ['admin','manager','comptable'],              ['admin','manager','comptable'], ['admin','comptable']),

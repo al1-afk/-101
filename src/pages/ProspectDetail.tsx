@@ -5,7 +5,7 @@ import {
   ArrowLeft, Plus, Edit2, Trash2, Phone, Mail, Building2, User,
   Calendar, Bell, DollarSign, Loader2, AlertCircle, Clock, FileText,
   ChevronDown, ChevronRight, UserPlus, ArrowRightLeft, PhoneCall,
-  TrendingUp, Target, Tag, Check, AlertTriangle,
+  TrendingUp, Target, Tag, Check, AlertTriangle, MessageCircle,
 } from 'lucide-react'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
@@ -32,6 +32,19 @@ function stageLabel(statut: ProspectStatut) {
 }
 /* Étapes de progression linéaire (hors "perdu", qui est une issue terminale). */
 const PIPELINE = PROSPECT_STAGES.filter(s => s.id !== 'perdu')
+
+/* Numéro → format international pour wa.me (défaut Maroc +212).
+   0661091900 → 212661091900 ; 00212… / +212… → 212… ; garde un indicatif déjà présent. */
+function waNumber(phone: string): string {
+  let d = phone.replace(/\D/g, '')
+  if (d.startsWith('00')) d = d.slice(2)
+  else if (d.startsWith('0')) d = '212' + d.slice(1)
+  return d
+}
+function waLink(phone: string, text?: string): string {
+  const base = `https://wa.me/${waNumber(phone)}`
+  return text ? `${base}?text=${encodeURIComponent(text)}` : base
+}
 
 function formatDateTime(iso: string) {
   return new Intl.DateTimeFormat('fr-FR', {
@@ -129,8 +142,19 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
       </div>
     )
   }
+  const totalCallMin = logs.reduce((s, l) => s + (l.type === 'appel' ? (l.duration_minutes ?? 0) : 0), 0)
+  const callCount    = logs.filter(l => l.type === 'appel').length
   return (
-    <div className="relative space-y-0">
+    <div>
+      {totalCallMin > 0 && (
+        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 w-fit">
+          <PhoneCall className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+          <span className="text-xs font-semibold text-cyan-700 dark:text-cyan-300">
+            Temps d'appel total : {totalCallMin} min{callCount > 1 ? ` · ${callCount} appels` : ''}
+          </span>
+        </div>
+      )}
+      <div className="relative space-y-0">
       <div className="absolute left-[17px] top-4 bottom-4 w-px bg-border" />
       {logs.map((log, i) => {
         const cfg  = LOG_CONFIG[log.type] ?? LOG_CONFIG.edit
@@ -147,7 +171,14 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
               <Icon className={`w-3.5 h-3.5 ${cfg.color}`} />
             </div>
             <div className="flex-1 pt-1.5 min-w-0">
-              <p className="text-sm text-foreground leading-snug">{log.message}</p>
+              <div className="flex items-start gap-2 flex-wrap">
+                <p className="text-sm text-foreground leading-snug">{log.message}</p>
+                {log.duration_minutes != null && log.duration_minutes > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 whitespace-nowrap">
+                    <Clock className="w-3 h-3" />{log.duration_minutes} min
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-muted-foreground">{formatDateTime(log.created_at)}</span>
                 {log.auteur && <span className="text-xs text-muted-foreground">· {log.auteur}</span>}
@@ -156,6 +187,7 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
           </motion.div>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -291,9 +323,10 @@ export default function ProspectDetail() {
 
   const [editOpen,   setEditOpen]   = useState(false)
   const [delConfirm, setDelConfirm] = useState(false)
-  const [noteText,   setNoteText]   = useState('')
-  const [noteType,   setNoteType]   = useState<LogType>('note')
-  const [notesDraft, setNotesDraft] = useState(prospect?.notes ?? '')
+  const [noteText,     setNoteText]     = useState('')
+  const [noteType,     setNoteType]     = useState<LogType>('note')
+  const [callDuration, setCallDuration] = useState('')   // durée d'appel en minutes
+  const [notesDraft,   setNotesDraft]   = useState(prospect?.notes ?? '')
 
   /* Reset du composer d'activité quand on change de prospect */
   const [prevId, setPrevId] = useState(id)
@@ -301,6 +334,7 @@ export default function ProspectDetail() {
     setPrevId(id)
     setNoteText('')
     setNoteType('note')
+    setCallDuration('')
   }
   /* Garde le brouillon de notes aligné sur la valeur persistée — couvre le
      changement de prospect ET une édition via le dialog « Modifier ».
@@ -352,9 +386,13 @@ export default function ProspectDetail() {
 
   const handleAddNote = () => {
     if (!noteText.trim()) return
+    const dur = noteType === 'appel' && callDuration ? parseInt(callDuration, 10) : null
     addLog.mutate(
-      { prospect_id: prospect.id, type: noteType, message: noteText.trim(), auteur: 'Said' },
-      { onSuccess: () => { setNoteText(''); toast.success('Activité enregistrée') } },
+      {
+        prospect_id: prospect.id, type: noteType, message: noteText.trim(), auteur: 'Said',
+        duration_minutes: dur && dur > 0 ? dur : null,
+      },
+      { onSuccess: () => { setNoteText(''); setCallDuration(''); toast.success('Activité enregistrée') } },
     )
   }
 
@@ -444,6 +482,17 @@ export default function ProspectDetail() {
           </div>
 
           <div className="flex gap-2 flex-shrink-0">
+            {prospect.telephone && (
+              <a
+                href={waLink(prospect.telephone)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Envoyer un WhatsApp à ${prospect.telephone}`}
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm font-medium bg-[#25D366] hover:bg-[#20bd5a] text-white transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+              </a>
+            )}
             <Button size="sm" variant="ghost"
               className="bg-white/20 hover:bg-white/30 text-white border-white/30 border backdrop-blur-sm h-9"
               onClick={() => setEditOpen(true)}>
@@ -558,6 +607,24 @@ export default function ProspectDetail() {
                   )
                 })}
               </div>
+              {/* Durée d'appel — suivi du temps passé au téléphone */}
+              {noteType === 'appel' && (
+                <div className="flex items-center gap-2">
+                  <div className="relative w-40">
+                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-cyan-500 pointer-events-none" />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={callDuration}
+                      onChange={e => setCallDuration(e.target.value)}
+                      placeholder="Durée"
+                      className="pl-9 pr-10 h-8 text-sm"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">min</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">Durée de l'appel (optionnel)</span>
+                </div>
+              )}
               <AutocorrectTextarea
                 value={noteText}
                 onChange={e => setNoteText(e.target.value)}
@@ -619,6 +686,16 @@ export default function ProspectDetail() {
               <InfoRow icon={Building2} label="Entreprise"  value={prospect.entreprise} />
               <InfoRow icon={Mail}      label="Email"       value={prospect.email} href={prospect.email ? `mailto:${prospect.email}` : undefined} />
               <InfoRow icon={Phone}     label="Téléphone"   value={prospect.telephone} href={prospect.telephone ? `tel:${prospect.telephone}` : undefined} />
+              {prospect.telephone && (
+                <a
+                  href={waLink(prospect.telephone)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 ml-6 text-xs font-semibold text-[#25D366] hover:underline"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" /> Envoyer un WhatsApp
+                </a>
+              )}
               <InfoRow icon={UserPlus}  label="Responsable" value={prospect.responsable} />
               <InfoRow icon={Tag}       label="Source"      value={prospect.source} />
               <InfoRow icon={DollarSign} label="Valeur"     value={prospect.valeur_estimee != null ? formatCurrency(prospect.valeur_estimee) : null} />

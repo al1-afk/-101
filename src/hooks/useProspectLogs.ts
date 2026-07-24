@@ -5,12 +5,14 @@ import { toast } from 'sonner'
 export type LogType = 'creation' | 'statut' | 'note' | 'edit' | 'appel' | 'email'
 
 export interface ProspectLog {
-  id:          string
-  prospect_id: string
-  created_at:  string
-  type:        LogType
-  message:     string
-  auteur?:     string | null
+  id:               string
+  prospect_id:      string
+  created_at:       string
+  type:             LogType
+  message:          string
+  auteur?:          string | null
+  /* Durée en minutes — renseignée pour les appels (type='appel'), suivi du temps. */
+  duration_minutes?: number | null
 }
 
 const TABLE = 'prospect_logs'

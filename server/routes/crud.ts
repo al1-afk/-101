@@ -42,6 +42,8 @@ const ALLOWED_TABLES = new Set([
   'bons_livraison',
   /* Carnet d'adresses : freelances, candidats, artisans, etc. */
   'contacts',
+  /* Journal d'activité CRM (timeline prospect : notes, appels, emails…) */
+  'prospect_logs',
 ])
 
 const isProd = process.env.NODE_ENV === 'production'
@@ -74,15 +76,29 @@ router.get('/:table', async (req: Request, res: Response) => {
   const limit    = Math.min(Number(req.query.limit  || 500), 1000)
   const offset   = Math.max(Number(req.query.offset || 0), 0)
 
+  /* Filtres d'égalité optionnels : tout query param hors réservés est traité
+     comme `colonne = valeur` (nom validé par SAFE_COL, valeur paramétrée).
+     Ex. /api/prospect_logs?prospect_id=… → timeline scopée à un prospect. */
+  const RESERVED = new Set(['orderBy', 'order', 'limit', 'offset'])
+  const whereClauses: string[] = []
+  const whereVals: unknown[] = []
+  for (const [k, v] of Object.entries(req.query)) {
+    if (RESERVED.has(k) || typeof v !== 'string' || !SAFE_COL.test(k)) continue
+    whereVals.push(v)
+    whereClauses.push(`${k} = $${whereVals.length}`)
+  }
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
+
   try {
     /* RLS enforced by SET LOCAL app.current_tenant in tenantQuery */
     const rows = await tenantQuery(
       tenantId,
-      `SELECT * FROM ${table} ORDER BY ${orderBy} ${order} LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      `SELECT * FROM ${table} ${whereSql} ORDER BY ${orderBy} ${order} LIMIT $${whereVals.length + 1} OFFSET $${whereVals.length + 2}`,
+      [...whereVals, limit, offset]
     )
     res.json(rows)
   } catch (err: any) {
+    logger.error(`[GET /api/${table}]`, err?.code, err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
   }
 })
