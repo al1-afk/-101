@@ -434,6 +434,15 @@ export default function ProspectDetail() {
     })
   }
 
+  /* Édition inline des dates (1er contact / relance) — sauvegarde au changement. */
+  const saveDate = (field: 'date_contact' | 'date_relance', value: string) => {
+    const current = (field === 'date_relance' ? prospect.date_relance : prospect.date_contact) ?? ''
+    if (value === current) return
+    update.mutate({ id: prospect.id, [field]: value || null }, {
+      onSuccess: () => toast.success(field === 'date_relance' ? 'Date de relance mise à jour' : 'Date de 1er contact mise à jour'),
+    })
+  }
+
   const handleDelete = () => {
     del.mutate(prospect.id, {
       onSuccess: () => { navigate(`${base}/prospects`); toast.success('Prospect supprimé') },
@@ -539,17 +548,32 @@ export default function ProspectDetail() {
           { label: 'Statut',         value: stageLabel(prospect.statut), icon: Target, color: accent, bg: `${accent}12` },
           { label: '1er contact',    value: prospect.date_contact ? formatDate(prospect.date_contact) : '—', icon: Calendar, color: '#6366f1', bg: '#6366f112' },
           { label: 'Relance',        value: prospect.date_relance ? formatDate(prospect.date_relance) : '—', icon: Bell, color: '#f59e0b', bg: '#f59e0b12' },
-        ].map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="card p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: bg }}>
-              <Icon className="w-5 h-5" style={{ color }} />
+        ].map(({ label, value, icon: Icon, color, bg }) => {
+          const dateField: 'date_contact' | 'date_relance' | null =
+            label === 'Relance' ? 'date_relance' : label === '1er contact' ? 'date_contact' : null
+          return (
+            <div key={label} className="card p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: bg }}>
+                <Icon className="w-5 h-5" style={{ color }} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-muted-foreground">{label}</p>
+                {dateField ? (
+                  <input
+                    type="date"
+                    value={(dateField === 'date_relance' ? prospect.date_relance : prospect.date_contact) ?? ''}
+                    onChange={e => saveDate(dateField, e.target.value)}
+                    title="Cliquer pour définir la date"
+                    className="w-full text-sm font-bold text-foreground bg-transparent outline-none cursor-pointer -ml-0.5"
+                    style={{ colorScheme: 'light dark' }}
+                  />
+                ) : (
+                  <p className="text-base font-bold text-foreground leading-tight truncate">{value}</p>
+                )}
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className="text-base font-bold text-foreground leading-tight truncate">{value}</p>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* ── Pipeline stepper ── */}
