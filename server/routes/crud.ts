@@ -123,6 +123,31 @@ function normalizeValues(obj: Record<string, unknown>): Record<string, unknown> 
   )
 }
 
+/* Traduit une erreur Postgres en réponse HTTP lisible côté client.
+   Le front (src/lib/api.ts) affiche `data.error` dans un toast, donc ce
+   message est vu tel quel par l'utilisateur.
+   - P0001 = RAISE EXCEPTION applicatif (garde-fous métier des triggers,
+     ex. « Le paiement dépasse le solde restant ») → 400 + message tel quel :
+     il est rédigé pour l'utilisateur, pas pour le debug.
+   - 23xxx = violations d'intégrité → 400/409 + message court et clair.
+   - Sinon → 500 générique + SQLSTATE (aide à repérer une dérive de schéma). */
+function sendDbError(res: Response, err: any, ctx: string, extra?: unknown): void {
+  const code = typeof err?.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : null
+  logger.error(ctx, code, err?.message, err?.detail, extra ?? '')
+
+  if (code === 'P0001') {
+    const msg = typeof err?.message === 'string' && err.message.trim() ? err.message.trim() : 'Opération refusée'
+    return void res.status(400).json({ error: msg })
+  }
+  switch (code) {
+    case '23505': return void res.status(409).json({ error: 'Doublon : cet enregistrement existe déjà.' })
+    case '23503': return void res.status(400).json({ error: 'Référence liée introuvable ou déjà supprimée.' })
+    case '23502': return void res.status(400).json({ error: 'Un champ obligatoire est manquant.' })
+    case '23514': return void res.status(400).json({ error: 'Valeur non autorisée pour un des champs.' })
+  }
+  res.status(500).json({ error: code ? `Erreur serveur (${code})` : 'Erreur serveur' })
+}
+
 /* ── POST /api/:table ────────────────────────────────────────── */
 router.post('/:table', async (req: Request, res: Response) => {
   const table = tableParam(req)
@@ -154,9 +179,7 @@ router.post('/:table', async (req: Request, res: Response) => {
       }
     }
   } catch (err: any) {
-    logger.error(`[POST /api/${table}]`, err?.code, err?.message, err?.detail, { keys })
-    const code = typeof err?.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : null
-    res.status(500).json({ error: code ? `Erreur serveur (${code})` : 'Erreur serveur' })
+    sendDbError(res, err, `[POST /api/${table}]`, { keys })
   }
 })
 
@@ -193,9 +216,7 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
       void notifyDevisAccepte(tid, row)
     }
   } catch (err: any) {
-    logger.error(`[PATCH /api/${table}/${id}]`, err?.code, err?.message, err?.detail, { keys })
-    const code = typeof err?.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code) ? err.code : null
-    res.status(500).json({ error: code ? `Erreur serveur (${code})` : 'Erreur serveur' })
+    sendDbError(res, err, `[PATCH /api/${table}/${id}]`, { keys })
   }
 })
 
