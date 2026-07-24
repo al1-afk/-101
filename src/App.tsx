@@ -13,6 +13,7 @@ import { TenantProvider } from '@/contexts/TenantContext'
 const Dashboard      = lazy(() => import('@/pages/Dashboard'))
 const Auth           = lazy(() => import('@/pages/Auth'))
 const Prospects      = lazy(() => import('@/pages/Prospects'))
+const ProspectDetail = lazy(() => import('@/pages/ProspectDetail'))
 const Clients        = lazy(() => import('@/pages/Clients'))
 const RenewalsBreakdown = lazy(() => import('@/pages/RenewalsBreakdown'))
 const ClientDetail   = lazy(() => import('@/pages/ClientDetail'))
@@ -141,6 +142,7 @@ export default function App() {
             }>
               <Route index                              element={<Dashboard />} />
               <Route path="prospects"                  element={<Prospects />} />
+              <Route path="prospects/:id"              element={<ProspectDetail />} />
               <Route path="outbound"                   element={<OutboundDashboard />} />
               <Route path="outbound/prospects"         element={<OutboundProspects />} />
               <Route path="outbound/pipeline"          element={<OutboundPipeline />} />

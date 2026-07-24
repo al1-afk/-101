@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   DragDropContext, Droppable, Draggable,
@@ -903,6 +904,9 @@ function KanbanCard({
 
 /* ─── Main Page ───────────────────────────────────────────────────── */
 export default function Prospects() {
+  const navigate = useNavigate()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
+  const base = tenantSlug ? `/${tenantSlug}` : ''
   const { data: prospects = [], isLoading, isError } = useProspects()
   const createProspect  = useCreateProspect()
   const updateProspect  = useUpdateProspect()
@@ -950,7 +954,7 @@ export default function Prospects() {
   const paginated  = filtered.slice(pageStart, pageStart + PAGE_SIZE)
 
   const openNew     = () => { setEditTarget(null); setDrawerOpen(true) }
-  const openEdit    = (p: Prospect) => { setEditTarget(p); setDrawerOpen(true) }
+  const openEdit    = (p: Prospect) => navigate(`${base}/prospects/${p.id}`)
   const closeDrawer = () => setDrawerOpen(false)
 
   const toggleSelect    = (id: string) =>
