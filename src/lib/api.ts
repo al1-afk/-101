@@ -544,6 +544,9 @@ export const teamMemberTasksApi         = tableApi('team_member_tasks')
 /* ── Bons de livraison (handover client + mots de passe + liens) ── */
 export const bonsLivraisonApi           = tableApi('bons_livraison')
 
+/* ── Bibliothèque de modèles de prestations (devis) ─────────────── */
+export const prestationModelsApi        = tableApi('prestation_models')
+
 /* ── Journal d'activité unifié (CRUD + membres + sécurité) ─────── */
 export interface ActivityEntry {
   id:           string
