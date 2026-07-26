@@ -97,8 +97,8 @@ const CO = {
   patente: '10301120',
   ice:     '003453451000013',
   banque:  'CIH Bank',
-  rib:     '230 670 6430581221008400 29',
-  swift:   'CIHMMAC',
+  rib:     '230 570 6435881221008400 29',
+  swift:   'CIHMMAMC',
 }
 
 const DEFAULT_CONDITIONS = [

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import DOMPurify from 'dompurify'
@@ -10,12 +10,18 @@ import {
   AlignLeft, List as ListIcon, Receipt,
   Bold, Italic, Underline, AlignCenter, AlignRight,
   ListOrdered, IndentIncrease, IndentDecrease, Eraser, Strikethrough,
-  BookMarked, Save, Package, Send,
+  BookMarked, Save, Package, Send, Library, GripVertical, Copy, Sparkles,
 } from 'lucide-react'
 import { useDevis, useCreateDevis, useUpdateDevis, useDeleteDevis, type Devis } from '@/hooks/useDevis'
 import { useClients, useCreateClient, type Client } from '@/hooks/useClients'
 import { useCreateFacture, useFactures } from '@/hooks/useFactures'
 import { produitsApi } from '@/lib/api'
+import { DragDropContext, Droppable, Draggable, type DropResult, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
+import PrestationLibraryDialog from '@/components/devis/PrestationLibraryDialog'
+import {
+  buildPrestationFromTemplate, getTemplateByKey, templateBaseTitle,
+  type PrestationTemplate, type DevisTemplatePreset, type TemplateVars,
+} from '@/lib/prestationTemplates'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
 import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
@@ -24,8 +30,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatCurrency, formatDate, getInitials } from '@/lib/utils'
 import { toast } from 'sonner'
-import { generateDevisPDFWithRetry } from '@/lib/generateDevisPDF'
-import { generateDevisPDFBlob }     from '@/lib/generateDevisPDFBlob'
+import { generateDevisPDFWithRetry, generateDevisPDFBlobFromTemplate } from '@/lib/generateDevisPDF'
 import { SendDocumentDialog }       from '@/components/SendDocumentDialog'
 import DevisTemplate from '@/components/devis/DevisTemplate'
 import DevisActions, { buildPdfFilename } from '@/components/devis/DevisActions'
@@ -77,6 +82,31 @@ export interface DevisNotesData {
   /* Template & ICE client — utilisés par les modèles alternatifs. */
   template?:        DevisTemplateKind
   clientIce?:       string
+  /* Champs du modèle « Executive » (optionnels). */
+  objet?:           string
+  offreTitle?:      string
+  /* Marqueur de génération IA (facultatif → rétrocompatible).
+     Sert au badge « Généré par IA — à valider » dans l'app. JAMAIS rendu
+     sur le PDF destiné au client. */
+  aiMeta?: {
+    generated?:          boolean
+    validated?:          boolean
+    generationId?:       string | null
+    confidence?:         number
+    questionsToConfirm?: string[]
+    warnings?:           string[]
+    assumptions?:        string[]
+    generatedAt?:        string
+  }
+}
+
+/** Extrait le marqueur IA d'un devis (pour le badge « à valider »). */
+export function getDevisAiMeta(notes: string | null): NonNullable<DevisNotesData['aiMeta']> | null {
+  if (!notes) return null
+  try {
+    const d = JSON.parse(notes) as DevisNotesData
+    return d.aiMeta && d.aiMeta.generated ? d.aiMeta : null
+  } catch { return null }
 }
 
 export const DEFAULT_BANK: BankInfo = { banque: 'CIH', iban: '230 570 6435881221008400 29', swift: 'CIHMMAMC' }
@@ -353,11 +383,13 @@ interface SavedPrestation {
 
 /* ─── Prestation row ──────────────────────────────────────────────── */
 export function PrestationRow({
-  p, onChange, onDelete,
+  p, onChange, onDelete, onDuplicate, dragHandleProps,
 }: {
   p: Prestation
   onChange: (id: string, field: keyof Prestation, val: string | number | DescriptionBlock[]) => void
   onDelete: (id: string) => void
+  onDuplicate?: (id: string) => void
+  dragHandleProps?: DraggableProvidedDragHandleProps | null
 }) {
   const showQty  = p.showQuantite ?? true
   const showPrix = p.showPrixUnit ?? true
@@ -445,6 +477,16 @@ export function PrestationRow({
     >
       {/* Titre + library + save */}
       <div className="flex items-start gap-2">
+        {dragHandleProps && (
+          <button
+            type="button"
+            {...dragHandleProps}
+            title="Glisser pour réordonner"
+            className="w-6 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0 cursor-grab active:cursor-grabbing"
+          >
+            <GripVertical className="w-4 h-4" />
+          </button>
+        )}
         <div className="flex-1 relative" ref={libRef}>
           <AutocorrectInput
             value={p.titre}
@@ -532,6 +574,16 @@ export function PrestationRow({
             : <Save className="w-4 h-4" />}
         </button>
 
+        {onDuplicate && (
+          <button
+            type="button"
+            onClick={() => onDuplicate(p.id)}
+            title="Dupliquer cette prestation"
+            className="w-8 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10 transition-colors flex-shrink-0"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+        )}
         <button
           onClick={() => onDelete(p.id)}
           className="w-8 h-9 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0"
@@ -735,7 +787,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       ? p.map((x, i) => ({ ...x, id: String(i + 1) })) as Prestation[]
       : [{ id: '1', titre: '', description: [], quantite: 1, prix_unitaire: 0 }]
   })
-  const [tvaEnabled,     setTvaEnabled]     = useState(() => editDevis ? editDevis.tva > 0 : true)
+  /* Nouveau devis : HT seulement par défaut (TVA désactivée). */
+  const [tvaEnabled,     setTvaEnabled]     = useState(() => editDevis ? editDevis.tva > 0 : false)
   const [tvaRate,        setTvaRate]        = useState(() => (editDevis?.tva ?? 0) > 0 ? editDevis!.tva : 20)
   const [bankInfo,       setBankInfo]       = useState<BankInfo>(() =>
     editDevis?.notes ? parseDevisNotes(editDevis.notes).bankInfo : DEFAULT_BANK
@@ -747,13 +800,26 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   })
   const [newCondition,   setNewCondition]   = useState('')
   const [template,       setTemplate]       = useState<DevisTemplateKind>(() => {
-    if (!editDevis?.notes) return 'default'
+    /* Modèle par défaut d'un nouveau devis : Executive (premium). */
+    if (!editDevis?.notes) return 'executive'
     try { const d = JSON.parse(editDevis.notes) as DevisNotesData; return (d.template as DevisTemplateKind) ?? 'default' } catch { return 'default' }
   })
   const [clientIce,      setClientIce]      = useState<string>(() => {
     if (!editDevis?.notes) return ''
     try { const d = JSON.parse(editDevis.notes) as DevisNotesData; return typeof d.clientIce === 'string' ? d.clientIce : '' } catch { return '' }
   })
+  const [objet,          setObjet]          = useState<string>(() => {
+    if (!editDevis?.notes) return ''
+    try { const d = JSON.parse(editDevis.notes) as DevisNotesData; return typeof d.objet === 'string' ? d.objet : '' } catch { return '' }
+  })
+  const [offreTitle,     setOffreTitle]     = useState<string>(() => {
+    if (!editDevis?.notes) return ''
+    try { const d = JSON.parse(editDevis.notes) as DevisNotesData; return typeof d.offreTitle === 'string' ? d.offreTitle : '' } catch { return '' }
+  })
+  /* Marqueur IA : conservé à travers les éditions. `aiValidated` passe à true
+     quand l'utilisateur « valide » le brouillon IA (retire le badge). */
+  const aiMeta = useMemo(() => getDevisAiMeta(editDevis?.notes ?? null), [editDevis?.notes])
+  const [aiValidated, setAiValidated] = useState<boolean>(() => !!aiMeta?.validated)
   const [signature, setSignature] = useState<string | null>(() => {
     // Load saved company signature from localStorage
     try { return localStorage.getItem('ng_signature') ?? null } catch { return null }
@@ -826,6 +892,101 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   const deletePrestation = (id: string) =>
     setPrestations(p => p.filter(x => x.id !== id))
 
+  const duplicatePrestation = (id: string) =>
+    setPrestations(p => {
+      const idx = p.findIndex(x => x.id === id)
+      if (idx < 0) return p
+      const src = p[idx]
+      const copy: Prestation = {
+        ...src,
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+        description: src.description.map(b => ({ ...b, id: uid() })),
+      }
+      const next = [...p]
+      next.splice(idx + 1, 0, copy)
+      return next
+    })
+
+  const onPrestationDragEnd = (result: DropResult) => {
+    const { source, destination } = result
+    if (!destination || destination.index === source.index) return
+    setPrestations(p => {
+      const next = [...p]
+      const [moved] = next.splice(source.index, 1)
+      next.splice(destination.index, 0, moved)
+      return next
+    })
+  }
+
+  /* ── Bibliothèque de modèles de prestations ── */
+  const [libraryOpen,   setLibraryOpen]   = useState(false)
+  const [pendingPreset, setPendingPreset] = useState<DevisTemplatePreset | null>(null)
+  const prestationsEndRef = useRef<HTMLDivElement>(null)
+
+  const normTitle = (s: string) =>
+    s.replace(/\[[A-Z0-9_]+\]/g, '').replace(/—\s*$/, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+  const existingBaseTitles = useMemo(
+    () => new Set(prestations.map(p => normTitle(p.titre))),
+    [prestations],
+  )
+
+  const buildTemplateVars = (): TemplateVars => ({
+    '[NOM_ENTREPRISE]':   client?.entreprise || client?.nom || '',
+    '[VILLE]':            client?.ville || '',
+    '[SECTEUR_ACTIVITE]': client?.type_service || client?.sous_categorie || '',
+  })
+
+  const scrollToPrestationsEnd = () =>
+    setTimeout(() => prestationsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60)
+
+  /** Ajoute un ou plusieurs modèles au devis (bloque les doublons des modèles uniques). */
+  const handleAddTemplates = (tpls: PrestationTemplate[]) => {
+    const vars = buildTemplateVars()
+    const seen = new Set(existingBaseTitles)
+    const toAdd: Prestation[] = []
+    const skipped: string[] = []
+    for (const t of tpls) {
+      if (t.unique && seen.has(templateBaseTitle(t))) { skipped.push(t.titre); continue }
+      toAdd.push(buildPrestationFromTemplate(t, vars))
+      if (t.unique) seen.add(templateBaseTitle(t))
+    }
+    if (toAdd.length) {
+      setPrestations(p => [...p, ...toAdd])
+      toast.success(toAdd.length === 1
+        ? 'Modèle ajouté au devis avec succès.'
+        : `${toAdd.length} modèles ajoutés au devis.`)
+      scrollToPrestationsEnd()
+    }
+    if (skipped.length) toast.info(`Ce modèle est déjà présent : ${skipped.join(', ')}`)
+    setLibraryOpen(false)
+  }
+
+  /** Applique un modèle de devis complet (remplace le contenu ou l'ajoute à la suite). */
+  const applyPreset = (preset: DevisTemplatePreset, mode: 'replace' | 'append') => {
+    const vars = buildTemplateVars()
+    const base = mode === 'replace' ? [] : prestations
+    const seen = new Set(base.map(p => normTitle(p.titre)))
+    const built: Prestation[] = []
+    for (const key of preset.modelKeys) {
+      const t = getTemplateByKey(key)
+      if (!t) continue
+      if (t.unique && seen.has(templateBaseTitle(t))) continue
+      built.push(buildPrestationFromTemplate(t, vars))
+      if (t.unique) seen.add(templateBaseTitle(t))
+    }
+    setPrestations(mode === 'replace' ? built : [...base, ...built])
+    setPendingPreset(null)
+    toast.success(`Modèle « ${preset.label} » appliqué (${built.length} prestations).`)
+    scrollToPrestationsEnd()
+  }
+
+  const handleApplyDevisPreset = (preset: DevisTemplatePreset) => {
+    const hasContent = prestations.some(p => p.titre.trim() || p.prix_unitaire > 0 || p.description.length > 0)
+    if (hasContent) setPendingPreset(preset)
+    else applyPreset(preset, 'replace')
+  }
+
   /* ── New client save ── */
   const saveNewClient = () => {
     if (!newClientForm.nom.trim()) return
@@ -845,7 +1006,10 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
 
   /* ── Final submit ── */
   const handleSubmit = () => {
-    if (!selectedId) { toast.error('Sélectionnez un client'); setStep(1); return }
+    /* Un brouillon IA part d'un prospect (pas encore client) : on autorise
+       l'enregistrement sans client sélectionné dans ce cas précis. */
+    const prospectLinked = !!(editDevis as any)?.prospect_id
+    if (!selectedId && !prospectLinked) { toast.error('Sélectionnez un client'); setStep(1); return }
     const notesData: DevisNotesData = {
       prestations: prestations.map(({ id: _id, ...p }) => p),
       conditions,
@@ -853,6 +1017,11 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       signature,
       template,
       clientIce: clientIce.trim() || undefined,
+      objet: objet.trim() || undefined,
+      offreTitle: offreTitle.trim() || undefined,
+      /* Conserve le marqueur IA à travers les éditions ; `validated` reflète
+         l'action « Valider » de l'utilisateur. */
+      ...(aiMeta ? { aiMeta: { ...aiMeta, validated: aiValidated } } : {}),
     }
     const notes = JSON.stringify(notesData)
 
@@ -866,11 +1035,11 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       }, 0)
     const newNumero = `DEV-${year}-${String(maxSeq + 1).padStart(3, '0')}`
 
-    const clientNom = clients.find(c => c.id === selectedId)?.nom ?? ''
+    const clientNom = clients.find(c => c.id === selectedId)?.nom ?? (editDevis?.client_nom ?? '')
 
     const payload = {
       numero:          editDevis?.numero ?? newNumero,
-      client_id:       selectedId,
+      client_id:       selectedId || null,
       client_nom:      clientNom,
       /* ✅ BUG-01 fix: NEVER overwrite the existing statut on edit */
       statut:          editDevis?.statut ?? ('brouillon' as const),
@@ -900,7 +1069,7 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       created_at:      new Date().toISOString(),
       numero:          editDevis?.numero ?? `DEV-${new Date().getFullYear()}-XXXX`,
       client_id:       selectedId,
-      client_nom:      client?.entreprise ?? client?.nom,
+      client_nom:      client?.entreprise ?? client?.nom ?? editDevis?.client_nom,
       statut:          editDevis?.statut ?? 'brouillon',
       date_emission:   dateDevis,
       date_expiration: dateValidite,
@@ -914,6 +1083,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
         signature,
         template,
         clientIce: clientIce.trim() || undefined,
+        objet: objet.trim() || undefined,
+        offreTitle: offreTitle.trim() || undefined,
       }),
     }
 
@@ -933,6 +1104,21 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
             <span className="hidden sm:inline-block text-xs text-slate-400 font-mono bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded select-none truncate">
               {previewDevis.numero}
             </span>
+
+            {/* Badge « Généré par IA — à valider » (jamais présent sur le PDF).
+                Un clic « Valider » lève le badge sans changer le statut. */}
+            {aiMeta && !aiValidated && (
+              <button type="button" onClick={() => { setAiValidated(true); toast.success('Brouillon IA marqué comme validé — pensez à enregistrer.') }}
+                title="Marquer ce brouillon IA comme vérifié (retire le badge). Enregistrez ensuite."
+                className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 hover:bg-violet-200 transition-colors">
+                <Sparkles className="w-3 h-3" /> Généré par IA — à valider
+              </button>
+            )}
+            {aiMeta && aiValidated && (
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <Check className="w-3 h-3" /> Brouillon validé
+              </span>
+            )}
 
             {/* Mobile-only tab switcher */}
             <div className="md:hidden flex items-center rounded-lg border border-slate-200 dark:border-slate-600 p-0.5 bg-slate-50 dark:bg-slate-700/50">
@@ -1006,17 +1192,45 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
               {/* ── Prestations ── */}
               <div className="space-y-3">
                 <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Prestations / Services</p>
-                <AnimatePresence>
-                  {prestations.map(p => (
-                    <PrestationRow key={p.id} p={p} onChange={updatePrestation} onDelete={deletePrestation} />
-                  ))}
-                </AnimatePresence>
-                <button
-                  onClick={addPrestation}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-600 text-xs text-slate-400 hover:border-blue-600/50 hover:text-blue-600 dark:text-blue-400 transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Ajouter une prestation
-                </button>
+                <DragDropContext onDragEnd={onPrestationDragEnd}>
+                  <Droppable droppableId="prestations">
+                    {dropProvided => (
+                      <div ref={dropProvided.innerRef} {...dropProvided.droppableProps} className="space-y-3">
+                        {prestations.map((p, index) => (
+                          <Draggable key={p.id} draggableId={p.id} index={index}>
+                            {dragProvided => (
+                              <div ref={dragProvided.innerRef} {...dragProvided.draggableProps}>
+                                <PrestationRow
+                                  p={p}
+                                  onChange={updatePrestation}
+                                  onDelete={deletePrestation}
+                                  onDuplicate={duplicatePrestation}
+                                  dragHandleProps={dragProvided.dragHandleProps}
+                                />
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {dropProvided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </DragDropContext>
+                <div ref={prestationsEndRef} />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    onClick={addPrestation}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-600 text-xs text-slate-400 hover:border-blue-600/50 hover:text-blue-600 dark:text-blue-400 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Ajouter une prestation
+                  </button>
+                  <button
+                    onClick={() => setLibraryOpen(true)}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors shadow-sm"
+                  >
+                    <Library className="w-3.5 h-3.5" /> Ajouter un modèle
+                  </button>
+                </div>
 
                 {/* Template selector — label au-dessus + menu large pour rester lisible même en panneau étroit */}
                 <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 divide-y divide-slate-200 dark:divide-slate-600">
@@ -1028,14 +1242,14 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                     <Select value={template} onValueChange={v => setTemplate(v as DevisTemplateKind)}>
                       <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="default">Détaillé (par défaut)</SelectItem>
+                        <SelectItem value="executive">Executive (premium) · par défaut</SelectItem>
+                        <SelectItem value="default">Détaillé</SelectItem>
                         <SelectItem value="simple">Simple (Nextgital)</SelectItem>
                         <SelectItem value="offer">Proposition sans tableau</SelectItem>
-                        <SelectItem value="executive">Executive (premium)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  {(template === 'simple' || template === 'offer') && (
+                  {(template === 'simple' || template === 'offer' || template === 'executive') && (
                     <div className="p-2.5 space-y-1.5">
                       <p className="text-xs text-slate-600 dark:text-slate-300">ICE client</p>
                       <Input
@@ -1046,13 +1260,41 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                       />
                     </div>
                   )}
+                  {template === 'executive' && (
+                    <div className="p-2.5 space-y-2.5">
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-slate-600 dark:text-slate-300">Titre de l'offre</p>
+                        <Input
+                          value={offreTitle}
+                          onChange={e => setOffreTitle(e.target.value)}
+                          placeholder="Ex : PACK COMPLET E-COMMERCE"
+                          className="h-8 text-xs w-full"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-slate-600 dark:text-slate-300">Objet du devis</p>
+                        <textarea
+                          value={objet}
+                          onChange={e => setObjet(e.target.value)}
+                          placeholder="Décrivez l'objet et l'objectif du devis. Laissez vide pour un texte par défaut."
+                          rows={4}
+                          className="w-full rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2.5 py-2 text-xs text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+                        />
+                        <p className="text-[10px] text-slate-400">
+                          Utilisé uniquement par le modèle Executive (section « Objet du devis »).
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* TVA */}
                 <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30">
                   <div>
                     <p className="text-xs font-medium text-slate-700 dark:text-slate-200">TVA</p>
-                    {tvaEnabled && <p className="text-[10px] text-slate-400">{tvaRate}% · +{formatCurrency(montantTVA)}</p>}
+                    {tvaEnabled
+                      ? <p className="text-[10px] text-slate-400">{tvaRate}% · +{formatCurrency(montantTVA)}</p>
+                      : <p className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Prix HT seulement · TVA & TTC masqués</p>}
                   </div>
                   <div className="flex items-center gap-2">
                     {tvaEnabled && (
@@ -1085,8 +1327,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                     </div>
                   )}
                   <div className="flex justify-between px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-b-xl">
-                    <span className="font-bold text-slate-700 dark:text-slate-100">TOTAL TTC</span>
-                    <span className="font-bold text-[#1e64c4]">{formatCurrency(montantTTC)}</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-100">{tvaEnabled ? 'TOTAL TTC' : 'TOTAL HT'}</span>
+                    <span className="font-bold text-[#1e64c4]">{formatCurrency(tvaEnabled ? montantTTC : montantHT)}</span>
                   </div>
                 </div>
               </div>
@@ -1202,6 +1444,39 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
             </A4Preview>
           </div>
         </div>
+
+        {/* Bibliothèque des prestations */}
+        <PrestationLibraryDialog
+          open={libraryOpen}
+          onClose={() => setLibraryOpen(false)}
+          onAddTemplates={handleAddTemplates}
+          onApplyDevisPreset={handleApplyDevisPreset}
+          existingBaseTitles={existingBaseTitles}
+        />
+
+        {/* Confirmation : modèle de devis sur un devis déjà rempli */}
+        <Dialog open={!!pendingPreset} onOpenChange={v => { if (!v) setPendingPreset(null) }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Ce devis contient déjà des prestations</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Souhaitez-vous remplacer les prestations existantes par le modèle
+              «&nbsp;{pendingPreset?.label}&nbsp;», ou l'ajouter à la suite&nbsp;?
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end mt-3">
+              <Button variant="ghost" size="sm" onClick={() => setPendingPreset(null)}>Annuler</Button>
+              <Button variant="secondary" size="sm"
+                onClick={() => pendingPreset && applyPreset(pendingPreset, 'append')}>
+                Ajouter à la suite
+              </Button>
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white border-0"
+                onClick={() => pendingPreset && applyPreset(pendingPreset, 'replace')}>
+                Remplacer
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
@@ -1443,10 +1718,7 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
           filename={`${d.numero}.pdf`}
           defaultEmail={client?.email ?? ''}
           clientNom={d.client_nom ?? client?.entreprise ?? client?.nom}
-          buildPdf={() => generateDevisPDFBlob(d, {
-            clientNom:   d.client_nom ?? client?.entreprise ?? client?.nom,
-            clientEmail: client?.email ?? undefined,
-          })}
+          buildPdf={() => generateDevisPDFBlobFromTemplate(d, client)}
         />
 
         {/* ── A4 Preview */}
@@ -1606,19 +1878,21 @@ function DevisPreviewModal({ devis: d, client, onClose }: { devis: Devis; client
                 {/* Totals */}
                 <div className="px-8 pt-4 flex justify-end">
                   <div className="w-60 rounded-lg overflow-hidden border border-slate-200">
-                    <div className="flex justify-between px-4 py-2.5 bg-white border-b border-slate-100">
-                      <span className="text-[10px] text-slate-500">Sous-total HT</span>
-                      <span className="text-[10px] font-bold text-slate-700">{formatCurrency(d.montant_ht)}</span>
-                    </div>
                     {hasTVA && (
-                      <div className="flex justify-between px-4 py-2.5 bg-white border-b border-slate-100">
-                        <span className="text-[10px] text-slate-500">TVA ({d.tva}%)</span>
-                        <span className="text-[10px] font-bold text-slate-700">{formatCurrency(d.montant_ttc - d.montant_ht)}</span>
-                      </div>
+                      <>
+                        <div className="flex justify-between px-4 py-2.5 bg-white border-b border-slate-100">
+                          <span className="text-[10px] text-slate-500">Sous-total HT</span>
+                          <span className="text-[10px] font-bold text-slate-700">{formatCurrency(d.montant_ht)}</span>
+                        </div>
+                        <div className="flex justify-between px-4 py-2.5 bg-white border-b border-slate-100">
+                          <span className="text-[10px] text-slate-500">TVA ({d.tva}%)</span>
+                          <span className="text-[10px] font-bold text-slate-700">{formatCurrency(d.montant_ttc - d.montant_ht)}</span>
+                        </div>
+                      </>
                     )}
                     <div className="flex justify-between px-4 py-3 bg-[#08143A]">
-                      <span className="text-[10px] font-bold text-[#00A2FF] uppercase tracking-wide">Total TTC</span>
-                      <span className="text-sm font-black text-white">{formatCurrency(d.montant_ttc)}</span>
+                      <span className="text-[10px] font-bold text-[#00A2FF] uppercase tracking-wide">{hasTVA ? 'Total TTC' : 'Total HT'}</span>
+                      <span className="text-sm font-black text-white">{formatCurrency(hasTVA ? d.montant_ttc : d.montant_ht)}</span>
                     </div>
                   </div>
                 </div>
@@ -1762,6 +2036,23 @@ export default function DevisPage() {
   const openNew  = () => { setEditing(undefined); setWizardStep(1); setWizardOpen(true) }
   const openEdit = (d: Devis) => { setEditing(d); setWizardStep(2); setWizardOpen(true) }
 
+  /* Ouverture automatique de l'éditeur via ?edit=<id> — utilisé après la
+     génération d'un devis IA depuis la fiche prospect. Le paramètre est
+     retiré une fois l'éditeur ouvert (pas de réouverture au retour).
+     Synchronisation URL → éditeur : setState dans l'effet est ici voulu. */
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const editId = searchParams.get('edit')
+    if (!editId || wizardOpen) return
+    const target = devis.find(d => d.id === editId)
+    if (!target) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('edit')
+    setEditing(target); setWizardStep(2); setWizardOpen(true)
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, devis, wizardOpen])
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="page-header">
@@ -1831,9 +2122,20 @@ export default function DevisPage() {
                 <tr><td colSpan={7} className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-400 mx-auto" /></td></tr>
               ) : filtered.map(d => {
                 const s = STATUT_CONFIG[d.statut]
+                const ai = getDevisAiMeta(d.notes)
                 return (
                   <tr key={d.id} className="table-row group">
-                    <td className="font-mono font-medium text-foreground">{d.numero}</td>
+                    <td className="font-mono font-medium text-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        {d.numero}
+                        {ai && !ai.validated && (
+                          <span title="Généré par IA — à valider"
+                            className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                            <Sparkles className="w-2.5 h-2.5" /> IA
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="text-foreground">{d.client_nom || '—'}</td>
                     <td className="text-muted-foreground">{formatDate(d.date_emission)}</td>
                     <td className="text-muted-foreground">{d.date_expiration ? formatDate(d.date_expiration) : '—'}</td>
@@ -2035,10 +2337,7 @@ export default function DevisPage() {
             filename={`${sendTarget.numero}.pdf`}
             defaultEmail={c?.email ?? ''}
             clientNom={sendTarget.client_nom ?? c?.entreprise ?? c?.nom}
-            buildPdf={() => generateDevisPDFBlob(sendTarget, {
-              clientNom:   sendTarget.client_nom ?? c?.entreprise ?? c?.nom,
-              clientEmail: c?.email ?? undefined,
-            })}
+            buildPdf={() => generateDevisPDFBlobFromTemplate(sendTarget, c)}
           />
         )
       })()}

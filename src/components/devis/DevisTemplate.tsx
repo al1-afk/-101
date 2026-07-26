@@ -95,8 +95,8 @@ const CO = {
   patente: '10301120',
   ice:     '003453451000013',
   banque:  'CIH Bank',
-  rib:     '230 670 6430581221008400 29',
-  swift:   'CIHMMAC',
+  rib:     '230 570 6435881221008400 29',
+  swift:   'CIHMMAMC',
 }
 
 const DEFAULT_CONDITIONS = [
@@ -330,22 +330,24 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
           </div>
 
           <div className="w-64">
-            <div className="flex justify-between items-center py-1.5 px-3 bg-[#f8fafc] border border-[#e2e8f0]">
-              <span className="text-[10px] text-[#64748b]">Sous-total HT</span>
-              <span className="text-[11px] font-bold text-[#0a1a3c]">{fmt(d.montant_ht)}</span>
-            </div>
             {hasTVA && (
-              <div className="flex justify-between items-center py-1.5 px-3 bg-[#f8fafc] border border-t-0 border-[#e2e8f0]">
-                <span className="text-[10px] text-[#64748b]">TVA ({d.tva}%)</span>
-                <span className="text-[11px] font-bold text-[#0a1a3c]">{fmt(tvaMontant)}</span>
-              </div>
+              <>
+                <div className="flex justify-between items-center py-1.5 px-3 bg-[#f8fafc] border border-[#e2e8f0]">
+                  <span className="text-[10px] text-[#64748b]">Sous-total HT</span>
+                  <span className="text-[11px] font-bold text-[#0a1a3c]">{fmt(d.montant_ht)}</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 px-3 bg-[#f8fafc] border border-t-0 border-[#e2e8f0]">
+                  <span className="text-[10px] text-[#64748b]">TVA ({d.tva}%)</span>
+                  <span className="text-[11px] font-bold text-[#0a1a3c]">{fmt(tvaMontant)}</span>
+                </div>
+              </>
             )}
             <div
               className="flex justify-between items-center py-2.5 px-3 mt-1 rounded-sm"
               style={{ backgroundColor: '#1a3460' }}
             >
-              <span className="text-[12px] font-extrabold text-white tracking-wide">TOTAL TTC</span>
-              <span className="text-[13px] font-extrabold text-white">{fmt(d.montant_ttc)}</span>
+              <span className="text-[12px] font-extrabold text-white tracking-wide">{hasTVA ? 'TOTAL TTC' : 'TOTAL HT'}</span>
+              <span className="text-[13px] font-extrabold text-white">{fmt(hasTVA ? d.montant_ttc : d.montant_ht)}</span>
             </div>
           </div>
         </div>

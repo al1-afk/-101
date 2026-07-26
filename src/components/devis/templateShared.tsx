@@ -30,6 +30,9 @@ export interface DevisNotesEnvelope {
   bilingual?:       boolean
   template?:        DevisTemplateKind
   clientIce?:       string
+  /* Champs spécifiques au modèle « Executive » (optionnels). */
+  objet?:           string   // texte « OBJET DU DEVIS »
+  offreTitle?:      string   // sous-titre de la section « OFFRE — … »
 }
 
 export function parseDevisEnvelope(notes: string | null): DevisNotesEnvelope {
@@ -85,7 +88,70 @@ export const CO = {
   ice:       '003453451000013',
   banque:    'CIH Bank',
   rib:       '230 570 6435881221008400 29',
-  swift:     'CIH',
+  swift:     'CIHMMAMC',
+}
+
+/* ─── Montant en toutes lettres (français) ─────────────────────
+   Ex. amountToWordsFr(14000) → "quatorze mille dirhams".
+   Utilisé par le modèle Executive pour la ligne « Arrêté le présent
+   devis à la somme de … ». */
+const _UNITS = [
+  'zéro', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf',
+  'dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize',
+  'dix-sept', 'dix-huit', 'dix-neuf',
+]
+const _TENS = ['', '', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', '', 'quatre-vingt', '']
+
+function _under100(n: number): string {
+  if (n < 20) return _UNITS[n]
+  const t = Math.floor(n / 10)
+  const u = n % 10
+  if (t === 7) return u === 1 ? 'soixante et onze' : 'soixante' + (u === 0 ? '-dix' : '-' + _UNITS[10 + u])
+  if (t === 9) return 'quatre-vingt-' + _UNITS[10 + u]
+  if (t === 8) return u === 0 ? 'quatre-vingts' : 'quatre-vingt-' + _UNITS[u]
+  const base = _TENS[t]
+  if (u === 0) return base
+  if (u === 1) return base + ' et un'
+  return base + '-' + _UNITS[u]
+}
+
+function _under1000(n: number): string {
+  if (n < 100) return _under100(n)
+  const c = Math.floor(n / 100)
+  const r = n % 100
+  if (r === 0) return c === 1 ? 'cent' : _UNITS[c] + ' cents'
+  const cent = c === 1 ? 'cent' : _UNITS[c] + ' cent'
+  return cent + ' ' + _under100(r)
+}
+
+function _toWords(n: number): string {
+  n = Math.floor(n)
+  if (n === 0) return 'zéro'
+  const parts: string[] = []
+  const millions  = Math.floor(n / 1_000_000)
+  const thousands = Math.floor((n % 1_000_000) / 1000)
+  const rest      = n % 1000
+  if (millions > 0)  parts.push(millions === 1 ? 'un million' : _under1000(millions) + ' millions')
+  if (thousands > 0) parts.push(thousands === 1 ? 'mille' : _under1000(thousands) + ' mille')
+  if (rest > 0)      parts.push(_under1000(rest))
+  return parts.join(' ')
+}
+
+const _CURRENCY_WORD: Record<Currency, [string, string]> = {
+  MAD: ['dirham', 'dirhams'],
+  EUR: ['euro', 'euros'],
+  USD: ['dollar', 'dollars'],
+  GBP: ['livre', 'livres'],
+}
+
+/** Montant en toutes lettres avec devise. Ex. « quatorze mille dirhams ». */
+export function amountToWordsFr(n: number, currency: Currency = 'MAD'): string {
+  const [sing, plur] = _CURRENCY_WORD[currency]
+  const int   = Math.floor(Math.abs(n))
+  const cents = Math.round((Math.abs(n) - int) * 100)
+  let s = _toWords(int) + ' ' + (int === 1 ? sing : plur)
+  if (cents > 0) s += ' et ' + _toWords(cents) + (cents === 1 ? ' centime' : ' centimes')
+  return s
 }
 
 /** Rendu des blocs de description (title / paragraph / list). Compact = variante inline. */

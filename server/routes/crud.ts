@@ -44,6 +44,8 @@ const ALLOWED_TABLES = new Set([
   'contacts',
   /* Journal d'activité CRM (timeline prospect : notes, appels, emails…) */
   'prospect_logs',
+  /* Bibliothèque de modèles de prestations (devis) */
+  'prestation_models',
 ])
 
 const isProd = process.env.NODE_ENV === 'production'

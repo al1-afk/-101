@@ -12,6 +12,8 @@
 import { createElement } from 'react'
 import { createRoot }    from 'react-dom/client'
 import { toast }         from 'sonner'
+import html2canvas       from 'html2canvas'
+import jsPDF             from 'jspdf'
 import DevisTemplate     from '@/components/devis/DevisTemplate'
 import { openPrint }     from '@/components/devis/DevisActions'
 import type { Devis }    from '@/hooks/useDevis'
@@ -68,6 +70,64 @@ export function generateDevisPDF(
       }, 4_000)
     })
   })
+}
+
+/**
+ * Génère un Blob PDF à partir du MÊME `DevisTemplate` que l'aperçu et le
+ * téléchargement (html2canvas → jsPDF), pour l'attacher à un email.
+ * → Le PDF envoyé au client est identique à celui qu'on voit / télécharge,
+ *   au lieu d'un rendu jsPDF séparé qui divergeait.
+ */
+export async function generateDevisPDFBlobFromTemplate(
+  d:       Devis,
+  client?: Client,
+): Promise<Blob> {
+  const container = document.createElement('div')
+  container.style.cssText =
+    'position:fixed;top:0;left:-99999px;width:210mm;background:#ffffff;z-index:-1;'
+  document.body.appendChild(container)
+
+  const root = createRoot(container)
+  root.render(createElement(DevisTemplate, { devis: d, client }))
+
+  try {
+    /* Laisse React committer le rendu (quelques frames). */
+    await new Promise<void>(res => {
+      let n = 0
+      const step = () => { if (++n < 5) requestAnimationFrame(step); else res() }
+      requestAnimationFrame(step)
+    })
+
+    const el = container.firstElementChild as HTMLElement | null
+    if (!el) throw new Error('PDF render failed: template element not found')
+
+    const canvas = await html2canvas(el, {
+      scale: 2, useCORS: true, backgroundColor: '#ffffff',
+    })
+
+    const pdf   = new jsPDF('p', 'mm', 'a4')
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const imgW  = pageW
+    const imgH  = (canvas.height * imgW) / canvas.width
+    const img   = canvas.toDataURL('image/jpeg', 0.92)
+
+    let heightLeft = imgH
+    let position   = 0
+    pdf.addImage(img, 'JPEG', 0, position, imgW, imgH)
+    heightLeft -= pageH
+    while (heightLeft > 0) {
+      position -= pageH
+      pdf.addPage()
+      pdf.addImage(img, 'JPEG', 0, position, imgW, imgH)
+      heightLeft -= pageH
+    }
+
+    return pdf.output('blob')
+  } finally {
+    root.unmount()
+    container.remove()
+  }
 }
 
 /**
