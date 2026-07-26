@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Settings, User, Bell, Shield, Globe, Save, RefreshCcw, Check, Eye, EyeOff, Download, Smartphone, CheckCircle2, MonitorSmartphone, Apple, Code2, Copy, KeyRound, ExternalLink } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Settings, User, Bell, Shield, Globe, Save, RefreshCcw, Check, Eye, EyeOff, Download, Smartphone, CheckCircle2, MonitorSmartphone, Apple, Code2, Copy, KeyRound, ExternalLink, Library } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
@@ -277,6 +278,11 @@ export default function Parametres() {
                   ? <><Check className="w-4 h-4 text-emerald-500" /> Réinitialisé</>
                   : <><RefreshCcw className="w-4 h-4" /> Réinitialiser l'onboarding</>
                 }
+              </Button>
+              <Button asChild variant="outline" className="gap-1.5">
+                <Link to="modeles-prestations">
+                  <Library className="w-4 h-4" /> Modèles de prestations (devis)
+                </Link>
               </Button>
             </div>
           </div>

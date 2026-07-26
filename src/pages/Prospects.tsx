@@ -21,8 +21,8 @@ import { formatDate, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
   useProspects, useCreateProspect, useUpdateProspect, useDeleteProspect,
-  PROSPECT_STAGES, PROSPECT_SOURCES,
-  type Prospect, type ProspectStatut,
+  PROSPECT_STAGES, PROSPECT_SOURCES, PROSPECT_PRIORITIES, prioriteRank,
+  type Prospect, type ProspectStatut, type ProspectPriorite,
 } from '@/hooks/useProspects'
 import {
   useProspectLogs, useAddProspectLog, useAllProspectLogs,
@@ -110,9 +110,25 @@ function outcomeBadgeClass(msg: string): string {
   return key ? OUTCOME_STYLE[key] : 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
 }
 
+/* ─── Badge de priorité prospect ──────────────────────────────────── */
+function PrioriteBadge({ priorite }: { priorite: ProspectPriorite }) {
+  const meta = PROSPECT_PRIORITIES.find(x => x.id === priorite)
+  if (!meta) return null
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+      style={{ backgroundColor: `${meta.color}22`, color: meta.color }}
+      title={`Priorité : ${meta.label}`}
+    >
+      {meta.icon} {meta.label}
+    </span>
+  )
+}
+
 /* ─── Timeline component ──────────────────────────────────────────── */
 function ProspectTimeline({ prospectId }: { prospectId: string }) {
   const { data: logs = [], isLoading } = useProspectLogs(prospectId)
+  const [zoom, setZoom] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -155,6 +171,15 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
             {/* Content */}
             <div className="flex-1 pt-1.5 min-w-0">
               <p className="text-sm text-foreground leading-snug">{log.message}</p>
+              {log.media && log.media.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {log.media.map((src, k) => (
+                    <button key={k} type="button" onClick={() => setZoom(src)} title="Agrandir">
+                      <img src={src} alt="" className="h-20 w-auto max-w-[160px] object-cover rounded-lg border border-border hover:opacity-90 transition-opacity" />
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-muted-foreground">
                   {formatDateTime(log.created_at)}
@@ -167,6 +192,21 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
           </motion.div>
         )
       })}
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+        >
+          <img src={zoom} alt="" className="max-w-full max-h-full rounded-lg shadow-2xl" />
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -178,6 +218,7 @@ const EMPTY_FORM = {
   telephone:      '',
   entreprise:     '',
   statut:         'nouveau' as ProspectStatut,
+  priorite:       '' as ProspectPriorite | '',
   valeur_estimee: '',
   source:         '',
   notes:          '',
@@ -193,6 +234,7 @@ function prospectToForm(p: Prospect): typeof EMPTY_FORM {
     telephone:      p.telephone ?? '',
     entreprise:     p.entreprise ?? '',
     statut:         p.statut,
+    priorite:       p.priorite ?? '',
     valeur_estimee: p.valeur_estimee != null ? String(p.valeur_estimee) : '',
     source:         p.source ?? '',
     notes:          p.notes ?? '',
@@ -305,6 +347,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
       telephone:      form.telephone.trim() || null,
       entreprise:     form.entreprise.trim() || null,
       statut:         form.statut,
+      priorite:       form.priorite || null,
       valeur_estimee: form.valeur_estimee ? parseFloat(form.valeur_estimee) : null,
       source:         form.source || null,
       notes:          form.notes.trim() || null,
@@ -573,6 +616,28 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                       </div>
                     </div>
 
+                    {/* Priorité (feeling commercial) */}
+                    <div>
+                      <p className="form-label mb-2">Priorité</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {PROSPECT_PRIORITIES.map(pr => (
+                          <button
+                            key={pr.id}
+                            type="button"
+                            onClick={() => setForm(p => ({ ...p, priorite: p.priorite === pr.id ? '' : pr.id }))}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                              form.priorite === pr.id
+                                ? 'border-transparent text-white shadow-sm'
+                                : 'border-border text-muted-foreground hover:text-foreground bg-transparent'
+                            }`}
+                            style={form.priorite === pr.id ? { backgroundColor: pr.color } : {}}
+                          >
+                            {pr.icon} {pr.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {/* Valeur */}
                       <div>
@@ -814,9 +879,12 @@ function ProspectRow({
           >
             {p.nom.charAt(0).toUpperCase()}
           </div>
-          <div>
-            <p className="text-sm font-medium text-foreground leading-tight">{p.nom}</p>
-            {p.entreprise && <p className="text-xs text-muted-foreground">{p.entreprise}</p>}
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-medium text-foreground leading-tight truncate">{p.nom}</p>
+              {p.priorite && <PrioriteBadge priorite={p.priorite} />}
+            </div>
+            {p.entreprise && <p className="text-xs text-muted-foreground truncate">{p.entreprise}</p>}
           </div>
         </div>
       </td>
@@ -1004,20 +1072,38 @@ export default function Prospects() {
   )
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
-  const filtered = useMemo(() =>
-    prospects
+  const filtered = useMemo(() => {
+    const q       = search.trim().toLowerCase()
+    const qDigits = q.replace(/\D/g, '')                       // chiffres tapés
+    const qCanon  = qDigits.replace(/^(00212|212|0)/, '')      // numéro national (sans 0 / +212)
+    const searching = q.length > 0
+    /* Recherche par téléphone : compare les chiffres, et gère l'équivalence
+       0XXXXXXXXX ↔ +212XXXXXXXXX (ex. « 663883668 » trouve « +212 663-883668 »). */
+    const phoneHit = (phone: string | null) => {
+      if (!phone || qDigits.length < 3) return false
+      const d = phone.replace(/\D/g, '')
+      return d.includes(qDigits) || d.replace(/^(00212|212|0)/, '').includes(qCanon)
+    }
+    return prospects
       .filter(p => {
-        const matchSearch  = !search
-          || p.nom.toLowerCase().includes(search.toLowerCase())
-          || (p.entreprise ?? '').toLowerCase().includes(search.toLowerCase())
+        const matchSearch  = !q
+          || p.nom.toLowerCase().includes(q)
+          || (p.entreprise ?? '').toLowerCase().includes(q)
+          || phoneHit(p.telephone)
         const matchStatut  = filterStatut === 'all' || p.statut === filterStatut
-        const matchToday   = !todayOnly || isRelanceToday(p)
-        const matchDate    = dateMatch(p.created_at)
+        /* Une recherche active affiche la liste complète : on ignore les
+           filtres de période (« Ce mois ») et « à contacter aujourd'hui ». */
+        const matchToday   = searching || !todayOnly || isRelanceToday(p)
+        const matchDate    = searching || dateMatch(p.created_at)
         return matchSearch && matchStatut && matchToday && matchDate
       })
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [prospects, search, filterStatut, todayOnly, dateMatch]
-  )
+      .sort((a, b) => {
+        /* Priorité d'abord (Premium en tête), puis les plus récents. */
+        const dr = prioriteRank(a.priorite) - prioriteRank(b.priorite)
+        if (dr !== 0) return dr
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      })
+  }, [prospects, search, filterStatut, todayOnly, dateMatch])
 
   /* Pagination — 10 par page, reset à 1 quand les filtres changent. */
   useEffect(() => { setPage(1) }, [search, filterStatut, todayOnly, dateRange])
@@ -1201,7 +1287,7 @@ export default function Prospects() {
         <div className="relative flex-1 min-w-44">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Rechercher prospect ou entreprise..."
+            placeholder="Rechercher par nom, entreprise ou téléphone..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-9 h-8 text-sm"

@@ -21,6 +21,22 @@ export interface Prospect {
   date_relance:   string | null
   /* Date + heure de relance (rappel planifié). date_relance garde la partie jour. */
   relance_at?:    string | null
+  /* Niveau de qualité (feeling commercial) : premium / moyen / bas. */
+  priorite?:      ProspectPriorite | null
+}
+
+export type ProspectPriorite = 'premium' | 'moyen' | 'bas'
+
+/* Niveaux de priorité — rank pour le tri (premium en tête). */
+export const PROSPECT_PRIORITIES: { id: ProspectPriorite; label: string; color: string; icon: string; rank: number }[] = [
+  { id: 'premium', label: 'Premium', color: '#f59e0b', icon: '⭐', rank: 0 },
+  { id: 'moyen',   label: 'Moyen',   color: '#3b82f6', icon: '◆',  rank: 1 },
+  { id: 'bas',     label: 'Bas',     color: '#94a3b8', icon: '○',  rank: 2 },
+]
+
+/* Rang de tri : premium(0) < moyen(1) < bas(2) < sans priorité(3). */
+export function prioriteRank(p: ProspectPriorite | null | undefined): number {
+  return PROSPECT_PRIORITIES.find(x => x.id === p)?.rank ?? 3
 }
 
 export const PROSPECT_STAGES: { id: ProspectStatut; label: string; accent: string; dot: string }[] = [
@@ -38,6 +54,7 @@ export const PROSPECT_SOURCES = [
   'WhatsApp Ads',
   'Google Ads',
   'SEO',
+  'Landing page',
   'Recommandation',
   'Autre',
 ]

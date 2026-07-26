@@ -25,6 +25,8 @@ export interface Client {
   /* Statut business : Actif (contrat en cours), Inactif (contrat terminé,
      pas renouvelé, gelé…). Défaut Nouveau à la création. */
   statut?:              string | null  // 'Nouveau' | 'Actif' | 'Inactif'
+  /* Client Premium : mis en avant (badge + tri en tête de liste). */
+  is_premium?:          boolean | null
 }
 
 const KEY = 'clients'

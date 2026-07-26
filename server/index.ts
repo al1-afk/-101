@@ -4,7 +4,6 @@ import dotenv  from 'dotenv'
 import cookieParser from 'cookie-parser'
 import { pool } from './db/pool'
 import { apiLimiter, sanitizeBody, errorHandler, requestId } from './middleware/security'
-import { logger } from './lib/logger'
 import helmet from 'helmet'
 
 import authRoutes     from './routes/auth'
@@ -15,6 +14,7 @@ import stockRoutes    from './routes/stock'
 import vehiclesRoutes from './routes/vehicles'
 import financeAiRoutes from './routes/financeAi'
 import aiRoutes from './routes/ai'
+import aiQuoteRoutes from './routes/aiQuote'
 import publicLeadsRoutes from './routes/publicLeads'
 import emailTrackingPublicRoutes from './routes/emailTrackingPublic'
 import teamRoutes      from './routes/team'
@@ -119,7 +119,11 @@ app.use(requestId)
 const LOCALHOST_DEV_RE = /^http:\/\/localhost:\d+$/
 const NEXTGITAL_RE     = /^https:\/\/[a-z0-9-]+\.nextgital\.(tech|ma)$/i
 app.use(cors((req, cb) => {
-  if (req.path && req.path.startsWith('/api/public/')) {
+  /* Routes publiques cross-origin (intake widget, pixel de tracking) : CORS grand
+     ouvert. On EXCLUT /api/public/widget-key qui est authentifié (requireAuth) et
+     appelé depuis l'app elle-même : il a besoin de l'en-tête Authorization + du
+     contrôle d'origine, donc il passe par la branche standard ci-dessous. */
+  if (req.path && req.path.startsWith('/api/public/') && req.path !== '/api/public/widget-key') {
     return cb(null, {
       origin: '*',
       methods: ['GET', 'POST', 'OPTIONS'],
@@ -159,6 +163,7 @@ app.use('/api/stock',    stockRoutes)
 app.use('/api/vehicles', vehiclesRoutes)
 app.use('/api/finance-ai', financeAiRoutes)
 app.use('/api/ai',        aiRoutes)
+app.use('/api/ai-quote',  aiQuoteRoutes)
 app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/public',    emailTrackingPublicRoutes)
 app.use('/api/team',      teamRoutes)

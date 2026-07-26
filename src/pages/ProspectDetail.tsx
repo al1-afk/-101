@@ -5,8 +5,11 @@ import {
   ArrowLeft, Plus, Edit2, Trash2, Phone, Mail, Building2, User,
   Calendar, Bell, DollarSign, Loader2, AlertCircle, Clock, FileText,
   ChevronDown, ChevronRight, UserPlus, ArrowRightLeft, PhoneCall,
-  TrendingUp, Target, Tag, Check, AlertTriangle, MessageCircle,
+  TrendingUp, Target, Tag, Check, AlertTriangle, MessageCircle, Sparkles, Languages,
+  Image as ImageIcon, X,
 } from 'lucide-react'
+import { aiApi } from '@/lib/aiApi'
+import { extractImageFilesFromClipboard, compressImageToDataURL } from '@/lib/pasteImage'
 import { Button }  from '@/components/ui/button'
 import { Input }   from '@/components/ui/input'
 import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
@@ -14,13 +17,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   useProspects, useUpdateProspect, useDeleteProspect,
-  PROSPECT_STAGES, PROSPECT_SOURCES,
-  type Prospect, type ProspectStatut,
+  PROSPECT_STAGES, PROSPECT_SOURCES, PROSPECT_PRIORITIES,
+  type Prospect, type ProspectStatut, type ProspectPriorite,
 } from '@/hooks/useProspects'
 import {
   useProspectLogs, useAddProspectLog, type LogType,
 } from '@/hooks/useProspectLogs'
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils'
+import { usePermissions } from '@/hooks/usePermissions'
+import AIQuoteGeneratorDialog from '@/components/devis/AIQuoteGeneratorDialog'
 import { toast } from 'sonner'
 
 /* ─── Stage helpers ───────────────────────────────────────────────── */
@@ -169,6 +174,7 @@ function Section({
 /* ─── Timeline ────────────────────────────────────────────────────── */
 function ProspectTimeline({ prospectId }: { prospectId: string }) {
   const { data: logs = [], isLoading } = useProspectLogs(prospectId)
+  const [zoom, setZoom] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -222,6 +228,15 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
                   </span>
                 )}
               </div>
+              {log.media && log.media.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {log.media.map((src, k) => (
+                    <button key={k} type="button" onClick={() => setZoom(src)} title="Agrandir">
+                      <img src={src} alt="" className="h-24 w-auto max-w-[180px] object-cover rounded-lg border border-border hover:opacity-90 transition-opacity" />
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-muted-foreground">{formatDateTime(log.created_at)}</span>
                 {log.auteur && <span className="text-xs text-muted-foreground">· {log.auteur}</span>}
@@ -231,6 +246,21 @@ function ProspectTimeline({ prospectId }: { prospectId: string }) {
         )
       })}
       </div>
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+        >
+          <img src={zoom} alt="" className="max-w-full max-h-full rounded-lg shadow-2xl" />
+          <button
+            type="button"
+            onClick={() => setZoom(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -245,6 +275,7 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
     telephone:      prospect.telephone ?? '',
     entreprise:     prospect.entreprise ?? '',
     statut:         prospect.statut,
+    priorite:       (prospect.priorite ?? '') as ProspectPriorite | '',
     valeur_estimee: prospect.valeur_estimee != null ? String(prospect.valeur_estimee) : '',
     source:         prospect.source ?? '',
     notes:          prospect.notes ?? '',
@@ -266,6 +297,7 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
       telephone:      form.telephone.trim() || null,
       entreprise:     form.entreprise.trim() || null,
       statut:         form.statut,
+      priorite:       form.priorite || null,
       valeur_estimee: form.valeur_estimee ? parseFloat(form.valeur_estimee) : null,
       source:         form.source || null,
       notes:          form.notes.trim() || null,
@@ -329,6 +361,24 @@ function ProspectEditForm({ prospect, onClose }: { prospect: Prospect; onClose: 
             </SelectContent>
           </Select>
         </div>
+        <div className="space-y-1.5 col-span-2">
+          <label className="form-label">Priorité</label>
+          <div className="flex flex-wrap gap-1.5">
+            {PROSPECT_PRIORITIES.map(pr => (
+              <button
+                key={pr.id}
+                type="button"
+                onClick={() => setForm(p => ({ ...p, priorite: p.priorite === pr.id ? '' : pr.id }))}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                  form.priorite === pr.id ? 'border-transparent text-white shadow-sm' : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+                style={form.priorite === pr.id ? { backgroundColor: pr.color } : {}}
+              >
+                {pr.icon} {pr.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="space-y-1.5">
           <label className="form-label">1er contact</label>
           <Input type="date" value={form.date_contact} onChange={set('date_contact')} />
@@ -366,12 +416,19 @@ export default function ProspectDetail() {
   const update  = useUpdateProspect()
   const del     = useDeleteProspect()
   const addLog  = useAddProspectLog()
+  const { can } = usePermissions()
+  /* Bouton « Générer un devis IA » : admin, manager (chef de projet) et
+     commercial autorisés — aligné sur le droit de créer un devis. */
+  const canGenerateQuote = can('devis', 'create')
 
   const prospect = prospects.find(p => p.id === id)
 
   const [editOpen,   setEditOpen]   = useState(false)
+  const [aiQuoteOpen, setAiQuoteOpen] = useState(false)
   const [delConfirm, setDelConfirm] = useState(false)
   const [noteText,     setNoteText]     = useState('')
+  const [translating,  setTranslating]  = useState(false)
+  const [pastedImages, setPastedImages] = useState<string[]>([])
   const [noteType,     setNoteType]     = useState<LogType>('note')
   const [callDuration, setCallDuration] = useState('')   // durée d'appel en minutes
   const [notesDraft,   setNotesDraft]   = useState(prospect?.notes ?? '')
@@ -432,16 +489,56 @@ export default function ProspectDetail() {
     })
   }
 
+  /* Priorité (feeling) — clic sur la puce active/désactive. */
+  const changePriorite = (next: ProspectPriorite) => {
+    const value = prospect.priorite === next ? null : next
+    update.mutate({ id: prospect.id, priorite: value }, {
+      onSuccess: () => toast.success(value ? `Priorité : ${PROSPECT_PRIORITIES.find(x => x.id === value)?.label}` : 'Priorité retirée'),
+    })
+  }
+
+  /* Colle une ou plusieurs images (CMD/Ctrl+V) : compression + ajout en vignette. */
+  const handlePasteImages = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = extractImageFilesFromClipboard(e)
+    if (files.length === 0) return
+    e.preventDefault()   // ne pas coller le contenu binaire dans le champ texte
+    try {
+      const urls = await Promise.all(files.map(compressImageToDataURL))
+      setPastedImages(prev => [...prev, ...urls])
+      toast.success(files.length === 1 ? 'Image ajoutée' : `${files.length} images ajoutées`)
+    } catch {
+      toast.error('Impossible de traiter l’image collée')
+    }
+  }
+
   const handleAddNote = () => {
-    if (!noteText.trim()) return
+    const text = noteText.trim()
+    if (!text && pastedImages.length === 0) return
     const dur = noteType === 'appel' && callDuration ? parseInt(callDuration, 10) : null
     addLog.mutate(
       {
-        prospect_id: prospect.id, type: noteType, message: noteText.trim(), auteur: 'Said',
+        prospect_id: prospect.id, type: noteType,
+        message: text || '🖼️ Image jointe', auteur: 'Said',
         duration_minutes: dur && dur > 0 ? dur : null,
+        ...(pastedImages.length ? { media: pastedImages } : {}),
       },
-      { onSuccess: () => { setNoteText(''); setCallDuration(''); toast.success('Activité enregistrée') } },
+      { onSuccess: () => { setNoteText(''); setCallDuration(''); setPastedImages([]); toast.success('Activité enregistrée') } },
     )
+  }
+
+  /* Traduction automatique de la note en français correct (arabe, darija,
+     anglais ou français fautif → français impeccable) via l'IA distante. */
+  const handleTranslateNote = async () => {
+    if (!noteText.trim()) { toast.error('Écrivez d’abord une note à traduire'); return }
+    setTranslating(true)
+    try {
+      const r = await aiApi.translate(noteText)
+      if (r?.text) { setNoteText(r.text); toast.success('Note traduite en français') }
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Traduction indisponible (IA non configurée)')
+    } finally {
+      setTranslating(false)
+    }
   }
 
   /* Issue d'appel en 1 clic : log immédiat (message = outcome, + durée si saisie).
@@ -454,8 +551,9 @@ export default function ProspectDetail() {
         prospect_id: prospect.id, type: 'appel', auteur: 'Said',
         message: extra ? `${outcome} — ${extra}` : outcome,
         duration_minutes: dur && dur > 0 ? dur : null,
+        ...(pastedImages.length ? { media: pastedImages } : {}),
       },
-      { onSuccess: () => { setNoteText(''); setCallDuration(''); toast.success(`Appel enregistré : ${outcome}`) } },
+      { onSuccess: () => { setNoteText(''); setCallDuration(''); setPastedImages([]); toast.success(`Appel enregistré : ${outcome}`) } },
     )
   }
 
@@ -544,6 +642,11 @@ export default function ProspectDetail() {
                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
                 {stageLabel(prospect.statut)}
               </span>
+              {prospect.priorite && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/25 text-white backdrop-blur-sm">
+                  {PROSPECT_PRIORITIES.find(x => x.id === prospect.priorite)?.icon} {PROSPECT_PRIORITIES.find(x => x.id === prospect.priorite)?.label}
+                </span>
+              )}
             </div>
             {prospect.entreprise && (
               <p className="text-white/80 text-sm flex items-center gap-1.5 mb-3">
@@ -583,6 +686,14 @@ export default function ProspectDetail() {
                 <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
               </a>
             )}
+            {canGenerateQuote && (
+              <Button size="sm" variant="ghost"
+                className="bg-white text-blue-700 hover:bg-white/90 border-0 h-9 font-semibold shadow-sm"
+                onClick={() => setAiQuoteOpen(true)}
+                title="Analyser le prospect et générer un devis brouillon avec l'IA">
+                <Sparkles className="w-3.5 h-3.5" /> Générer un devis IA
+              </Button>
+            )}
             <Button size="sm" variant="ghost"
               className="bg-white/20 hover:bg-white/30 text-white border-white/30 border backdrop-blur-sm h-9"
               onClick={() => setEditOpen(true)}>
@@ -595,6 +706,27 @@ export default function ProspectDetail() {
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* ── Priorité (feeling commercial) ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-muted-foreground">Priorité :</span>
+        {PROSPECT_PRIORITIES.map(pr => {
+          const active = prospect.priorite === pr.id
+          return (
+            <button
+              key={pr.id}
+              onClick={() => changePriorite(pr.id)}
+              disabled={update.isPending}
+              className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition-all border ${
+                active ? 'border-transparent text-white shadow-sm' : 'border-border text-muted-foreground hover:text-foreground'
+              }`}
+              style={active ? { backgroundColor: pr.color } : {}}
+            >
+              {pr.icon} {pr.label}
+            </button>
+          )
+        })}
       </div>
 
       {/* ── KPI ── */}
@@ -771,20 +903,56 @@ export default function ProspectDetail() {
               <AutocorrectTextarea
                 value={noteText}
                 onChange={e => setNoteText(e.target.value)}
+                onPaste={handlePasteImages}
                 onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAddNote() }}
                 className="input-field resize-none h-20 text-sm"
                 placeholder={
                   noteType === 'appel' ? "Ex : Appel de 15 min, intéressé par l'offre premium…"
                   : noteType === 'email' ? 'Ex : Email de suivi envoyé avec devis joint…'
-                  : 'Ajouter une note sur ce prospect…'
+                  : 'Ajouter une note… (collez une capture avec ⌘/Ctrl + V)'
                 }
               />
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] text-muted-foreground">⌘ Entrée pour enregistrer</p>
-                <Button size="sm" onClick={handleAddNote} disabled={!noteText.trim() || addLog.isPending} className="h-7 px-3 text-xs">
-                  {addLog.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                  Enregistrer
-                </Button>
+
+              {/* Vignettes des images collées */}
+              {pastedImages.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {pastedImages.map((src, i) => (
+                    <div key={i} className="relative group">
+                      <img src={src} alt={`Image ${i + 1}`}
+                        className="h-16 w-16 object-cover rounded-lg border border-border" />
+                      <button
+                        type="button"
+                        onClick={() => setPastedImages(prev => prev.filter((_, j) => j !== i))}
+                        title="Retirer l'image"
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-muted-foreground hidden sm:flex items-center gap-1">
+                  <ImageIcon className="w-3 h-3" /> Collez une image (⌘/Ctrl + V)
+                </p>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={handleTranslateNote}
+                    disabled={!noteText.trim() || translating}
+                    title="Traduire la note en français (arabe, darija, anglais…)"
+                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border border-fuchsia-300/40 dark:border-fuchsia-800/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {translating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Languages className="w-3 h-3" />}
+                    Traduire
+                  </button>
+                  <Button size="sm" onClick={handleAddNote} disabled={(!noteText.trim() && pastedImages.length === 0) || addLog.isPending} className="h-7 px-3 text-xs">
+                    {addLog.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    Enregistrer
+                  </Button>
+                </div>
               </div>
             </div>
             <ProspectTimeline prospectId={prospect.id} />
@@ -859,6 +1027,11 @@ export default function ProspectDetail() {
           <ProspectEditForm prospect={prospect} onClose={() => setEditOpen(false)} />
         </DialogContent>
       </Dialog>
+
+      {/* ── Génération de devis IA ── */}
+      {canGenerateQuote && aiQuoteOpen && (
+        <AIQuoteGeneratorDialog open={aiQuoteOpen} onClose={() => setAiQuoteOpen(false)} prospect={prospect} />
+      )}
 
       {/* ── Delete confirm ── */}
       <Dialog open={delConfirm} onOpenChange={setDelConfirm}>

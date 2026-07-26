@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Plus, Search, User, Building2, Phone, Mail, MapPin,
-  Edit2, Trash2, Loader2, Eye, Globe, Server, X, RotateCw,
+  Edit2, Trash2, Loader2, Eye, Globe, Server, X, RotateCw, Crown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClients, useCreateClient, useUpdateClient, useDeleteClient, type Client } from '@/hooks/useClients'
@@ -128,12 +128,14 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
     date_debut_contrat:  (client?.date_debut_contrat || '').slice(0, 10),
     montant_ttc_annuel:  client?.montant_ttc_annuel  ?? '',
     prix_renouvellement: client?.prix_renouvellement ?? '',
+    is_premium:          client?.is_premium ?? false,
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const { is_premium, ...formRest } = form
     const merged: any = {
-      ...form,
+      ...formRest,
       notes: serializeClientNotes(parsed.meta, form.notes, parsed.blocks),
       type_service:        form.type_service        || null,
       sous_categorie:      form.sous_categorie      || null,
@@ -141,6 +143,11 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
       montant_ttc_annuel:  form.montant_ttc_annuel  === '' ? null : Number(form.montant_ttc_annuel),
       prix_renouvellement: form.prix_renouvellement === '' ? null : Number(form.prix_renouvellement),
     }
+    /* N'envoie `is_premium` que s'il est activé (création) ou modifié (édition),
+       pour que la gestion normale des clients continue de fonctionner même si la
+       migration 079 n'est pas encore appliquée. */
+    const prevPremium = client?.is_premium ?? false
+    if (client ? prevPremium !== is_premium : is_premium) merged.is_premium = is_premium
     if (client) await update.mutateAsync({ id: client.id, ...merged })
     else await create.mutateAsync(merged as any)
     onClose()
@@ -176,6 +183,31 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
         <div className="space-y-1.5">
           <label className="form-label">Pays</label>
           <Input value={form.pays} onChange={e => setForm(p => ({ ...p, pays: e.target.value }))} />
+        </div>
+      </div>
+
+      {/* ── Type de client (Standard / Premium) ─────────────────── */}
+      <div className="space-y-1.5">
+        <label className="form-label">Type de client</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setForm(p => ({ ...p, is_premium: false }))}
+            className={`flex-1 h-9 rounded-lg border text-sm font-medium transition-colors ${
+              !form.is_premium ? 'bg-blue-600 text-white border-blue-600' : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            Standard
+          </button>
+          <button
+            type="button"
+            onClick={() => setForm(p => ({ ...p, is_premium: true }))}
+            className={`flex-1 h-9 rounded-lg border text-sm font-medium transition-colors inline-flex items-center justify-center gap-1.5 ${
+              form.is_premium ? 'bg-amber-500 text-white border-amber-500' : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            <Crown className="w-3.5 h-3.5" /> Premium
+          </button>
         </div>
       </div>
 
@@ -282,6 +314,9 @@ export default function Clients() {
       const searchMatch = !search || [c.nom, c.email, c.entreprise, c.ville].some(f => f?.toLowerCase().includes(search.toLowerCase()))
       return statusMatch && searchMatch && dateMatch(c.created_at)
     })
+    /* Clients Premium en tête (tri stable : l'ordre par date est conservé
+       à l'intérieur de chaque groupe). */
+    .sort((a, b) => (b.is_premium ? 1 : 0) - (a.is_premium ? 1 : 0))
   , [clients, search, dateMatch, statusFilter])
 
   const statusCounts = useMemo(() => ({
@@ -540,7 +575,14 @@ export default function Clients() {
                             <span className="font-bold text-[9px]">{getInitials(c.nom)}</span>
                           </div>
                           <div className="min-w-0">
-                            <p className="text-[12px] font-semibold text-foreground truncate hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{c.nom}</p>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <p className="text-[12px] font-semibold text-foreground truncate hover:text-blue-600 dark:hover:text-blue-400 transition-colors">{c.nom}</p>
+                              {c.is_premium && (
+                                <span className="inline-flex items-center gap-0.5 text-[8.5px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 flex-shrink-0 uppercase tracking-wide">
+                                  <Crown className="w-2.5 h-2.5" /> Premium
+                                </span>
+                              )}
+                            </div>
                             {c.entreprise && (
                               <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5">
                                 <Building2 className="w-2.5 h-2.5" /> {c.entreprise}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NEXT GITAL</string>
+    <string name="title_activity_main">NEXT GITAL</string>
+    <string name="package_name">tech.nextgital.gestion</string>
+    <string name="custom_url_scheme">tech.nextgital.gestion</string>
+</resources>

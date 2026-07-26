@@ -13,6 +13,8 @@ export interface ProspectLog {
   auteur?:          string | null
   /* Durée en minutes — renseignée pour les appels (type='appel'), suivi du temps. */
   duration_minutes?: number | null
+  /* Images jointes (data URL JPEG compressées) — captures collées ou glissées. */
+  media?:           string[] | null
 }
 
 const TABLE = 'prospect_logs'
