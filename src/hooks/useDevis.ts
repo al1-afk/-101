@@ -17,6 +17,8 @@ export interface Devis {
   numero:          string
   client_id:       string | null
   client_nom?:     string
+  /* Devis ciblant un prospect (lead) pas encore client — cf. migration 078. */
+  prospect_id?:    string | null
   statut:          'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire'
   date_emission:   string
   date_expiration: string | null

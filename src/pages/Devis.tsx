@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useDevis, useCreateDevis, useUpdateDevis, useDeleteDevis, type Devis } from '@/hooks/useDevis'
 import { useClients, useCreateClient, type Client } from '@/hooks/useClients'
+import { useProspects } from '@/hooks/useProspects'
 import { useCreateFacture, useFactures } from '@/hooks/useFactures'
 import { produitsApi } from '@/lib/api'
 import { DragDropContext, Droppable, Draggable, type DropResult, type DraggableProvidedDragHandleProps } from '@hello-pangea/dnd'
@@ -765,8 +766,9 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   const create       = useCreateDevis()
   const update       = useUpdateDevis()
   const createClient = useCreateClient()
-  const { data: clients  = [] } = useClients()
-  const { data: allDevis = [] } = useDevis()
+  const { data: clients   = [] } = useClients()
+  const { data: prospects = [] } = useProspects()
+  const { data: allDevis  = [] } = useDevis()
 
   const today     = new Date().toISOString().slice(0, 10)
   const plus30    = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
@@ -778,6 +780,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   useEffect(() => { onStepChange?.(step) }, [step])
   const [clientSearch,   setClientSearch]   = useState('')
   const [selectedId,     setSelectedId]     = useState(editDevis?.client_id ?? '')
+  /* Un devis peut cibler un prospect (lead) pas encore client. Exclusif avec selectedId. */
+  const [selectedProspectId, setSelectedProspectId] = useState<string>((editDevis as any)?.prospect_id ?? '')
   const [dateDevis,      setDateDevis]      = useState(editDevis?.date_emission ?? today)
   const [dateValidite,   setDateValidite]   = useState(editDevis?.date_expiration ?? plus30)
   const [prestations,    setPrestations]    = useState<Prestation[]>(() => {
@@ -866,16 +870,41 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   const [showNewClient, setShowNewClient] = useState(false)
   const [newClientForm, setNewClientForm] = useState({ nom: '', telephone: '', email: '', entreprise: '' })
 
-  const client = clients.find(c => c.id === selectedId)
+  const selectedProspect = prospects.find(p => p.id === selectedProspectId)
+
+  /* Client effectif : soit un vrai client, soit un « client synthétique » construit
+     depuis le prospect sélectionné (pour l'aperçu, le PDF et l'entête du devis). */
+  const client: Client | undefined =
+    clients.find(c => c.id === selectedId) ??
+    (selectedProspect
+      ? {
+          id:         selectedProspect.id,
+          created_at: selectedProspect.created_at,
+          nom:        selectedProspect.nom,
+          email:      selectedProspect.email,
+          telephone:  selectedProspect.telephone,
+          entreprise: selectedProspect.entreprise,
+          adresse:    null,
+          ville:      null,
+          pays:       'Maroc',
+          notes:      null,
+        } as Client
+      : undefined)
+
+  const matchQuery = (q: string, ...fields: (string | null | undefined)[]) =>
+    !q || fields.some(f => (f ?? '').toLowerCase().includes(q.toLowerCase()))
 
   const filteredClients = useMemo(() =>
-    clients.filter(c =>
-      !clientSearch ||
-      c.nom.toLowerCase().includes(clientSearch.toLowerCase()) ||
-      (c.telephone ?? '').includes(clientSearch) ||
-      (c.entreprise ?? '').toLowerCase().includes(clientSearch.toLowerCase())
-    )
+    clients.filter(c => matchQuery(clientSearch, c.nom, c.telephone, c.entreprise))
   , [clients, clientSearch])
+
+  /* Prospects sélectionnables pour un devis (on écarte les perdus). */
+  const filteredProspects = useMemo(() =>
+    prospects
+      .filter(p => p.statut !== 'perdu')
+      .filter(p => matchQuery(clientSearch, p.nom, p.telephone, p.entreprise))
+      .slice(0, 50)
+  , [prospects, clientSearch])
 
   /* ── Calculations ── */
   const montantHT  = prestations.reduce((s, p) => s + ((p.showQuantite ?? true) ? p.quantite * p.prix_unitaire : p.prix_unitaire), 0)
@@ -1006,10 +1035,10 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
 
   /* ── Final submit ── */
   const handleSubmit = () => {
-    /* Un brouillon IA part d'un prospect (pas encore client) : on autorise
-       l'enregistrement sans client sélectionné dans ce cas précis. */
-    const prospectLinked = !!(editDevis as any)?.prospect_id
-    if (!selectedId && !prospectLinked) { toast.error('Sélectionnez un client'); setStep(1); return }
+    /* Un devis peut cibler un prospect (lead) pas encore client — soit choisi ici,
+       soit hérité d'un brouillon IA. On autorise alors l'absence de client. */
+    const prospectLinked = !!selectedProspectId || !!(editDevis as any)?.prospect_id
+    if (!selectedId && !prospectLinked) { toast.error('Sélectionnez un client ou un prospect'); setStep(1); return }
     const notesData: DevisNotesData = {
       prestations: prestations.map(({ id: _id, ...p }) => p),
       conditions,
@@ -1035,12 +1064,17 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       }, 0)
     const newNumero = `DEV-${year}-${String(maxSeq + 1).padStart(3, '0')}`
 
-    const clientNom = clients.find(c => c.id === selectedId)?.nom ?? (editDevis?.client_nom ?? '')
+    const clientNom = selectedProspect
+      ? (selectedProspect.entreprise || selectedProspect.nom)
+      : (clients.find(c => c.id === selectedId)?.nom ?? (editDevis?.client_nom ?? ''))
 
     const payload = {
       numero:          editDevis?.numero ?? newNumero,
       client_id:       selectedId || null,
       client_nom:      clientNom,
+      /* Lie le devis au prospect uniquement s'il en cible un (évite d'envoyer la
+         colonne prospect_id quand elle est inutile). */
+      ...(selectedProspectId ? { prospect_id: selectedProspectId } : {}),
       /* ✅ BUG-01 fix: NEVER overwrite the existing statut on edit */
       statut:          editDevis?.statut ?? ('brouillon' as const),
       date_emission:   dateDevis,
@@ -1068,7 +1102,7 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
       id:              editDevis?.id ?? 'preview',
       created_at:      new Date().toISOString(),
       numero:          editDevis?.numero ?? `DEV-${new Date().getFullYear()}-XXXX`,
-      client_id:       selectedId,
+      client_id:       selectedId || null,
       client_nom:      client?.entreprise ?? client?.nom ?? editDevis?.client_nom,
       statut:          editDevis?.statut ?? 'brouillon',
       date_emission:   dateDevis,
@@ -1549,13 +1583,13 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
               )}
             </AnimatePresence>
 
-            {/* Client list */}
-            <div className="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-border">
+            {/* Liste : clients + prospects (un devis peut cibler un lead pas encore client) */}
+            <div className="max-h-56 overflow-y-auto space-y-1 rounded-xl border border-border">
               {filteredClients.map(c => (
                 <button
-                  key={c.id}
-                  onClick={() => setSelectedId(c.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors first:rounded-t-xl last:rounded-b-xl ${
+                  key={`c-${c.id}`}
+                  onClick={() => { setSelectedId(c.id); setSelectedProspectId('') }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                     selectedId === c.id
                       ? 'bg-blue-600/10 text-foreground'
                       : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
@@ -1576,8 +1610,46 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                   {selectedId === c.id && <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />}
                 </button>
               ))}
-              {filteredClients.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">Aucun client trouvé</p>
+
+              {/* Prospects (leads) — pas encore clients */}
+              {filteredProspects.length > 0 && (
+                <>
+                  <div className="px-3 pt-2 pb-1 sticky top-0 bg-background/95 backdrop-blur">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Prospects (leads)</p>
+                  </div>
+                  {filteredProspects.map(p => (
+                    <button
+                      key={`p-${p.id}`}
+                      onClick={() => { setSelectedProspectId(p.id); setSelectedId('') }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                        selectedProspectId === p.id
+                          ? 'bg-amber-500/10 text-foreground'
+                          : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        selectedProspectId === p.id ? 'bg-amber-500 text-white' : 'bg-muted'
+                      }`}>
+                        {getInitials(p.nom)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium leading-tight flex items-center gap-1.5">
+                          <span className="truncate">
+                            {p.telephone && <span className="mr-1">{p.telephone}</span>}
+                            {p.entreprise && <span className="text-muted-foreground">{p.entreprise}</span>}
+                          </span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 flex-shrink-0 uppercase">Prospect</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">{p.nom}</p>
+                      </div>
+                      {selectedProspectId === p.id && <Check className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />}
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {filteredClients.length === 0 && filteredProspects.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Aucun client ni prospect trouvé</p>
               )}
             </div>
 
@@ -1588,8 +1660,13 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                 animate={{ opacity: 1, y: 0 }}
                 className="rounded-xl border border-blue-600/30 bg-blue-600/5 p-4"
               >
-                <div className="mb-3">
-                  <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Informations du client</p>
+                <div className="mb-3 flex items-center gap-2">
+                  <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+                    {selectedProspect ? 'Devis pour un prospect' : 'Informations du client'}
+                  </p>
+                  {selectedProspect && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 uppercase">Lead</span>
+                  )}
                 </div>
                 <p className="text-sm font-semibold text-foreground">{client.entreprise ?? client.nom}</p>
                 {client.telephone && (
@@ -1625,8 +1702,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
             {/* Footer */}
             <div className="flex justify-between pt-2">
               <Button variant="secondary" size="sm" onClick={onClose}>Annuler</Button>
-              <Button size="sm" onClick={() => { if (!selectedId) { toast.error('Sélectionnez un client'); return }; setStep(2) }}
-                disabled={!selectedId}>
+              <Button size="sm" onClick={() => { if (!selectedId && !selectedProspectId) { toast.error('Sélectionnez un client ou un prospect'); return }; setStep(2) }}
+                disabled={!selectedId && !selectedProspectId}>
                 Suivant <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
