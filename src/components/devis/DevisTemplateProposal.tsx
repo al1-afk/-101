@@ -10,7 +10,7 @@ import type { Devis }  from '@/hooks/useDevis'
 import type { Client } from '@/hooks/useClients'
 import { sanitizeRichHtml } from '@/lib/safeHtml'
 import {
-  parseDevisEnvelope, fmtMoney, fmtDate, DescBlocks, CO,
+  parseDevisEnvelope, fmtMoney, fmtDate, CO,
   type Currency, type Prestation,
 } from './templateShared'
 
@@ -37,7 +37,10 @@ const DevisTemplateProposal = forwardRef<HTMLDivElement, Props>(({ devis: d, cli
   }]
 
   const lineTotal = (r: Prestation) => ((r.showQuantite ?? true) ? r.quantite * r.prix_unitaire : r.prix_unitaire)
-  const hasNarrative = rows.some(r => r.description && r.description.length > 0)
+  /* Descriptif libre (haut du devis) : HTML riche si présent, sinon texte simple. */
+  const objetHtml = objet
+    ? (/<[a-z][\s\S]*>/i.test(objet) ? objet : objet.replace(/\n/g, '<br/>'))
+    : ''
 
   return (
     <div
@@ -86,35 +89,21 @@ const DevisTemplateProposal = forwardRef<HTMLDivElement, Props>(({ devis: d, cli
 
       <div style={{ height: 2, background: BLUE, borderRadius: 2, marginBottom: '6mm' }} />
 
-      {/* ══ PRÉAMBULE / DESCRIPTIF ══ */}
+      {/* ══ DESCRIPTIF (haut du devis — aucun prix) ══ */}
       <p className="text-[11px] font-bold uppercase tracking-[0.15em] mb-2" style={{ color: NAVY }}>
-        {offreTitle || 'Présentation de l’offre'}
+        {offreTitle || 'Objet du devis'}
       </p>
       <div
-        className="mb-6 text-[10.5px] leading-relaxed [&_strong]:font-bold [&_strong]:text-[#0a1a3c] [&_ul]:list-disc [&_ul]:pl-4"
+        className="mb-8 text-[10.5px] leading-relaxed
+          [&_strong]:font-bold [&_strong]:text-[#0a1a3c] [&_b]:font-bold [&_b]:text-[#0a1a3c]
+          [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-1
+          [&_li]:mb-0.5 [&_p]:mb-2 [&_u]:underline [&_em]:italic"
         style={{ color: '#334155' }}
       >
-        {objet
-          ? <div dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(objet.replace(/\n/g, '<br/>')) }} />
-          : <p>Veuillez trouver ci-dessous notre proposition détaillée ainsi que le détail financier correspondant. Nous restons à votre disposition pour tout ajustement.</p>}
+        {objetHtml
+          ? <div dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(objetHtml) }} />
+          : <p>Veuillez trouver ci-dessous la présentation de notre offre ainsi que le détail financier correspondant. Nous restons à votre disposition pour tout ajustement.</p>}
       </div>
-
-      {/* ══ SECTIONS DESCRIPTIVES (narratif par prestation) ══ */}
-      {hasNarrative && (
-        <div className="space-y-4 mb-7">
-          {rows.map((r, i) => (
-            r.description && r.description.length > 0 ? (
-              <div key={i} style={{ borderLeft: `3px solid ${BLUE}`, padding: '2px 0 4px 14px' }}>
-                <p className="text-[12px] font-bold" style={{ color: NAVY }}>
-                  <span style={{ color: BLUE }} className="mr-1">{String(i + 1).padStart(2, '0')}.</span>
-                  {r.titre}
-                </p>
-                <DescBlocks blocks={r.description} />
-              </div>
-            ) : null
-          ))}
-        </div>
-      )}
 
       {/* ══ DÉTAIL FINANCIER (tableau prix) ══ */}
       <p className="text-[13px] font-bold mb-2" style={{ color: NAVY }}>Détail financier</p>

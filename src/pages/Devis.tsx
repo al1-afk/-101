@@ -1312,16 +1312,23 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                         <p className="text-xs text-slate-600 dark:text-slate-300">
                           {template === 'proposal' ? 'Descriptif / préambule (haut du devis)' : 'Objet du devis'}
                         </p>
-                        <textarea
-                          value={objet}
-                          onChange={e => setObjet(e.target.value)}
-                          placeholder="Décrivez l'offre. Laissez vide pour un texte par défaut."
-                          rows={5}
-                          className="w-full rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2.5 py-2 text-xs text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
-                        />
+                        {template === 'proposal' ? (
+                          <DescriptionEditor
+                            value={objet ? [{ id: 'objet', type: 'paragraph', content: objet }] : []}
+                            onChange={blocks => setObjet(blocks[0]?.content ?? '')}
+                          />
+                        ) : (
+                          <textarea
+                            value={objet}
+                            onChange={e => setObjet(e.target.value)}
+                            placeholder="Décrivez l'objet et l'objectif du devis. Laissez vide pour un texte par défaut."
+                            rows={5}
+                            className="w-full rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2.5 py-2 text-xs text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+                          />
+                        )}
                         <p className="text-[10px] text-slate-400">
                           {template === 'proposal'
-                            ? 'Texte affiché en haut ; le tableau « Détail financier » se remplit depuis les prestations.'
+                            ? 'Description complète (gras + listes à puces) affichée en haut, sans prix. Le tableau « Détail financier » se remplit depuis les prestations.'
                             : 'Utilisé par le modèle Executive (section « Objet du devis »).'}
                         </p>
                       </div>
