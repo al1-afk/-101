@@ -18,7 +18,7 @@ export interface Prestation {
   showPrixUnit?: boolean
 }
 
-export type DevisTemplateKind = 'default' | 'simple' | 'offer' | 'executive'
+export type DevisTemplateKind = 'default' | 'simple' | 'offer' | 'executive' | 'proposal'
 
 export interface DevisNotesEnvelope {
   prestations: Prestation[]

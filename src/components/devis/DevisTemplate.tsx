@@ -10,6 +10,7 @@ import { sanitizeRichHtml } from '@/lib/safeHtml'
 import DevisTemplateSimple    from './DevisTemplateSimple'
 import DevisTemplateOffer     from './DevisTemplateOffer'
 import DevisTemplateExecutive from './DevisTemplateExecutive'
+import DevisTemplateProposal  from './DevisTemplateProposal'
 import type { DevisTemplateKind } from './templateShared'
 
 /* ─── Types ──────────────────────────────────────────────────── */
@@ -152,6 +153,7 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
     if (parsed.template === 'simple')    return <DevisTemplateSimple    ref={ref} devis={d} client={client} />
     if (parsed.template === 'offer')     return <DevisTemplateOffer     ref={ref} devis={d} client={client} />
     if (parsed.template === 'executive') return <DevisTemplateExecutive ref={ref} devis={d} client={client} />
+    if (parsed.template === 'proposal')  return <DevisTemplateProposal  ref={ref} devis={d} client={client} />
     const { prestations, conditions, bankInfo, signature } = parsed
 
     const hasTVA      = d.tva > 0
