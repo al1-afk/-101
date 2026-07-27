@@ -31,7 +31,7 @@ import {
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { prospectsSchema } from '@/lib/importExportSchemas'
 import {
-  DateRangeFilter, makeDatePredicate, computeRange, type DateRange,
+  DateRangeFilter, makeDatePredicate, computeRange, type DateRange, type DatePreset,
 } from '@/components/ui/DateRangeFilter'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
@@ -64,7 +64,7 @@ const DEFAULT_MONTH_RANGE: DateRange = (() => {
   return { preset: 'month', from: r.from, to: r.to }
 })()
 
-const PAGE_SIZE = 10
+const PAGE_SIZE = 50
 
 function stageAccent(statut: ProspectStatut) {
   return PROSPECT_STAGES.find(s => s.id === statut)?.accent ?? '#64748B'
@@ -1072,11 +1072,13 @@ export default function Prospects() {
   )
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
-  const filtered = useMemo(() => {
+  const searching = search.trim().length > 0
+
+  /* Base = tous les filtres SAUF la période (sert aussi aux compteurs). */
+  const baseFiltered = useMemo(() => {
     const q       = search.trim().toLowerCase()
     const qDigits = q.replace(/\D/g, '')                       // chiffres tapés
     const qCanon  = qDigits.replace(/^(00212|212|0)/, '')      // numéro national (sans 0 / +212)
-    const searching = q.length > 0
     /* Recherche par téléphone : compare les chiffres, et gère l'équivalence
        0XXXXXXXXX ↔ +212XXXXXXXXX (ex. « 663883668 » trouve « +212 663-883668 »). */
     const phoneHit = (phone: string | null) => {
@@ -1084,28 +1086,50 @@ export default function Prospects() {
       const d = phone.replace(/\D/g, '')
       return d.includes(qDigits) || d.replace(/^(00212|212|0)/, '').includes(qCanon)
     }
-    return prospects
-      .filter(p => {
-        const matchSearch  = !q
-          || p.nom.toLowerCase().includes(q)
-          || (p.entreprise ?? '').toLowerCase().includes(q)
-          || phoneHit(p.telephone)
-        const matchStatut  = filterStatut === 'all' || p.statut === filterStatut
-        /* Une recherche active affiche la liste complète : on ignore les
-           filtres de période (« Ce mois ») et « à contacter aujourd'hui ». */
-        const matchToday   = searching || !todayOnly || isRelanceToday(p)
-        const matchDate    = searching || dateMatch(p.created_at)
-        return matchSearch && matchStatut && matchToday && matchDate
-      })
+    return prospects.filter(p => {
+      const matchSearch  = !q
+        || p.nom.toLowerCase().includes(q)
+        || (p.entreprise ?? '').toLowerCase().includes(q)
+        || phoneHit(p.telephone)
+      const matchStatut  = filterStatut === 'all' || p.statut === filterStatut
+      /* Une recherche active affiche la liste complète : on ignore les
+         filtres de période (« Ce mois ») et « à contacter aujourd'hui ». */
+      const matchToday   = !!q || !todayOnly || isRelanceToday(p)
+      return matchSearch && matchStatut && matchToday
+    })
+  }, [prospects, search, filterStatut, todayOnly])
+
+  const filtered = useMemo(() => (
+    baseFiltered
+      .filter(p => searching || dateMatch(p.created_at))
       .sort((a, b) => {
         /* Priorité d'abord (Premium en tête), puis les plus récents. */
         const dr = prioriteRank(a.priorite) - prioriteRank(b.priorite)
         if (dr !== 0) return dr
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       })
-  }, [prospects, search, filterStatut, todayOnly, dateMatch])
+  ), [baseFiltered, searching, dateMatch])
 
-  /* Pagination — 10 par page, reset à 1 quand les filtres changent. */
+  /* Nombre de prospects par période, affiché sur chaque pastille du filtre. */
+  const periodCounts = useMemo(() => {
+    const countFor = (range: DateRange) => {
+      const match = makeDatePredicate(range)
+      return baseFiltered.filter(p => match(p.created_at)).length
+    }
+    const presets: Exclude<DatePreset, 'all' | 'custom'>[] = ['today', 'week', 'month', 'year']
+    const counts: Partial<Record<DatePreset, number>> = { all: baseFiltered.length }
+    presets.forEach(preset => {
+      /* La pastille active suit la période réellement affichée (flèches ‹ ›). */
+      if (preset === dateRange.preset) { counts[preset] = countFor(dateRange); return }
+      const { from, to } = computeRange(preset)
+      counts[preset] = countFor({ preset, from, to })
+    })
+    /* « Personnalisé » : compte la plage choisie, sinon rien à afficher. */
+    if (dateRange.preset === 'custom') counts.custom = countFor(dateRange)
+    return counts
+  }, [baseFiltered, dateRange])
+
+  /* Pagination — 50 par page, reset à 1 quand les filtres changent. */
   useEffect(() => { setPage(1) }, [search, filterStatut, todayOnly, dateRange])
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageStart  = (page - 1) * PAGE_SIZE
@@ -1336,7 +1360,7 @@ export default function Prospects() {
 
       {/* Date filter */}
       <div className="card-premium p-3">
-        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        <DateRangeFilter value={dateRange} onChange={setDateRange} counts={periodCounts} />
       </div>
 
       {/* ── Loading / Error states ── */}

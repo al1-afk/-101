@@ -782,6 +782,8 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
   const [selectedId,     setSelectedId]     = useState(editDevis?.client_id ?? '')
   /* Un devis peut cibler un prospect (lead) pas encore client. Exclusif avec selectedId. */
   const [selectedProspectId, setSelectedProspectId] = useState<string>((editDevis as any)?.prospect_id ?? '')
+  /* Onglet de sélection : Client vs Prospect (listes séparées, plus lisibles). */
+  const [pickerMode, setPickerMode] = useState<'client' | 'prospect'>((editDevis as any)?.prospect_id ? 'prospect' : 'client')
   const [dateDevis,      setDateDevis]      = useState(editDevis?.date_emission ?? today)
   const [dateValidite,   setDateValidite]   = useState(editDevis?.date_expiration ?? plus30)
   const [prestations,    setPrestations]    = useState<Prestation[]>(() => {
@@ -1532,21 +1534,48 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
           <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
 
             <div>
-              <label className="form-label">Sélectionner un client *</label>
-              <div className="flex gap-2 mt-1.5">
+              <label className="form-label">
+                {pickerMode === 'prospect' ? 'Sélectionner un prospect *' : 'Sélectionner un client *'}
+              </label>
+
+              {/* Onglets Client / Prospect */}
+              <div className="grid grid-cols-2 gap-2 mt-1.5 p-1 rounded-xl bg-muted/50">
+                <button
+                  type="button"
+                  onClick={() => setPickerMode('client')}
+                  className={`h-8 rounded-lg text-xs font-semibold transition-colors ${
+                    pickerMode === 'client' ? 'bg-blue-600 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Client
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPickerMode('prospect')}
+                  className={`h-8 rounded-lg text-xs font-semibold transition-colors ${
+                    pickerMode === 'prospect' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Prospect (lead)
+                </button>
+              </div>
+
+              <div className="flex gap-2 mt-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={clientSearch}
                     onChange={e => setClientSearch(e.target.value)}
-                    placeholder="Rechercher par nom, téléphone, entreprise…"
+                    placeholder="Rechercher par nom ou téléphone…"
                     className="pl-9"
                     autoFocus
                   />
                 </div>
-                <Button size="sm" variant="secondary" onClick={() => setShowNewClient(s => !s)}>
-                  <Plus className="w-3.5 h-3.5" /> Nouveau client
-                </Button>
+                {pickerMode === 'client' && (
+                  <Button size="sm" variant="secondary" onClick={() => setShowNewClient(s => !s)}>
+                    <Plus className="w-3.5 h-3.5" /> Nouveau client
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -1583,9 +1612,9 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
               )}
             </AnimatePresence>
 
-            {/* Liste : clients + prospects (un devis peut cibler un lead pas encore client) */}
+            {/* Liste selon l'onglet actif (Client ou Prospect) */}
             <div className="max-h-56 overflow-y-auto space-y-1 rounded-xl border border-border">
-              {filteredClients.map(c => (
+              {pickerMode === 'client' && filteredClients.map(c => (
                 <button
                   key={`c-${c.id}`}
                   onClick={() => { setSelectedId(c.id); setSelectedProspectId('') }}
@@ -1610,14 +1639,11 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                   {selectedId === c.id && <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />}
                 </button>
               ))}
+              {pickerMode === 'client' && filteredClients.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Aucun client trouvé</p>
+              )}
 
-              {/* Prospects (leads) — pas encore clients */}
-              {filteredProspects.length > 0 && (
-                <>
-                  <div className="px-3 pt-2 pb-1 sticky top-0 bg-background/95 backdrop-blur">
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Prospects (leads)</p>
-                  </div>
-                  {filteredProspects.map(p => (
+              {pickerMode === 'prospect' && filteredProspects.map(p => (
                     <button
                       key={`p-${p.id}`}
                       onClick={() => { setSelectedProspectId(p.id); setSelectedId('') }}
@@ -1644,12 +1670,9 @@ function DevisWizard({ onClose, editDevis, onStepChange }: {
                       </div>
                       {selectedProspectId === p.id && <Check className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />}
                     </button>
-                  ))}
-                </>
-              )}
-
-              {filteredClients.length === 0 && filteredProspects.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">Aucun client ni prospect trouvé</p>
+              ))}
+              {pickerMode === 'prospect' && filteredProspects.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Aucun prospect trouvé</p>
               )}
             </div>
 

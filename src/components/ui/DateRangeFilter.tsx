@@ -118,9 +118,27 @@ interface Props {
   value: DateRange
   onChange: (range: DateRange) => void
   className?: string
+  /* Compteurs optionnels affichés sur chaque pastille (ex. nb de prospects). */
+  counts?: Partial<Record<DatePreset, number>>
 }
 
-export function DateRangeFilter({ value, onChange, className = '' }: Props) {
+/* Petit badge de compteur collé à la pastille. */
+function CountBadge({ value, active }: { value?: number; active: boolean }) {
+  if (value === undefined) return null
+  return (
+    <span
+      className={`ml-1.5 min-w-[1.25rem] px-1 py-px rounded-full text-[10px] font-bold leading-4 text-center ${
+        active
+          ? 'bg-white/25 text-white'
+          : 'bg-muted text-muted-foreground'
+      }`}
+    >
+      {value}
+    </span>
+  )
+}
+
+export function DateRangeFilter({ value, onChange, className = '', counts }: Props) {
   const [customOpen, setCustomOpen] = useState(false)
   const [customFrom, setCustomFrom] = useState(value.from || '')
   const [customTo,   setCustomTo]   = useState(value.to   || '')
@@ -185,6 +203,7 @@ export function DateRangeFilter({ value, onChange, className = '' }: Props) {
           }`}
         >
           Toute
+          <CountBadge value={counts?.all} active={value.preset === 'all'} />
         </button>
         {PRESETS.map(p => (
           <button
@@ -198,6 +217,7 @@ export function DateRangeFilter({ value, onChange, className = '' }: Props) {
             }`}
           >
             {p.label}
+            <CountBadge value={counts?.[p.key]} active={value.preset === p.key} />
           </button>
         ))}
         <button
@@ -210,6 +230,7 @@ export function DateRangeFilter({ value, onChange, className = '' }: Props) {
           }`}
         >
           <Calendar className="w-3 h-3" /> Personnalisé
+          <CountBadge value={counts?.custom} active={value.preset === 'custom'} />
         </button>
       </div>
 
