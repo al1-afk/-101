@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useOfflineSync } from '@/hooks/useOfflineSync'
 import { useEventReminders } from '@/hooks/useEventReminders'
+import { useRelanceReminders } from '@/hooks/useRelanceReminders'
 import { useValidationNotifier } from '@/hooks/useValidationNotifier'
 import { maybeRequestPermissionOnce } from '@/lib/browserNotifications'
 import PwaInstallBanner from '@/components/PwaInstallBanner'
@@ -32,6 +33,8 @@ export default function AppLayout() {
   useNetworkStatus()
   useOfflineSync()
   useEventReminders()
+  /* Rappel des relances prospects : 5 min avant + à l'heure exacte */
+  useRelanceReminders()
   /* Toast manager when a team member completes a task → status validation */
   useValidationNotifier()
 
