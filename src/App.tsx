@@ -4,6 +4,7 @@ import { lazyWithRetry as lazy } from '@/lib/lazyWithRetry'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import AppLayout      from '@/components/layout/AppLayout'
+import WelcomeScreen  from '@/components/WelcomeScreen'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
 import ErrorBoundary  from '@/components/ErrorBoundary'
 import { ThemeProvider }  from '@/contexts/ThemeContext'
@@ -112,6 +113,7 @@ function PageLoader() {
 export default function App() {
   return (
     <ThemeProvider>
+    <WelcomeScreen />
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ErrorBoundary>
