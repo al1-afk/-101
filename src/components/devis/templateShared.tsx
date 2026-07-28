@@ -164,8 +164,8 @@ export function DescBlocks({ blocks, compact = false }: { blocks: DescriptionBlo
         if (b.type === 'paragraph') return (
           <div
             key={i}
-            style={{ fontSize: sz, color: '#333', lineHeight: 1.45 }}
-            className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-semibold"
+            style={{ fontSize: sz, color: '#0f172a', fontWeight: 500, lineHeight: 1.5 }}
+            className="[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-bold [&_strong]:text-[#0a1a3c]"
             dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(b.content) }}
           />
         )
@@ -176,7 +176,7 @@ export function DescBlocks({ blocks, compact = false }: { blocks: DescriptionBlo
         if (b.type === 'list') return (
           <ul key={i}>
             {text.split('\n').filter(Boolean).map((item, j) => (
-              <li key={j} style={{ fontSize: sz, color: '#333', lineHeight: 1.45 }}>{item}</li>
+              <li key={j} style={{ fontSize: sz, color: '#0f172a', fontWeight: 500, lineHeight: 1.5 }}>{item}</li>
             ))}
           </ul>
         )
