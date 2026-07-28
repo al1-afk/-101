@@ -54,14 +54,14 @@ function CardBullets({ blocks }: { blocks: DescriptionBlock[] }) {
             <div
               key={i}
               className="text-[9.5px] leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-bold [&_strong]:text-[#0a1a3c]"
-              style={{ color: '#334155' }}
+              style={{ color: '#0f172a' }}
               dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(it.content) }}
             />
           )
         return (
           <div key={i} className="flex items-start gap-1.5">
             <span className="flex-shrink-0" style={{ width: 4, height: 4, marginTop: 5, background: BLUE }} />
-            <span className="text-[9.5px] leading-snug" style={{ color: '#334155' }}>{it.content}</span>
+            <span className="text-[9.5px] leading-snug" style={{ color: '#0f172a' }}>{it.content}</span>
           </div>
         )
       })}
@@ -137,8 +137,8 @@ const DevisTemplateExecutive = forwardRef<HTMLDivElement, Props>(({ devis: d, cl
         <div className="ml-auto" style={{ width: '58%' }}>
           <div style={{ background: '#eef2fb', borderRadius: 6, padding: '10px 14px' }}>
             <p className="text-[14px] font-extrabold leading-tight" style={{ color: BLUE }}>{clientName}</p>
-            {clientSector && <p className="text-[10.5px]" style={{ color: '#334155' }}>{clientSector}</p>}
-            {clientPlace  && <p className="text-[10.5px]" style={{ color: '#334155' }}>{clientPlace}</p>}
+            {clientSector && <p className="text-[10.5px]" style={{ color: '#0f172a' }}>{clientSector}</p>}
+            {clientPlace  && <p className="text-[10.5px]" style={{ color: '#0f172a' }}>{clientPlace}</p>}
             {clientIce    && <p className="text-[9.5px] mt-0.5" style={{ color: '#64748b' }}>ICE : {clientIce}</p>}
           </div>
         </div>
@@ -158,11 +158,11 @@ const DevisTemplateExecutive = forwardRef<HTMLDivElement, Props>(({ devis: d, cl
         {objet ? (
           <div
             className="text-[10.5px] leading-relaxed [&_strong]:font-bold [&_strong]:text-[#0a1a3c] [&_ul]:list-disc [&_ul]:pl-4"
-            style={{ color: '#334155' }}
+            style={{ color: '#0f172a' }}
             dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(objet.replace(/\n/g, '<br/>')) }}
           />
         ) : (
-          <p className="text-[10.5px] leading-relaxed" style={{ color: '#334155' }}>
+          <p className="text-[10.5px] leading-relaxed" style={{ color: '#0f172a' }}>
             Réalisation des prestations décrites ci-dessous pour <strong style={{ color: NAVY }}>{clientName}</strong>,
             dans le cadre d'un accompagnement personnalisé par {CO.legalName}, de la conception jusqu'à la
             mise en ligne et au suivi.
@@ -249,7 +249,7 @@ const DevisTemplateExecutive = forwardRef<HTMLDivElement, Props>(({ devis: d, cl
             {condCols.map((col, ci) => (
               <div key={ci} className="space-y-1.5">
                 {col.map((c, i) => (
-                  <p key={i} className="text-[9.5px] leading-relaxed" style={{ color: '#334155' }}>
+                  <p key={i} className="text-[9.5px] leading-relaxed" style={{ color: '#0f172a' }}>
                     {c.label && <span className="font-bold" style={{ color: NAVY }}>{c.label} : </span>}
                     {c.value}
                   </p>

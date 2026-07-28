@@ -230,7 +230,7 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
             <p className="text-[12px] font-extrabold text-[#0a1a3c] leading-snug">
               {client?.entreprise ?? d.client_nom ?? '—'}
             </p>
-            <div className="text-[10px] text-[#374151] leading-snug">
+            <div className="text-[10px] text-[#0f172a] leading-snug">
               {d.client_nom && client?.entreprise && <p>{d.client_nom}</p>}
               {client?.email     && <p>{client.email}</p>}
               {client?.telephone && <p>{client.telephone}</p>}
@@ -299,12 +299,12 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
                         <BlockContent blocks={row.description} />
                       </td>
                       {anyQty && (
-                        <td className="px-3 py-2 text-right text-[11px] text-[#374151] align-top border-b border-[#e2e8f0]">
+                        <td className="px-3 py-2 text-right text-[11px] text-[#0f172a] align-top border-b border-[#e2e8f0]">
                           {showQty ? row.quantite : ''}
                         </td>
                       )}
                       {anyPrix && (
-                        <td className="px-3 py-2 text-right text-[11px] text-[#374151] align-top border-b border-[#e2e8f0]">
+                        <td className="px-3 py-2 text-right text-[11px] text-[#0f172a] align-top border-b border-[#e2e8f0]">
                           {showPrix ? fmt(row.prix_unitaire) : ''}
                         </td>
                       )}
@@ -385,7 +385,7 @@ const DevisTemplate = forwardRef<HTMLDivElement, DevisTemplateProps>(
             </p>
             <ul className="space-y-1">
               {allConditions.slice(0, 6).map((c, i) => (
-                <li key={i} className="flex items-start gap-1.5 text-[10px] text-[#374151]">
+                <li key={i} className="flex items-start gap-1.5 text-[10px] text-[#0f172a]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#1e64c4] flex-shrink-0 mt-[3px]" />
                   {c}
                 </li>

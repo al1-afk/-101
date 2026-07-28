@@ -117,7 +117,7 @@ function BlockContent({ blocks }: { blocks: DescriptionBlock[] }) {
         if (b.type === 'paragraph') return (
           <div
             key={i}
-            className="text-[10px] text-[#374151] leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-0.5 [&_strong]:font-semibold [&_strong]:text-[#0a1a3c] [&_em]:italic [&_u]:underline [&_s]:line-through"
+            className="text-[10px] font-medium text-[#0f172a] leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-0.5 [&_strong]:font-bold [&_strong]:text-[#0a1a3c] [&_em]:italic [&_u]:underline [&_s]:line-through"
             dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(b.content) }}
           />
         )
@@ -128,8 +128,8 @@ function BlockContent({ blocks }: { blocks: DescriptionBlock[] }) {
         if (b.type === 'list') return (
           <ul key={i} className="space-y-0.5">
             {text.split('\n').filter(Boolean).map((item, j) => (
-              <li key={j} className="flex items-start gap-1.5 text-[10px] text-[#374151]">
-                <span className="w-1 h-1 rounded-full bg-[#374151] flex-shrink-0 mt-[4px]" />
+              <li key={j} className="flex items-start gap-1.5 text-[10px] font-medium text-[#0f172a]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0f172a] flex-shrink-0 mt-[3px]" />
                 <span className="leading-relaxed">{item}</span>
               </li>
             ))}
@@ -235,7 +235,7 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
             <p className="text-[12px] font-extrabold text-[#0a1a3c] leading-snug">
               {client?.entreprise ?? f.client_nom ?? '—'}
             </p>
-            <div className="text-[10px] text-[#374151] leading-snug">
+            <div className="text-[10px] text-[#0f172a] leading-snug">
               {f.client_nom && client?.entreprise && <p>{f.client_nom}</p>}
               {client?.email     && <p>{client.email}</p>}
               {client?.telephone && <p>{client.telephone}</p>}
@@ -304,12 +304,12 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
                         <BlockContent blocks={row.description} />
                       </td>
                       {anyQty && (
-                        <td className="px-3 py-2 text-right text-[11px] text-[#374151] align-top border-b border-[#e2e8f0]">
+                        <td className="px-3 py-2 text-right text-[11px] text-[#0f172a] align-top border-b border-[#e2e8f0]">
                           {showQty ? row.quantite : ''}
                         </td>
                       )}
                       {anyPrix && (
-                        <td className="px-3 py-2 text-right text-[11px] text-[#374151] align-top border-b border-[#e2e8f0]">
+                        <td className="px-3 py-2 text-right text-[11px] text-[#0f172a] align-top border-b border-[#e2e8f0]">
                           {showPrix ? fmt(row.prix_unitaire, currency) : ''}
                         </td>
                       )}
@@ -410,7 +410,7 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
               </p>
               <ul className="space-y-1">
                 {allConditions.slice(0, 6).map((c, i) => (
-                  <li key={i} className="flex items-start gap-1.5 text-[10px] text-[#374151]">
+                  <li key={i} className="flex items-start gap-1.5 text-[10px] text-[#0f172a]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#1e64c4] flex-shrink-0 mt-[3px]" />
                     {c}
                   </li>
@@ -448,7 +448,7 @@ const FactureTemplate = forwardRef<HTMLDivElement, FactureTemplateProps>(
               </p>
               <ul className="space-y-1">
                 {allConditions.slice(0, 6).map((c, i) => (
-                  <li key={i} className="flex items-start gap-1.5 text-[10px] text-[#374151]">
+                  <li key={i} className="flex items-start gap-1.5 text-[10px] text-[#0f172a]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#1e64c4] flex-shrink-0 mt-[3px]" />
                     {c}
                   </li>

@@ -79,7 +79,7 @@ const DevisTemplateProposal = forwardRef<HTMLDivElement, Props>(({ devis: d, cli
       <div className="mb-5 rounded-lg" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '10px 14px' }}>
         <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: '#64748b' }}>À l'attention de</p>
         <p className="text-[13px] font-extrabold" style={{ color: NAVY }}>{client?.entreprise ?? d.client_nom ?? '—'}</p>
-        <div className="text-[10px]" style={{ color: '#334155' }}>
+        <div className="text-[10px]" style={{ color: '#0f172a' }}>
           {client?.email && <span>{client.email}</span>}
           {client?.email && client?.telephone && <span> · </span>}
           {client?.telephone && <span>{client.telephone}</span>}
@@ -98,7 +98,7 @@ const DevisTemplateProposal = forwardRef<HTMLDivElement, Props>(({ devis: d, cli
           [&_strong]:font-bold [&_strong]:text-[#0a1a3c] [&_b]:font-bold [&_b]:text-[#0a1a3c]
           [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-1
           [&_li]:mb-0.5 [&_p]:mb-2 [&_u]:underline [&_em]:italic"
-        style={{ color: '#334155' }}
+        style={{ color: '#0f172a' }}
       >
         {objetHtml
           ? <div dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(objetHtml) }} />
@@ -161,7 +161,7 @@ const DevisTemplateProposal = forwardRef<HTMLDivElement, Props>(({ devis: d, cli
           <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: NAVY }}>Conditions</p>
           <ul className="space-y-1">
             {parsed.conditions.slice(0, 6).map((c, i) => (
-              <li key={i} className="flex items-start gap-2 text-[10px]" style={{ color: '#334155' }}>
+              <li key={i} className="flex items-start gap-2 text-[10px]" style={{ color: '#0f172a' }}>
                 <span className="flex-shrink-0" style={{ width: 5, height: 5, borderRadius: 9, background: BLUE, marginTop: 4 }} />
                 <span>{c}</span>
               </li>

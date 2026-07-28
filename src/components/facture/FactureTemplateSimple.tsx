@@ -94,7 +94,7 @@ function DescBlocks({ blocks }: { blocks: DescriptionBlock[] }) {
         if (b.type === 'paragraph') return (
           <div
             key={i}
-            className="text-[9.5px] text-[#333] leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-semibold"
+            className="text-[9.5px] font-medium text-[#0f172a] leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_strong]:font-bold [&_strong]:text-[#0a1a3c]"
             dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(b.content) }}
           />
         )
@@ -105,7 +105,7 @@ function DescBlocks({ blocks }: { blocks: DescriptionBlock[] }) {
         if (b.type === 'list') return (
           <ul key={i} className="space-y-0">
             {text.split('\n').filter(Boolean).map((item, j) => (
-              <li key={j} className="text-[9.5px] text-[#333] leading-snug">{item}</li>
+              <li key={j} className="text-[9.5px] font-medium text-[#0f172a] leading-snug">{item}</li>
             ))}
           </ul>
         )

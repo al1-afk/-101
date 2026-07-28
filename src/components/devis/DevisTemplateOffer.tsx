@@ -74,7 +74,7 @@ const DevisTemplateOffer = forwardRef<HTMLDivElement, Props>(({ devis: d, client
       </div>
 
       {/* Intro */}
-      <p className="text-[10.5px] text-[#333] leading-relaxed mb-5">
+      <p className="text-[10.5px] font-medium text-[#0f172a] leading-relaxed mb-5">
         Bonjour,<br />
         Suite à nos échanges, veuillez trouver ci-dessous notre proposition détaillée. Nous restons
         à votre disposition pour tout ajustement.
@@ -125,7 +125,7 @@ const DevisTemplateOffer = forwardRef<HTMLDivElement, Props>(({ devis: d, client
           <p className="text-[10px] font-bold text-[#0a1a3c] uppercase tracking-widest mb-2">Conditions</p>
           <ul className="space-y-1">
             {parsed.conditions.slice(0, 6).map((c, i) => (
-              <li key={i} className="flex items-start gap-2 text-[10px] text-[#333]">
+              <li key={i} className="flex items-start gap-2 text-[10px] font-medium text-[#0f172a]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#1e64c4] flex-shrink-0 mt-[4px]" />
                 <span>{c}</span>
               </li>
