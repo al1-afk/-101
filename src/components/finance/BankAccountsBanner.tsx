@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Wallet, Trash2, Loader2 } from 'lucide-react'
+import { Plus, Wallet, Trash2, Loader2, ArrowLeftRight, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -10,7 +10,10 @@ import {
   useDeleteBankAccount,
   type BankAccountWithSolde,
 } from '@/hooks/useBankAccounts'
+import { useTransferts } from '@/hooks/useFinanceQueries'
 import { AccountDetailDialog } from './AccountDetailDialog'
+import { AdjustBalanceDialog } from './AdjustBalanceDialog'
+import { TransferDialog } from './TransferDialog'
 
 const TYPE_PRESETS = [
   { value: 'banque', label: 'Banque',   icon: '🏦', couleur: '#3b82f6' },
@@ -27,10 +30,14 @@ function formatDH(n: number, devise = 'MAD') {
 
 export function BankAccountsBanner() {
   const { data: accounts, isLoading, totalSolde } = useBankAccountsWithSolde()
+  const { data: transferts = [] } = useTransferts()
   const createAccount = useCreateBankAccount()
   const deleteAccount = useDeleteBankAccount()
   const [showForm, setShowForm] = useState(false)
   const [openAccountId, setOpenAccountId] = useState<string | null>(null)
+  const [adjustAccount, setAdjustAccount] = useState<BankAccountWithSolde | null>(null)
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [transferSource, setTransferSource] = useState<string | null>(null)
   const [form, setForm] = useState({
     nom: '',
     type: 'banque' as 'banque' | 'wallet' | 'cash' | 'autre',
@@ -82,9 +89,20 @@ export function BankAccountsBanner() {
             </p>
           </div>
         </div>
-        <Button size="sm" onClick={() => setShowForm(true)}>
-          <Plus className="w-4 h-4 mr-1" /> Nouveau compte
-        </Button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {accounts.filter(a => a.actif !== false).length >= 2 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { setTransferSource(null); setShowTransfer(true) }}
+            >
+              <ArrowLeftRight className="w-4 h-4 mr-1" /> Transférer
+            </Button>
+          )}
+          <Button size="sm" onClick={() => setShowForm(true)}>
+            <Plus className="w-4 h-4 mr-1" /> Nouveau compte
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -107,8 +125,27 @@ export function BankAccountsBanner() {
               key={a.id}
               account={a}
               onClick={() => setOpenAccountId(a.id)}
+              onAdjust={() => setAdjustAccount(a)}
               onDelete={() => {
-                if (confirm(`Supprimer le compte "${a.nom}" ? Les dépenses/paiements liés seront conservés mais dissociés.`)) {
+                /* Un transfert appartient à deux comptes : le supprimer avec
+                   l'un fausserait le solde de l'autre. La base refuse (FK
+                   RESTRICT) — autant le dire avant le clic plutôt que de
+                   laisser remonter une erreur. */
+                const lies = transferts.filter(
+                  t => t.compte_source_id === a.id || t.compte_destination_id === a.id
+                ).length
+                if (lies > 0) {
+                  alert(
+                    `Impossible de supprimer "${a.nom}" : ${lies} transfert(s) le concernent.\n\n` +
+                    `Supprimez d'abord ces transferts dans l'historique financier, ou désactivez le compte.`
+                  )
+                  return
+                }
+                if (confirm(
+                  `Supprimer le compte "${a.nom}" ?\n\n` +
+                  `Les dépenses, revenus et paiements liés seront conservés mais dissociés du compte. ` +
+                  `L'historique de ses ajustements de solde sera supprimé.`
+                )) {
                   deleteAccount.mutate(a.id)
                 }
               }}
@@ -223,6 +260,20 @@ export function BankAccountsBanner() {
       <AccountDetailDialog
         accountId={openAccountId}
         onClose={() => setOpenAccountId(null)}
+        onAdjust={(acc) => { setOpenAccountId(null); setAdjustAccount(acc) }}
+        onTransfer={(acc) => { setOpenAccountId(null); setTransferSource(acc.id); setShowTransfer(true) }}
+      />
+
+      <AdjustBalanceDialog
+        account={adjustAccount}
+        onClose={() => setAdjustAccount(null)}
+      />
+
+      <TransferDialog
+        open={showTransfer}
+        onClose={() => setShowTransfer(false)}
+        accounts={accounts}
+        defaultSourceId={transferSource}
       />
     </div>
   )
@@ -232,10 +283,12 @@ function AccountCard({
   account,
   onDelete,
   onClick,
+  onAdjust,
 }: {
   account: BankAccountWithSolde
   onDelete: () => void
   onClick: () => void
+  onAdjust: () => void
 }) {
   const bg = account.couleur ?? '#3b82f6'
   return (
@@ -273,7 +326,22 @@ function AccountCard({
           )}
         </p>
       )}
-      <p className="text-[10px] text-blue-500 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {account.total_ajustements !== 0 && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 truncate">
+          ⚖️ Ajusté de {account.total_ajustements > 0 ? '+' : '−'}
+          {formatDH(Math.abs(account.total_ajustements), account.devise)}
+        </p>
+      )}
+
+      {/* Correction manuelle du solde — l'action la plus fréquente sur une
+          carte, donc accessible directement et non cachée au survol. */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onAdjust() }}
+        className="mt-2 w-full inline-flex items-center justify-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 border border-border rounded-lg py-1 hover:bg-blue-50 dark:hover:bg-blue-900/15 transition-colors"
+      >
+        <SlidersHorizontal className="w-3 h-3" /> Modifier le solde
+      </button>
+      <p className="text-[10px] text-blue-500 mt-1 opacity-0 group-hover:opacity-100 transition-opacity text-center">
         Voir l'historique →
       </p>
     </div>

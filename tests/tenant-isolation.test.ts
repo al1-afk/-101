@@ -21,7 +21,12 @@
 import test     from 'node:test'
 import assert   from 'node:assert/strict'
 import { Pool } from 'pg'
-import 'dotenv/config'
+import jwt      from 'jsonwebtoken'
+import dotenv   from 'dotenv'
+
+/* Même source de configuration que le serveur (server/db/pool.ts). */
+dotenv.config({ path: '.env.local' })
+dotenv.config()
 
 const API_URL = process.env.TEST_API_URL || 'http://localhost:4000'
 
@@ -50,7 +55,7 @@ async function api<T = any>(
       ...headers,
     },
   })
-  const body = await res.json().catch(() => ({}))
+  const body = await res.json().catch(() => ({})) as T
   return { status: res.status, body }
 }
 
@@ -75,30 +80,37 @@ async function registerTenant(): Promise<Token> {
   return { ...(body as any), tenantSlug: slug }
 }
 
+/* Même dérivation que server/middleware/auth.ts (repli dev stable). */
+const JWT_SECRET = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
+  ? process.env.JWT_SECRET
+  : `dev-JWT_SECRET-fallback-${'x'.repeat(40)}`
+
 async function addMember(tenantId: string, role: string): Promise<Token> {
-  // We don't have a public "create user in existing tenant" API, so we
-  // register a new tenant to get a user, then insert a membership row
-  // directly via the app DB pool (this is an integration test — the
-  // point is to exercise the HTTP boundary, not replicate every flow).
-  const { token, tenantId: _t } = await registerTenant()
+  /* On crée l'appartenance en base puis on SIGNE directement un token.
+     Passer par /api/auth/login ne marche plus : la connexion exige
+     désormais une seconde vérification (2FA), et les routes d'auth sont
+     plafonnées à 10 requêtes / 15 min par IP.
+
+     Note : le rôle inscrit ici dans le token n'a plus d'importance —
+     depuis le durcissement, `requireAuth` relit le rôle EFFECTIF dans
+     tenant_users. On met volontairement 'admin' dans le JWT pour que le
+     test prouve que c'est bien la base qui fait autorité. */
+  const { token } = await registerTenant()
   const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString())
   const userId  = payload.userId
 
   await adminPool.query(
     `INSERT INTO tenant_users (tenant_id, user_id, role, status)
      VALUES ($1, $2, $3, 'active')
-     ON CONFLICT (tenant_id, user_id) DO UPDATE SET role=EXCLUDED.role`,
+     ON CONFLICT (tenant_id, user_id) DO UPDATE SET role=EXCLUDED.role, status='active'`,
     [tenantId, userId, role],
   )
 
-  // Re-login targeting the new tenant so the JWT carries its tenantId
-  const email = payload.email
-  const { body: loginBody, status } = await api<Token>('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password: 'Strong-Password-123', tenantSlug: (await tenantSlugFor(tenantId)) }),
-  })
-  assert.equal(status, 200, `login failed: ${JSON.stringify(loginBody)}`)
-  return loginBody as Token
+  const scoped = jwt.sign(
+    { userId, email: payload.email, tenantId, role: 'admin', type: 'access' },
+    JWT_SECRET, { expiresIn: '1h' },
+  )
+  return { token: scoped, tenantId, tenantSlug: await tenantSlugFor(tenantId), role }
 }
 
 async function tenantSlugFor(tenantId: string): Promise<string> {
@@ -200,6 +212,31 @@ test('6. RBAC: viewer ne peut pas DELETE', async () => {
   /* et la ligne existe toujours */
   const { status } = await api(`/api/clients/${c1.id}`, { token: owner.token })
   assert.equal(status, 200)
+})
+
+test('8. IDOR hors CRUD: /api/team/members/:id d\'un autre espace → 404', async () => {
+  /* Cette route ne filtre PAS par tenant dans son SQL : elle s'appuie
+     uniquement sur la RLS (`tenantQueryOne(... WHERE m.id = $1)`), comme
+     ~200 requêtes du backend. Le test vérifie que le durcissement
+     (rôle d'exécution soumis à la RLS, migration 082) protège bien ces
+     routes-là, et pas seulement le CRUD générique. */
+  const A = await registerTenant()
+  const B = await registerTenant()
+
+  const inserted = await adminPool.query(
+    `INSERT INTO public.team_members (tenant_id, nom, email)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [A.tenantId, 'Membre-A', `member-${Date.now()}@example.test`],
+  )
+  const memberId = inserted.rows[0].id
+
+  const own = await api(`/api/team/members/${memberId}`, { token: A.token })
+  assert.equal(own.status, 200, 'A doit voir son propre membre')
+
+  const cross = await api(`/api/team/members/${memberId}`, { token: B.token })
+  assert.equal(cross.status, 404, 'B ne doit pas atteindre le membre de A')
+
+  await adminPool.query('DELETE FROM public.team_members WHERE id = $1', [memberId])
 })
 
 test('7. CASCADE: supprimer tenant A efface toutes ses lignes', async () => {

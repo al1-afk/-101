@@ -10,6 +10,8 @@
  * Requires env : GOOGLE_PLACES_API_KEY
  */
 
+import { safeFetchText } from './safeFetch'
+
 export interface GooglePlace {
   place_id:    string
   name:        string
@@ -169,30 +171,26 @@ function isRealEmail(email: string): boolean {
   return true
 }
 
+/* L'URL vient d'un champ « site web » de prospect : elle est fournie par
+   l'utilisateur. Sans garde-fou, elle pouvait viser 169.254.169.254
+   (métadonnées cloud), 127.0.0.1 (l'API elle-même) ou n'importe quel
+   service du réseau interne — c'est une SSRF, et les emails extraits de
+   la réponse ressortaient dans l'interface. `safeFetchText` refuse toute
+   cible non publique et revalide chaque redirection. */
 async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<string | null> {
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      headers: {
-        /* User-Agent d'un vrai navigateur — certains sites bloquent les bots */
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-        'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      redirect: 'follow',
-    })
-    if (!res.ok) return null
-    const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('html') && !ct.includes('text')) return null
-    const text = await res.text()
-    /* Limite à 500 KB — les mega pages (SPA) contiennent rarement l'email en clair */
-    return text.slice(0, 500_000)
-  } catch {
-    return null
-  } finally {
-    clearTimeout(t)
-  }
+  const res = await safeFetchText(url, {
+    timeoutMs,
+    maxBytes: 500_000,
+    headers: {
+      /* User-Agent d'un vrai navigateur — certains sites bloquent les bots */
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+      'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  })
+  if (!res.ok || !res.body) return null
+  const ct = res.contentType ?? ''
+  if (!ct.includes('html') && !ct.includes('text')) return null
+  return res.body
 }
 
 function extractEmailsFromHtml(html: string): string[] {

@@ -1,8 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { bankAccountsApi, paiementsApi } from '@/lib/api'
+import { bankAccountsApi } from '@/lib/api'
 import { currentTenantIdForCache } from '@/lib/authToken'
 import { toast } from 'sonner'
 import { useDepenses } from './useDepenses'
+import { usePaiements } from './usePaiements'
+import { useRevenus, useTransferts, useAjustements } from './useFinanceQueries'
+import {
+  computeAccountBalances, computeMonthlyHistory, buildMovements,
+  type FinanceData, type Movement,
+} from '@/lib/finance/compute'
 import { useMemo } from 'react'
 
 export interface BankAccount {
@@ -22,32 +28,18 @@ export interface BankAccount {
 }
 
 export interface BankAccountWithSolde extends BankAccount {
-  solde: number
-  total_entrees: number
-  total_sorties: number
+  solde:                     number
+  total_entrees:             number
+  total_sorties:             number
+  total_transferts_entrants: number
+  total_transferts_sortants: number
+  total_ajustements:         number
 }
 
-interface PaiementRow {
-  id:              string
-  montant:         number
-  bank_account_id: string | null
-  date:            string
-  status:          string
-  notes:           string | null
-  reference:       string | null
-}
-
-export interface AccountMovement {
-  id:      string
-  date:    string       // YYYY-MM-DD
-  type:    'entree' | 'sortie'
-  montant: number
-  label:   string
-  source:  'paiement' | 'depense'
-}
+/** Mouvement d'un compte (ré-export du type partagé). */
+export type AccountMovement = Movement
 
 const KEY = 'bank_accounts'
-const KEY_PAI = 'paiements'
 
 export function useBankAccounts() {
   return useQuery<BankAccount[]>({
@@ -57,111 +49,92 @@ export function useBankAccounts() {
   })
 }
 
-/* Solde live : solde_initial + Σ paiements entrants - Σ dépenses sortantes.
-   Calculé côté client à partir des mêmes hooks que la page utilise déjà,
-   pour éviter d'ajouter une route serveur dédiée à la vue. */
+/**
+ * Rassemble les listes qui composent un solde. Les mêmes requêtes sont
+ * partagées (React Query dédoublonne par clé) : aucun appel réseau
+ * supplémentaire par rapport aux écrans qui les affichent déjà.
+ */
+function useFinanceSources(): { data: FinanceData; isLoading: boolean } {
+  const accountsQ    = useBankAccounts()
+  const depensesQ    = useDepenses()
+  const paiementsQ   = usePaiements()
+  const revenusQ     = useRevenus()
+  const transfertsQ  = useTransferts()
+  const ajustementsQ = useAjustements()
+
+  const isLoading = accountsQ.isLoading || depensesQ.isLoading || paiementsQ.isLoading
+    || revenusQ.isLoading
+
+  return useMemo(() => ({
+    data: {
+      accounts:    accountsQ.data    ?? [],
+      depenses:    depensesQ.data    ?? [],
+      paiements:   paiementsQ.data   ?? [],
+      revenus:     revenusQ.data     ?? [],
+      transferts:  transfertsQ.data  ?? [],
+      ajustements: ajustementsQ.data ?? [],
+    },
+    isLoading,
+  }), [
+    accountsQ.data, depensesQ.data, paiementsQ.data,
+    revenusQ.data, transfertsQ.data, ajustementsQ.data, isLoading,
+  ])
+}
+
+/* Solde réel d'un compte :
+     solde_initial
+   + paiements encaissés + revenus + transferts entrants + ajustements
+   − dépenses − transferts sortants
+   La formule vit dans @/lib/finance/compute (testée) et dans la vue SQL
+   bank_accounts_with_solde — jamais recopiée à la main ici. */
 export function useBankAccountsWithSolde() {
-  const accountsQ = useBankAccounts()
-  const { data: depenses = [] } = useDepenses()
-  const paiementsQ = useQuery<PaiementRow[]>({
-    queryKey: [KEY_PAI, currentTenantIdForCache()],
-    queryFn:  () => paiementsApi.list({ orderBy: 'created_at', order: 'desc' }) as Promise<PaiementRow[]>,
-    staleTime: 1000 * 60 * 3,
-  })
+  const { data, isLoading } = useFinanceSources()
 
   const enriched = useMemo<BankAccountWithSolde[]>(() => {
-    const accounts = accountsQ.data ?? []
-    /* Seuls les paiements effectivement encaissés (status='paye') impactent
-       le solde. Un paiement 'en_attente' n'est pas encore dans le compte. */
-    const paiements = (paiementsQ.data ?? []).filter(p => p.status === 'paye')
-    return accounts.map(a => {
-      const total_entrees = paiements
-        .filter(p => p.bank_account_id === a.id)
-        .reduce((s, p) => s + Number(p.montant || 0), 0)
-      const total_sorties = depenses
-        .filter(d => (d as any).bank_account_id === a.id)
-        .reduce((s, d) => s + Number(d.montant || 0), 0)
+    const balances = computeAccountBalances(data)
+    return (data.accounts ?? []).map(a => {
+      const b = balances.get(a.id)
       return {
-        ...a,
-        total_entrees,
-        total_sorties,
-        solde: Number(a.solde_initial || 0) + total_entrees - total_sorties,
+        ...(a as BankAccount),
+        solde:                     b?.solde ?? Number(a.solde_initial || 0),
+        total_entrees:             b?.total_entrees ?? 0,
+        total_sorties:             b?.total_sorties ?? 0,
+        total_transferts_entrants: b?.total_transferts_entrants ?? 0,
+        total_transferts_sortants: b?.total_transferts_sortants ?? 0,
+        total_ajustements:         b?.total_ajustements ?? 0,
       }
     })
-  }, [accountsQ.data, paiementsQ.data, depenses])
+  }, [data])
 
   return {
     data: enriched,
-    isLoading: accountsQ.isLoading || paiementsQ.isLoading,
+    isLoading,
     totalSolde: enriched.reduce((s, a) => s + a.solde, 0),
   }
 }
 
-/* Historique mensuel du solde d'un compte : renvoie un tableau ordonné
-   [{ month:'2026-02', solde: 1234 }, …] jusqu'au mois courant.
-   Solde à la fin du mois M = solde_initial + Σ paiements(date <= fin M)
-                                            − Σ dépenses(date <= fin M) */
+/**
+ * Historique mensuel du solde d'un compte + journal de ses mouvements
+ * (revenus, paiements encaissés, dépenses, transferts, ajustements).
+ */
 export function useAccountMonthlyHistory(accountId: string | null, monthsBack = 12) {
-  const { data: depenses = [] } = useDepenses()
-  const paiementsQ = useQuery<PaiementRow[]>({
-    queryKey: [KEY_PAI, currentTenantIdForCache()],
-    queryFn:  () => paiementsApi.list({ orderBy: 'created_at', order: 'desc' }) as Promise<PaiementRow[]>,
-    staleTime: 1000 * 60 * 3,
-  })
-  const { data: accounts = [] } = useBankAccounts()
+  const { data } = useFinanceSources()
 
   return useMemo(() => {
-    if (!accountId) return { history: [], movements: [] }
-    const account = accounts.find(a => a.id === accountId)
-    if (!account) return { history: [], movements: [] }
-
-    /* Seuls les paiements encaissés (paye) impactent le solde du compte. */
-    const paiements = (paiementsQ.data ?? [])
-      .filter(p => p.bank_account_id === accountId && p.status === 'paye')
-    const accountDepenses = depenses.filter(d => (d as any).bank_account_id === accountId)
-
-    /* Mouvements unifiés triés du plus récent au plus ancien. */
-    const movements: AccountMovement[] = [
-      ...paiements.map(p => ({
-        id:      p.id,
-        date:    p.date,
-        type:    'entree' as const,
-        montant: Number(p.montant || 0),
-        label:   p.notes || p.reference || 'Paiement encaissé',
-        source:  'paiement' as const,
-      })),
-      ...accountDepenses.map(d => ({
-        id:      d.id,
-        date:    d.date_depense,
-        type:    'sortie' as const,
-        montant: Number(d.montant || 0),
-        label:   d.description || d.categorie || 'Dépense',
-        source:  'depense' as const,
-      })),
-    ].sort((a, b) => (a.date < b.date ? 1 : -1))
-
-    /* Solde à la fin de chaque mois, monthsBack mois en arrière. */
-    const now = new Date()
-    const history: Array<{ month: string; label: string; solde: number }> = []
-    for (let i = monthsBack - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0) // dernier jour du mois
-      const endStr = d.toISOString().slice(0, 10)
-      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      const totalPai = paiements
-        .filter(p => p.date && p.date <= endStr)
-        .reduce((s, p) => s + Number(p.montant || 0), 0)
-      const totalDep = accountDepenses
-        .filter(x => x.date_depense && x.date_depense <= endStr)
-        .reduce((s, x) => s + Number(x.montant || 0), 0)
-      history.push({
-        month: monthKey,
-        label: d.toLocaleString('fr-FR', { month: 'short', year: '2-digit' }),
-        solde: Number(account.solde_initial || 0) + totalPai - totalDep,
-      })
+    const account = (data.accounts ?? []).find(a => a.id === accountId) as BankAccount | undefined
+    if (!accountId || !account) {
+      return { history: [], movements: [] as Movement[], account: undefined, solde: 0 }
     }
-
-    return { history, movements, account }
-  }, [accountId, accounts, paiementsQ.data, depenses, monthsBack])
+    return {
+      history:   computeMonthlyHistory(data, accountId, monthsBack),
+      movements: buildMovements(data, accountId),
+      account,
+      /* Le solde courant vient du calcul de référence, pas du dernier point
+         de l'historique mensuel : un mouvement daté dans le futur compte
+         dans le solde réel mais pas dans le point « fin du mois en cours ». */
+      solde:     computeAccountBalances(data).get(accountId)?.solde ?? 0,
+    }
+  }, [accountId, data, monthsBack])
 }
 
 export function useCreateBankAccount() {

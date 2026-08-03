@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { query, queryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
+import { invalidateRole } from '../lib/effectiveRole'
 
 const router = Router()
 
@@ -71,6 +72,9 @@ router.post('/invite', requireAuth, async (req, res) => {
      RETURNING *`,
     [tenantId, invitee?.id ?? null, role, userId, invitee ? 'active' : 'pending']
   )
+  /* Le rôle vient de changer : on purge le cache pour que la nouvelle
+     valeur s'applique à la requête suivante, sans attendre la TTL. */
+  if (invitee?.id) invalidateRole(invitee.id, tenantId)
   res.status(201).json(member)
 })
 
@@ -82,6 +86,9 @@ router.delete('/members/:userId', requireAuth, async (req, res) => {
      WHERE user_id = $1 AND tenant_id = $2`,
     [req.params.userId, req.user!.tenantId]
   )
+  /* Révocation immédiate : sans cette purge, l'utilisateur garderait
+     ses droits jusqu'à 30 s (TTL du cache). */
+  invalidateRole(String(req.params.userId), req.user!.tenantId)
   res.json({ success: true })
 })
 

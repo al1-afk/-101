@@ -13,6 +13,7 @@ import { useOfflineSync } from '@/hooks/useOfflineSync'
 import { useEventReminders } from '@/hooks/useEventReminders'
 import { useRelanceReminders } from '@/hooks/useRelanceReminders'
 import { useValidationNotifier } from '@/hooks/useValidationNotifier'
+import { usePresenceHeartbeat } from '@/hooks/usePresenceHeartbeat'
 import { maybeRequestPermissionOnce } from '@/lib/browserNotifications'
 import PwaInstallBanner from '@/components/PwaInstallBanner'
 import ShortcutsModal from '@/components/ShortcutsModal'
@@ -37,6 +38,9 @@ export default function AppLayout() {
   useRelanceReminders()
   /* Toast manager when a team member completes a task → status validation */
   useValidationNotifier()
+  /* Présence réelle pour le Centre de sécurité (1 battement/min par
+     onglet actif). Le layout n'est monté qu'une fois authentifié. */
+  usePresenceHeartbeat(true)
 
   /* Demande gentiment la permission pour les notifs navigateur (1ère visite). */
   useEffect(() => { maybeRequestPermissionOnce() }, [])

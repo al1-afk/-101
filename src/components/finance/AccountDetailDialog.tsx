@@ -3,63 +3,66 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useAccountMonthlyHistory } from '@/hooks/useBankAccounts'
-import { useCreatePaiement } from '@/hooks/usePaiements'
+import { useAccountMonthlyHistory, type BankAccountWithSolde } from '@/hooks/useBankAccounts'
+import { useCreateRevenu } from '@/hooks/useFinance'
 import { formatDate } from '@/lib/utils'
-import { ArrowDownRight, ArrowUpRight, Plus, Loader2, X } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { formatDH, round2, toISODateLocal, type MovementType } from '@/lib/finance/compute'
+import { ArrowDownRight, ArrowUpRight, Plus, Loader2, X, SlidersHorizontal, ArrowLeftRight } from 'lucide-react'
 
-function formatDH(n: number, devise = 'MAD') {
-  return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} ${devise === 'MAD' ? 'DH' : devise}`
+/* Icône par nature de mouvement — le journal doit se lire sans légende. */
+const MOVEMENT_ICON: Record<MovementType, string> = {
+  revenu:            '💰',
+  paiement:          '💳',
+  depense:           '💸',
+  transfert_entrant: '🔄',
+  transfert_sortant: '🔄',
+  ajustement:        '⚖️',
 }
 
 export function AccountDetailDialog({
   accountId,
   onClose,
+  onAdjust,
+  onTransfer,
 }: {
   accountId: string | null
   onClose: () => void
+  onAdjust?: (account: BankAccountWithSolde) => void
+  onTransfer?: (account: BankAccountWithSolde) => void
 }) {
-  const { history, movements, account } = useAccountMonthlyHistory(accountId, 12)
-  const createPaiement = useCreatePaiement()
-  const qc = useQueryClient()
+  const { history, movements, account, solde: soldeActuel } = useAccountMonthlyHistory(accountId, 12)
+  const createRevenu = useCreateRevenu()
   const [showDepositForm, setShowDepositForm] = useState(false)
   const [deposit, setDeposit] = useState({
     montant: '' as string | number,
-    date:    new Date().toISOString().slice(0, 10),
+    date:    toISODateLocal(new Date()),
     notes:   '',
   })
 
-  const soldeActuel = history.length > 0 ? history[history.length - 1].solde : 0
   const devise = account?.devise ?? 'MAD'
 
   const resetDeposit = () => setDeposit({
     montant: '',
-    date:    new Date().toISOString().slice(0, 10),
+    date:    toISODateLocal(new Date()),
     notes:   '',
   })
 
   const submitDeposit = async () => {
-    if (!accountId) return
-    const montant = Number(deposit.montant)
-    if (!montant || montant <= 0) return
-    await createPaiement.mutateAsync({
-      /* Dépôt manuel : pas de facture ni de client, juste une entrée d'argent. */
-      reference:       `DEPOT-${Date.now()}`,
-      facture_id:      null,
-      contrat_id:      null,
-      client_id:       null,
-      date:            deposit.date,
-      montant,
-      type_paiement:   'autre',
-      methode:         'virement',
-      status:          'paye',
-      notes:           deposit.notes || 'Dépôt manuel',
+    if (!accountId || createRevenu.isPending) return
+    const montant = Number(String(deposit.montant).replace(',', '.'))
+    if (!Number.isFinite(montant) || montant <= 0) return
+    /* Un dépôt EST un revenu encaissé : il alimente la même table que le
+       formulaire « Ajouter un revenu », donc les statistiques et le solde
+       restent cohérents quel que soit le point d'entrée. */
+    await createRevenu.mutateAsync({
+      montant:         round2(montant),
+      date_revenu:     deposit.date,
       bank_account_id: accountId,
-    } as any)
-    /* Rafraîchit à la fois la liste de paiements ET les comptes bancaires. */
-    qc.invalidateQueries({ queryKey: ['paiements'] })
-    qc.invalidateQueries({ queryKey: ['bank_accounts'] })
+      categorie:       'apport',
+      source:          deposit.notes || 'Dépôt manuel',
+      description:     deposit.notes || 'Dépôt manuel',
+      type:            'business',
+    })
     resetDeposit()
     setShowDepositForm(false)
   }
@@ -89,9 +92,21 @@ export function AccountDetailDialog({
                   </p>
                 </div>
                 {!showDepositForm && (
-                  <Button size="sm" onClick={() => setShowDepositForm(true)}>
-                    <Plus className="w-4 h-4 mr-1" /> Ajouter un dépôt
-                  </Button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button size="sm" onClick={() => setShowDepositForm(true)}>
+                      <Plus className="w-4 h-4 mr-1" /> Ajouter un dépôt
+                    </Button>
+                    {onAdjust && (
+                      <Button size="sm" variant="secondary" onClick={() => onAdjust({ ...(account as any), solde: soldeActuel } as BankAccountWithSolde)}>
+                        <SlidersHorizontal className="w-4 h-4 mr-1" /> Modifier le solde
+                      </Button>
+                    )}
+                    {onTransfer && (
+                      <Button size="sm" variant="secondary" onClick={() => onTransfer({ ...(account as any), solde: soldeActuel } as BankAccountWithSolde)}>
+                        <ArrowLeftRight className="w-4 h-4 mr-1" /> Transférer
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -143,9 +158,9 @@ export function AccountDetailDialog({
                     <Button
                       size="sm"
                       onClick={submitDeposit}
-                      disabled={createPaiement.isPending || !Number(deposit.montant)}
+                      disabled={createRevenu.isPending || !(Number(deposit.montant) > 0)}
                     >
-                      {createPaiement.isPending
+                      {createRevenu.isPending
                         ? <Loader2 className="w-4 h-4 animate-spin" />
                         : `+ ${Number(deposit.montant || 0).toLocaleString('fr-FR')} ${devise === 'MAD' ? 'DH' : devise}`}
                     </Button>
@@ -212,32 +227,39 @@ export function AccountDetailDialog({
                         <th className="text-left">Date</th>
                         <th className="text-left">Libellé</th>
                         <th className="text-right">Montant</th>
+                        <th className="text-right">Solde</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {movements.map(m => (
-                        <tr key={`${m.source}-${m.id}`} className="border-t border-border">
-                          <td className="py-2 px-3 text-muted-foreground whitespace-nowrap">{formatDate(m.date)}</td>
-                          <td className="py-2 px-3 text-foreground truncate max-w-xs">
-                            <span className="text-xs text-muted-foreground mr-1.5">
-                              {m.source === 'paiement' ? '💰' : '💸'}
-                            </span>
-                            {m.label}
-                          </td>
-                          <td className={`py-2 px-3 text-right font-semibold whitespace-nowrap ${
-                            m.type === 'entree'
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-red-600 dark:text-red-400'
-                          }`}>
-                            <span className="inline-flex items-center gap-0.5">
-                              {m.type === 'entree'
-                                ? <ArrowUpRight className="w-3.5 h-3.5" />
-                                : <ArrowDownRight className="w-3.5 h-3.5" />}
-                              {m.type === 'entree' ? '+' : '−'}{formatDH(m.montant, devise)}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {movements.map(m => {
+                        const entree = m.entree > 0
+                        return (
+                          <tr key={m.key} className="border-t border-border">
+                            <td className="py-2 px-3 text-muted-foreground whitespace-nowrap">{formatDate(m.date)}</td>
+                            <td className="py-2 px-3 text-foreground truncate max-w-xs">
+                              <span className="text-xs text-muted-foreground mr-1.5">
+                                {MOVEMENT_ICON[m.type]}
+                              </span>
+                              {m.label}
+                            </td>
+                            <td className={`py-2 px-3 text-right font-semibold whitespace-nowrap ${
+                              entree
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-red-600 dark:text-red-400'
+                            }`}>
+                              <span className="inline-flex items-center gap-0.5">
+                                {entree
+                                  ? <ArrowUpRight className="w-3.5 h-3.5" />
+                                  : <ArrowDownRight className="w-3.5 h-3.5" />}
+                                {entree ? '+' : '−'}{formatDH(entree ? m.entree : m.sortie, devise)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right text-muted-foreground tabular-nums whitespace-nowrap">
+                              {m.solde === null ? '—' : formatDH(m.solde, devise)}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

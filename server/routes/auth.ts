@@ -10,6 +10,9 @@ import { sendEmail, loginCodeEmail, passwordResetEmail } from '../lib/email'
 import { teamInvitationEmail } from '../lib/email-team'
 import { randomToken, hashToken, tokenPrefix } from '../lib/tokenSecurity'
 import { logger } from '../lib/logger'
+import { trackSecurityEvent, endPresence } from '../lib/securityEvents'
+import { markSecurityLogged } from '../middleware/securityMonitor'
+import { getClientIpOrUnknown } from '../lib/clientIp'
 
 const router = Router()
 
@@ -98,6 +101,23 @@ async function logLogin(row: {
   } catch (e: any) {
     logger.error('[login_history]', e?.message)
   }
+}
+
+/* Rattache un échec de connexion au tenant du compte visé.
+
+   Sans ça, tous les échecs partiraient en `tenant_id = NULL` et
+   seraient visibles par TOUS les administrateurs — fuite d'information
+   entre espaces (savoir que l'email d'un concurrent est attaqué).
+   Avec ça, seuls les échecs sur un email INEXISTANT restent non
+   attribués : ils ne révèlent rien de personne. */
+async function tenantOfUser(userId: string): Promise<string | null> {
+  const row = await queryOne<{ tenant_id: string }>(
+    `SELECT tenant_id FROM tenant_users
+      WHERE user_id = $1 AND status = 'active'
+      ORDER BY invited_at LIMIT 1`,
+    [userId]
+  ).catch(() => null)
+  return row?.tenant_id ?? null
 }
 
 function labelFromUA(ua: string): string {
@@ -213,7 +233,9 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Email et mot de passe requis' })
   }
 
-  const ip = req.ip ?? '0.0.0.0'
+  /* IP résolue selon la config proxy réelle (Traefik) — jamais un
+     en-tête brut fourni par le client. Voir lib/clientIp.ts. */
+  const ip = getClientIpOrUnknown(req)
   const ua = String(req.headers['user-agent'] ?? '')
 
   try {
@@ -226,6 +248,22 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       [email, ip]
     )
     if (Number(recentFails?.count ?? 0) >= 10) {
+      /* Rattachement au tenant du compte visé quand il existe : sans ça,
+         l'événement (qui contient l'email) partirait en « non attribué »
+         et serait donc visible par les administrateurs de TOUS les
+         espaces — fuite d'information entre tenants. */
+      const target = await queryOne<{ id: string }>(
+        `SELECT id FROM users WHERE email = $1`, [email]
+      ).catch(() => null)
+      markSecurityLogged(req)
+      trackSecurityEvent({
+        type: 'login_blocked_lockout', req,
+        email, httpStatus: 429,
+        userId:   target?.id ?? null,
+        tenantId: target ? await tenantOfUser(target.id) : null,
+        reason: 'too_many_failed_attempts',
+        metadata: { failures: Number(recentFails?.count ?? 0), window_minutes: 15 },
+      })
       return res.status(429).json({
         error: 'Compte temporairement verrouillé. Réessayez dans 15 minutes.',
       })
@@ -248,9 +286,26 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     )
 
     if (!user || !valid) {
+      markSecurityLogged(req)
+      trackSecurityEvent({
+        type: 'login_failed', req,
+        email, httpStatus: 401,
+        tenantId: user ? await tenantOfUser(user.id) : null,
+        userId:   user?.id ?? null,
+        /* On distingue « compte inconnu » de « mot de passe faux » dans le
+           journal interne, jamais dans la réponse HTTP (anti-énumération). */
+        reason: user ? 'invalid_password' : 'unknown_account',
+      })
       return res.status(401).json({ error: 'Identifiants incorrects' })
     }
     if (!user.is_active) {
+      markSecurityLogged(req)
+      trackSecurityEvent({
+        type: 'account_disabled_login', req,
+        email, userId: user.id,
+        tenantId: await tenantOfUser(user.id),
+        httpStatus: 403, reason: 'account_disabled',
+      })
       return res.status(403).json({ error: 'Compte désactivé' })
     }
 
@@ -410,6 +465,13 @@ router.post('/verify-login', authLimiter, async (req: Request, res: Response) =>
         success: false, challengeId: row.id,
         metadata: { reason: 'too_many_attempts' },
       })
+      markSecurityLogged(req)
+      trackSecurityEvent({
+        type: 'login_failed_burst', req,
+        email, userId: row.user_id, tenantId: row.tenant_id,
+        httpStatus: 429, reason: 'too_many_2fa_attempts',
+        metadata: { attempts: row.attempts, method: row.method },
+      })
       return res.status(429).json({ error: 'Trop de tentatives. Reconnectez-vous.' })
     }
 
@@ -438,6 +500,12 @@ router.post('/verify-login', authLimiter, async (req: Request, res: Response) =>
           userId: row.user_id, tenantId: row.tenant_id, email,
           ip, ua, method: row.method as any, event: 'verify_failed',
           success: false, challengeId: row.id,
+        })
+        trackSecurityEvent({
+          type: 'login_failed', req,
+          email, userId: row.user_id, tenantId: row.tenant_id,
+          httpStatus: 400, reason: 'invalid_verification_code',
+          metadata: { method: row.method },
         })
         return res.status(400).json({ error: 'Code incorrect' })
       }
@@ -729,6 +797,13 @@ router.post('/reset-password', authLimiter, async (req: Request, res: Response) 
       [row.user_id]
     )
 
+    trackSecurityEvent({
+      type: 'password_reset_completed', req,
+      email, userId: row.user_id,
+      tenantId: await tenantOfUser(row.user_id),
+      reason: 'reset_code_verified',
+      metadata: { all_sessions_revoked: true },
+    })
     res.json({ success: true })
   } catch (err: any) {
     logger.error('[reset-password]', err.message)
@@ -743,6 +818,14 @@ router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
 
   const payload = verifyRefreshToken(rawToken)
   if (!payload) {
+    /* Cookie présent mais signature/expiration invalides. On ne
+       journalise PAS l'absence de cookie : un visiteur déconnecté
+       déclenche ce cas en permanence, ce serait du bruit pur. */
+    markSecurityLogged(req)
+    trackSecurityEvent({
+      type: 'refresh_rejected', req,
+      httpStatus: 401, reason: 'invalid_refresh_signature',
+    })
     res.clearCookie('gestiq_refresh', { path: '/api/auth' })
     return res.status(401).json({ error: 'Session invalide', code: 'INVALID_REFRESH' })
   }
@@ -765,6 +848,16 @@ router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
         `UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`,
         [payload.userId]
       )
+      /* CRITICAL/CONFIRMED assumé : la rotation est atomique côté serveur,
+         un refresh token déjà révoqué ne peut pas être rejoué par accident.
+         C'est l'un des rares cas où la preuve technique est déterministe. */
+      markSecurityLogged(req)
+      trackSecurityEvent({
+        type: 'token_reuse_detected', req,
+        userId: payload.userId, tenantId: payload.tenantId,
+        httpStatus: 401, reason: 'refresh_token_replayed',
+        metadata: { all_sessions_revoked: true },
+      })
       res.clearCookie('gestiq_refresh', { path: '/api/auth' })
       return res.status(401).json({ error: 'Session compromise détectée', code: 'TOKEN_REUSE' })
     }
@@ -803,6 +896,10 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
       [tokenHash]
     ).catch(() => {})
   }
+  /* La présence disparaît immédiatement du « qui est en ligne » — sans
+     ça, l'utilisateur y resterait jusqu'à expiration du heartbeat. */
+  void endPresence(req.user!.userId, String(req.body?.sessionKey ?? '') || null)
+  trackSecurityEvent({ type: 'logout', req, reason: 'user_logout' })
   res.clearCookie('gestiq_refresh', { path: '/api/auth' })
   res.json({ success: true })
 })
@@ -839,6 +936,11 @@ router.post('/change-password', requireAuth, passwordLimiter, async (req: Reques
     )
     res.clearCookie('gestiq_refresh', { path: '/api/auth' })
 
+    trackSecurityEvent({
+      type: 'password_changed', req,
+      reason: 'self_service_change',
+      metadata: { all_sessions_revoked: true },
+    })
     res.json({ success: true })
   } catch (err: any) {
     logger.error('[change-password]', err.message)

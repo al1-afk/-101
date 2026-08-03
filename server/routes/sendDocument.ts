@@ -97,6 +97,27 @@ router.post('/', async (req: Request, res: Response) => {
   if (pdfBase64.length > 8 * 1024 * 1024 * 4 / 3) {
     return res.status(413).json({ error: 'Le PDF dépasse la taille maximale' })
   }
+  /* La taille ne dit rien du CONTENU : on vérifie que le base64 décode
+     et que le binaire commence bien par la signature PDF. Sans ça, cette
+     route est un relais d'envoi de pièce jointe arbitraire, sous
+     l'identité de l'entreprise — parfait pour du phishing. */
+  let pdfBuffer: Buffer
+  try {
+    pdfBuffer = Buffer.from(pdfBase64, 'base64')
+  } catch {
+    return res.status(400).json({ error: 'Contenu PDF invalide' })
+  }
+  if (pdfBuffer.length < 100 || pdfBuffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    return res.status(400).json({ error: 'Le fichier envoyé n\'est pas un PDF' })
+  }
+  /* Nom de fichier : on ne garde qu'une base sûre et on impose .pdf —
+     un `facture.pdf.html` ou un nom avec des séparateurs de chemin n'a
+     rien à faire dans une pièce jointe. */
+  const safeFilename = (filename.split(/[\\/]/).pop() ?? 'document')
+    .replace(/[^\w.\- ]+/g, '_')
+    .replace(/\.+/g, '.')
+    .slice(0, 80)
+    .replace(/\.pdf$/i, '') + '.pdf'
 
   const { title } = LABELS[kind as DocKind]
   const subject   = `${title} — ${numero}`
@@ -108,7 +129,7 @@ router.post('/', async (req: Request, res: Response) => {
       subject,
       html,
       text: `${title} : ${numero}. Le document est joint à cet email.`,
-      attachments: [{ filename, content: pdfBase64 }],
+      attachments: [{ filename: safeFilename, content: pdfBase64 }],
     })
     console.log(`[send-document] ${kind} ${numero} envoyé à ${to} par tenant=${req.user!.tenantId}`)
     res.json({ ok: true })

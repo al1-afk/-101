@@ -3,9 +3,30 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import helmet from 'helmet'
 import crypto from 'crypto'
 import { logger } from '../lib/logger'
+import { trackSecurityEvent } from '../lib/securityEvents'
+import { markSecurityLogged } from './securityMonitor'
 
 /* ── Helmet — secure HTTP headers ─────────────────────────────── */
 export { helmet }
+
+/* ── Journalisation des déclenchements de rate limit ───────────────
+   L'observateur global (securityResponseMonitor) verrait déjà passer le
+   429, mais sans savoir QUEL plafond a sauté. Ce handler nomme le
+   limiteur — « 3 resets de mot de passe en 1 h » et « 200 requêtes API
+   en 1 min » ne racontent pas la même histoire.                      */
+function limitHandler(limiterName: string, message: Record<string, string>) {
+  return (req: Request, res: Response) => {
+    markSecurityLogged(req)
+    trackSecurityEvent({
+      type: 'rate_limit',
+      req,
+      httpStatus: 429,
+      reason: `limiter_${limiterName}`,
+      metadata: { limiter: limiterName },
+    })
+    res.status(429).json(message)
+  }
+}
 
 /* ── Rate limiters ────────────────────────────────────────────── */
 
@@ -17,6 +38,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
   skipSuccessfulRequests: true,
+  handler: limitHandler('auth', { error: 'Trop de tentatives. Réessayez dans 15 minutes.' }),
 })
 
 /** Forgot-password / password reset : 3 requêtes / heure par IP.
@@ -27,6 +49,7 @@ export const passwordResetLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Trop de demandes. Réessayez plus tard.' },
+  handler: limitHandler('password_reset', { error: 'Trop de demandes. Réessayez plus tard.' }),
 })
 
 /** Invitations & password resets déclenchés par un admin — 20/heure/IP,
@@ -44,6 +67,7 @@ export const inviteLimiter = rateLimit({
     const ipKey    = ipKeyGenerator(req.ip ?? '0.0.0.0')
     return `${ipKey}|${tenantId}|${userId}`
   },
+  handler: limitHandler('invite', { error: 'Trop d\'invitations. Réessayez plus tard.' }),
 })
 
 /** General API: 200/min en prod, 2000/min en dev (React Query polling) */
@@ -53,6 +77,7 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Limite de requêtes atteinte.' },
+  handler: limitHandler('api', { error: 'Limite de requêtes atteinte.' }),
 })
 
 /** Password change: max 5 per hour */
@@ -60,6 +85,7 @@ export const passwordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: { error: 'Trop de tentatives de changement de mot de passe.' },
+  handler: limitHandler('password_change', { error: 'Trop de tentatives de changement de mot de passe.' }),
 })
 
 /** Upload : 60/min/IP — plafond raisonnable pour uploads d'attachments SOP/tâches. */
@@ -67,6 +93,7 @@ export const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
   message: { error: 'Trop d\'uploads. Réessayez dans une minute.' },
+  handler: limitHandler('upload', { error: 'Trop d\'uploads. Réessayez dans une minute.' }),
 })
 
 /* ── Input sanitizer — strip dangerous characters ─────────────── */

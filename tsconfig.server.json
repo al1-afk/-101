@@ -1,0 +1,26 @@
+{
+  /* Le backend Express n'était couvert par AUCUN tsconfig : `npm run build`
+     ne typecheckait que `src` (tsconfig.app.json) et `vite.config.ts`
+     (tsconfig.node.json). Ce fichier ferme ce trou — `npm run typecheck`
+     vérifie désormais aussi `server/` et `tests/`.
+     Il n'est volontairement pas ajouté aux `references` de tsconfig.json :
+     `npm run build` reste focalisé sur le bundle front. */
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["server", "tests"],
+  /* tests/visual = suite Playwright (contexte navigateur, dépendance
+     @playwright/test non installée) : hors périmètre de ce typecheck. */
+  "exclude": ["tests/visual"]
+}

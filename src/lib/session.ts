@@ -1,6 +1,7 @@
 import { tokenStore, authApi } from './api'
 import { queryClient } from './queryClient'
 import { deleteAllTenantDatabases } from './offline/db'
+import { getPresenceSessionKey } from '@/hooks/usePresenceHeartbeat'
 
 /* ─────────────────────────────────────────────────────────────────
    Tenant-scoped session helpers.
@@ -73,6 +74,10 @@ export async function purgeClientSession(): Promise<void> {
 
 /* Complete logout: revoke refresh token server-side THEN purge. */
 export async function logoutAndPurge(): Promise<void> {
-  await authApi.logout()
+  /* La clé est lue AVANT la purge (elle vit dans sessionStorage, que
+     purgeClientSession efface). */
+  let sessionKey: string | undefined
+  try { sessionKey = getPresenceSessionKey() } catch { /* stockage indispo */ }
+  await authApi.logout(sessionKey)
   await purgeClientSession()
 }

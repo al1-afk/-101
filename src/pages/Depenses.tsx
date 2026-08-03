@@ -1,7 +1,10 @@
 import { useState, useMemo, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Trash2, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Trash2, Loader2, TrendingDown, TrendingUp } from 'lucide-react'
 import { useDepenses, useCreateDepense, useDeleteDepense } from '@/hooks/useDepenses'
-import { useBankAccounts } from '@/hooks/useBankAccounts'
+import { useBankAccountsWithSolde } from '@/hooks/useBankAccounts'
+import { useFinanceData, useCreateRevenu, CATEGORIES_REVENU } from '@/hooks/useFinance'
+import { useClients } from '@/hooks/useClients'
+import { useProjets } from '@/hooks/useProjets'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
@@ -14,6 +17,10 @@ import {
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { depensesSchema } from '@/lib/importExportSchemas'
 import { BankAccountsBanner } from '@/components/finance/BankAccountsBanner'
+import { FinanceSummary } from '@/components/finance/FinanceSummary'
+import { PrevisionsSection } from '@/components/finance/PrevisionsSection'
+import { FinanceHistory } from '@/components/finance/FinanceHistory'
+import { computeSummary, formatDH, round2, toISODateLocal } from '@/lib/finance/compute'
 
 const CATEGORIES = [
   { key: 'transport', label: 'Transport', emoji: '🚗' },
@@ -31,10 +38,6 @@ const CAT_COLORS: Record<string, string> = {
   aumone: '#eab308',
   projet: '#8b5cf6',
   autre: '#06b6d4',
-}
-
-function formatDH(n: number) {
-  return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DH`
 }
 
 function getWeekBounds() {
@@ -57,20 +60,38 @@ function StatCard({ label, emoji, value, color, sub }: { label: string; emoji: s
 
 export default function Depenses() {
   const { data: depenses = [], isLoading } = useDepenses()
-  const { data: bankAccounts = [] } = useBankAccounts()
+  const { data: bankAccounts = [] } = useBankAccountsWithSolde()
+  const financeData = useFinanceData()
+  const { data: clients = [] } = useClients()
+  const { data: projets = [] } = useProjets()
   const createDepense = useCreateDepense()
   const deleteDepense = useDeleteDepense()
+  const createRevenu  = useCreateRevenu()
 
   const today = new Date()
-  const todayStr = today.toISOString().slice(0, 10)
+  const todayStr = toISODateLocal(today)
 
   const [viewMonth, setViewMonth] = useState({ year: today.getFullYear(), month: today.getMonth() })
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_RANGE)
+  /* Un seul bloc de saisie, deux natures d'opération : on ne duplique pas
+     la carte, on bascule — la page reste aussi courte qu'avant. */
+  const [mode, setMode] = useState<'depense' | 'revenu'>('depense')
   const [form, setForm] = useState({
     montant: '' as string | number,
     date_depense: todayStr,
     categorie: 'autre',
     type: 'personnel' as 'personnel' | 'business',
+    description: '',
+    bank_account_id: '' as string,
+  })
+  const [revenuForm, setRevenuForm] = useState({
+    montant: '' as string | number,
+    date_revenu: todayStr,
+    categorie: 'prestation',
+    type: 'business' as 'personnel' | 'business',
+    source: '',
+    client_id: '',
+    projet_id: '',
     description: '',
     bank_account_id: '' as string,
   })
@@ -82,7 +103,10 @@ export default function Depenses() {
     if (activeAccounts.length > 0 && !form.bank_account_id) {
       setForm(p => ({ ...p, bank_account_id: activeAccounts[0].id }))
     }
-  }, [activeAccounts, form.bank_account_id])
+    if (activeAccounts.length > 0 && !revenuForm.bank_account_id) {
+      setRevenuForm(p => ({ ...p, bank_account_id: activeAccounts[0].id }))
+    }
+  }, [activeAccounts, form.bank_account_id, revenuForm.bank_account_id])
 
   const accountsById = useMemo(() => {
     const m = new Map<string, typeof bankAccounts[number]>()
@@ -90,16 +114,46 @@ export default function Depenses() {
     return m
   }, [bankAccounts])
 
+  const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+
+  /* Synthèse réel / prévisionnel — calculée par le module pur testé
+     (@/lib/finance/compute), jamais recopiée dans le JSX. */
+  const summary = useMemo(
+    () => computeSummary(financeData, currentMonthStr),
+    [financeData, currentMonthStr]
+  )
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const montant = Number(form.montant)
-    if (!montant || montant <= 0) return
+    if (createDepense.isPending) return
+    const montant = Number(String(form.montant).replace(',', '.'))
+    if (!Number.isFinite(montant) || montant <= 0) return
     await createDepense.mutateAsync({
       ...form,
-      montant,
+      montant: round2(montant),
       bank_account_id: form.bank_account_id || null,
     } as any)
     setForm(p => ({ ...p, montant: '', description: '' }))
+  }
+
+  const handleSubmitRevenu = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (createRevenu.isPending) return
+    const montant = Number(String(revenuForm.montant).replace(',', '.'))
+    if (!Number.isFinite(montant) || montant <= 0) return
+    if (!revenuForm.bank_account_id) return
+    await createRevenu.mutateAsync({
+      montant:         round2(montant),
+      date_revenu:     revenuForm.date_revenu,
+      bank_account_id: revenuForm.bank_account_id,
+      categorie:       revenuForm.categorie,
+      type:            revenuForm.type,
+      source:          revenuForm.source.trim() || null,
+      client_id:       revenuForm.client_id || null,
+      projet_id:       revenuForm.projet_id || null,
+      description:     revenuForm.description.trim() || null,
+    })
+    setRevenuForm(p => ({ ...p, montant: '', description: '', source: '' }))
   }
 
   const stats = useMemo(() => {
@@ -113,7 +167,6 @@ export default function Depenses() {
       return dt >= mon && dt <= sun
     }).reduce((s, d) => s + d.montant, 0)
 
-    const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
     const monthTotal = depenses
       .filter(d => d.date_depense.startsWith(currentMonthStr))
       .reduce((s, d) => s + d.montant, 0)
@@ -131,7 +184,7 @@ export default function Depenses() {
     const topCat = byCat.length > 0 ? byCat.reduce((a, b) => (a.value > b.value ? a : b)) : null
 
     return { todayTotal, weekTotal, monthTotal, avgPerDay, topCat }
-  }, [depenses, todayStr, today])
+  }, [depenses, todayStr, today, currentMonthStr])
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
   const tableDeps = useMemo(
@@ -185,9 +238,9 @@ export default function Depenses() {
           💰
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-foreground">Suivi des dépenses</h1>
+          <h1 className="text-xl font-bold text-foreground">Suivi financier</h1>
           <p className="text-sm text-muted-foreground">
-            Suivez, analysez et comprenez vos dépenses personnelles et professionnelles
+            Revenus, dépenses, prévisions : suivez ce que vous avez et ce que vous attendez
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -199,14 +252,188 @@ export default function Depenses() {
         </div>
       </div>
 
+      {/* Synthèse : ce que je possède vs ce que j'attends */}
+      <FinanceSummary
+        summary={summary}
+        moisLabel={today.toLocaleString('fr-FR', { month: 'long', year: 'numeric' })}
+      />
+
       {/* Comptes bancaires — soldes temps réel */}
       <BankAccountsBanner />
 
       {/* Form + Stats side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Add expense form */}
+        {/* Saisie : dépense payée ou revenu encaissé */}
         <div className="card-premium p-6">
-          <h2 className="section-title mb-5">+ Ajouter une dépense</h2>
+          <div className="grid grid-cols-2 gap-2 mb-5">
+            <button
+              type="button"
+              onClick={() => setMode('depense')}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold transition-all ${
+                mode === 'depense'
+                  ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                  : 'bg-background text-foreground border-border hover:border-red-400'
+              }`}
+            >
+              <TrendingDown className="w-4 h-4" /> Ajouter une dépense
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('revenu')}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-semibold transition-all ${
+                mode === 'revenu'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                  : 'bg-background text-foreground border-border hover:border-emerald-400'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" /> Ajouter un revenu
+            </button>
+          </div>
+
+          {mode === 'revenu' ? (
+            <form onSubmit={handleSubmitRevenu} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="form-label">💰 Montant (DH) *</label>
+                <div className="relative">
+                  <Input
+                    type="number" step="0.01" min="0" inputMode="decimal"
+                    value={revenuForm.montant}
+                    onChange={e => setRevenuForm(p => ({ ...p, montant: e.target.value }))}
+                    placeholder="0"
+                    className="pr-12"
+                    required
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
+                    DH
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">📅 Date</label>
+                <Input
+                  type="date"
+                  value={revenuForm.date_revenu}
+                  onChange={e => setRevenuForm(p => ({ ...p, date_revenu: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">🏦 Compte de destination *</label>
+                {activeAccounts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    Aucun compte enregistré — ajoute un compte dans la section "Mes comptes" ci-dessus.
+                  </p>
+                ) : (
+                  <Select
+                    value={revenuForm.bank_account_id}
+                    onValueChange={v => setRevenuForm(p => ({ ...p, bank_account_id: v }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Choisir un compte" /></SelectTrigger>
+                    <SelectContent>
+                      {activeAccounts.map(a => (
+                        <SelectItem key={a.id} value={a.id}>{a.icon || '🏦'} {a.nom}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">🏷️ Catégorie</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {CATEGORIES_REVENU.map(c => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setRevenuForm(p => ({ ...p, categorie: c.key }))}
+                      className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-xl border text-xs font-medium transition-all ${
+                        revenuForm.categorie === c.key
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-background text-foreground border-border hover:border-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/10'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">{c.emoji}</span>
+                      <span className="truncate max-w-full">{c.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">👤 Client / Source</label>
+                <Input
+                  list="revenu-sources"
+                  value={revenuForm.source}
+                  onChange={e => setRevenuForm(p => ({ ...p, source: e.target.value }))}
+                  placeholder="Ex: Client X, Marketplace, Remboursement…"
+                />
+                <datalist id="revenu-sources">
+                  {clients.map(c => <option key={c.id} value={c.nom} />)}
+                </datalist>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">🚀 Projet (facultatif)</label>
+                <Select
+                  value={revenuForm.projet_id || '__none__'}
+                  onValueChange={v => setRevenuForm(p => ({ ...p, projet_id: v === '__none__' ? '' : v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Aucun</SelectItem>
+                    {projets.map(pr => <SelectItem key={pr.id} value={pr.id}>{pr.nom}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">👤 Type</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    { value: 'personnel', label: '👤 Personnel' },
+                    { value: 'business', label: '💼 Business' },
+                  ].map(t => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => setRevenuForm(p => ({ ...p, type: t.value as 'personnel' | 'business' }))}
+                      className={`py-2.5 px-4 rounded-xl border text-sm font-medium transition-all ${
+                        revenuForm.type === t.value
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-background text-foreground border-border hover:border-emerald-400'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="form-label">📝 Description / note (optionnel)</label>
+                <AutocorrectTextarea
+                  value={revenuForm.description}
+                  onChange={e => setRevenuForm(p => ({ ...p, description: e.target.value }))}
+                  placeholder="Détails du revenu…"
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-shadow"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full bg-emerald-600 hover:bg-emerald-700"
+                disabled={createRevenu.isPending || !revenuForm.bank_account_id}
+              >
+                {createRevenu.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : '💾'}{' '}
+                Enregistrer le revenu
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center">
+                Le solde du compte est augmenté immédiatement.
+              </p>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Amount */}
             <div className="space-y-1.5">
@@ -331,6 +558,7 @@ export default function Depenses() {
               Enregistrer la dépense
             </Button>
           </form>
+          )}
         </div>
 
         {/* Statistics */}
@@ -379,6 +607,12 @@ export default function Depenses() {
           )}
         </div>
       </div>
+
+      {/* Prévisions — revenus prévus & dépenses prévues (aucun impact solde) */}
+      <PrevisionsSection
+        previsions={(financeData.previsions ?? []) as any}
+        accounts={bankAccounts}
+      />
 
       {/* Visual breakdown */}
       <div className="card-premium p-6">
@@ -607,6 +841,9 @@ export default function Depenses() {
         </table>
         </div>
       </div>
+
+      {/* Historique financier unifié — pourquoi chaque solde a bougé */}
+      <FinanceHistory data={financeData} accounts={bankAccounts} />
     </div>
   )
 }

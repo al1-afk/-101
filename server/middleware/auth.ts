@@ -30,7 +30,7 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization
   if (!header?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Non authentifié' })
@@ -43,6 +43,29 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       return res.status(401).json({ error: 'Token invalide' })
     }
     req.user = payload
+
+    /* ── Rôle EFFECTIF, relu en base ────────────────────────────────
+       Le rôle inscrit dans le token date de son émission et vit 1 h.
+       On le remplace ici par celui de `tenant_users`, une fois pour
+       toutes : chaque `req.user.role` lu en aval (routes tenants,
+       outbound, aiQuote…) devient automatiquement exact, et une
+       révocation prend effet en moins de 30 s (cache court) au lieu
+       d'une heure.
+
+       Les jetons « membre d'équipe » n'ont pas de ligne dans
+       tenant_users : leur autorisation est gérée par leurs propres
+       routes (/api/team, /api/my-space). On les laisse passer tels
+       quels. */
+    if (payload.role !== 'team_member' && payload.userId && payload.tenantId) {
+      const { getEffectiveRole } = await import('../lib/effectiveRole')
+      const effective = await getEffectiveRole(payload.userId, payload.tenantId)
+      if (!effective) {
+        /* Appartenance révoquée ou compte désactivé : le token est
+           cryptographiquement valide mais ne vaut plus rien. */
+        return res.status(401).json({ error: 'Accès révoqué', code: 'ACCESS_REVOKED' })
+      }
+      req.user = { ...payload, role: effective }
+    }
     next()
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {
@@ -92,13 +115,25 @@ const ROLE_RANK: Record<Role, number> = {
   viewer:     1,
 }
 
+/* Le rôle est relu en BASE et non pris dans le JWT : sans cela, un
+   administrateur rétrogradé garderait ses droits jusqu'à l'expiration de
+   son token (1 h), y compris sur les routes d'administration. */
 export function requireRole(minRole: Role) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const role = (req.user?.role ?? '') as Role
-    const rank = ROLE_RANK[role] ?? 0
-    if (rank < ROLE_RANK[minRole]) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user?.userId || !req.user?.tenantId) {
+      return res.status(401).json({ error: 'Non authentifié' })
+    }
+    try {
+      const { getEffectiveRole } = await import('../lib/effectiveRole')
+      const role = await getEffectiveRole(req.user.userId, req.user.tenantId)
+      const rank = role ? (ROLE_RANK[role] ?? 0) : 0
+      if (rank < ROLE_RANK[minRole]) {
+        return res.status(403).json({ error: 'Permissions insuffisantes' })
+      }
+      next()
+    } catch {
+      /* Fail-closed. */
       return res.status(403).json({ error: 'Permissions insuffisantes' })
     }
-    next()
   }
 }

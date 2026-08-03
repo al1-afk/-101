@@ -271,7 +271,12 @@ export const authApi = {
     api.publicPost<{ success: boolean }>('/api/auth/reset-password', { email, code, newPassword }),
 
   /* Best-effort server-side logout: revokes refresh token + clears cookie */
-  logout: () => api.post<{ success: boolean }>('/api/auth/logout', {}).catch(() => ({ success: false })),
+  /* La sessionKey de présence part avec la déconnexion : le serveur
+     retire immédiatement l'utilisateur du « qui est en ligne » au lieu
+     d'attendre l'expiration du heartbeat. */
+  logout: (sessionKey?: string) =>
+    api.post<{ success: boolean }>('/api/auth/logout', { sessionKey })
+       .catch(() => ({ success: false })),
 }
 
 /* ── Admin 2FA API ──────────────────────────────────────────── */
@@ -303,6 +308,168 @@ export const admin2faApi = {
     api.patch<{ success: true; mode: string }>(`/api/admin/2fa/users/${userId}/twofa-mode`, { mode }),
   revokeAllDevices: (userId: string) =>
     api.delete<{ success: true; revoked: number }>(`/api/admin/2fa/users/${userId}/devices`),
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CENTRE DE SÉCURITÉ (Administration → Centre de sécurité)
+
+   Rappel : ce client n'est qu'une commodité. Le contrôle d'accès réel
+   est fait par le backend (requireSecurityMonitoring) — masquer le
+   menu côté React ne protège rien.
+   ═══════════════════════════════════════════════════════════════ */
+
+export type SecuritySeverity = 'info' | 'low' | 'medium' | 'high' | 'critical'
+export type SecurityStatus   = 'normal' | 'suspicious' | 'blocked' | 'confirmed'
+export type PresenceState    = 'online' | 'idle' | 'offline'
+
+export interface OnlineUser {
+  user_id:       string
+  name:          string
+  email:         string
+  role:          string
+  login_at:      string
+  last_seen_at:  string
+  sessions:      number
+  ip_address:    string | null
+  user_agent:    string | null
+  active_tokens: number
+  state:         PresenceState
+}
+
+export interface SecurityOverview {
+  periodHours: number
+  cards: {
+    online_users:  number
+    failed_logins: number
+    suspicious:    number
+    blocked:       number
+    severe:        number
+    open_alerts:   number
+  }
+  loginSeries: Array<{ bucket: string; success: number; failed: number }>
+  eventSeries: Array<{ bucket: string; total: number; severe: number }>
+  topIps:      Array<{ ip_address: string; events: number; severe: number; last_seen: string }>
+  topEvents:   Array<{ event_type: string; count: number }>
+  proxy:       { hops: number; resolvedIp: string | null; forwardedDepth: number; expressTrustProxy: unknown }
+}
+
+export interface SecurityEventRow {
+  id:          string
+  created_at:  string
+  event_type:  string
+  severity:    SecuritySeverity
+  status:      SecurityStatus
+  ip_address:  string | null
+  user_agent:  string | null
+  http_method: string | null
+  endpoint:    string | null
+  http_status: number | null
+  reason:      string | null
+  email:       string | null
+  user_id:     string | null
+  user_name:   string | null
+  metadata:    Record<string, unknown>
+}
+
+export interface LoginRow {
+  created_at: string
+  event:      string
+  success:    boolean
+  email:      string | null
+  user_id:    string | null
+  user_name:  string | null
+  ip_address: string | null
+  user_agent: string | null
+  method:     string | null
+  reason:     string | null
+}
+
+export interface SecurityAlertRow {
+  id:                   string
+  alert_type:           string
+  title:                string
+  severity:             SecuritySeverity
+  status:               'open' | 'acknowledged' | 'resolved'
+  ip_address:           string | null
+  user_id:              string | null
+  user_name:            string | null
+  occurrences:          number
+  first_seen_at:        string
+  last_seen_at:         string
+  cooldown_until:       string | null
+  channel_state:        'pending' | 'sent' | 'skipped'
+  metadata:             Record<string, unknown>
+  acknowledged_at:      string | null
+  acknowledged_by_name: string | null
+}
+
+export interface IpDetail {
+  ip:          string
+  periodHours: number
+  summary:  { events: number; suspicious: number; blocked: number; severe: number
+              first_seen: string | null; last_seen: string | null } | null
+  logins:   { success: number; failed: number; first_seen: string | null; last_seen: string | null } | null
+  users:    Array<{ user_id: string; name: string; email: string; events: number; last_seen: string }>
+  endpoints: Array<{ endpoint: string; http_method: string; count: number }>
+  events:   Array<Pick<SecurityEventRow, 'id' | 'created_at' | 'event_type' | 'severity' | 'status'
+                       | 'endpoint' | 'http_status' | 'reason' | 'email' | 'user_name'>>
+}
+
+export type SecurityPeriod = 'today' | '24h' | '7d' | '30d'
+
+interface EventFilters {
+  period?:   SecurityPeriod
+  severity?: SecuritySeverity
+  status?:   SecurityStatus
+  type?:     string
+  ip?:       string
+  userId?:   string
+  limit?:    number
+  offset?:   number
+}
+
+function qs(params: Record<string, unknown>): string {
+  const sp = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue
+    sp.set(k, String(v))
+  }
+  const s = sp.toString()
+  return s ? `?${s}` : ''
+}
+
+export const securityApi = {
+  /* Présence — appelé par tout utilisateur connecté, pas seulement l'admin */
+  heartbeat:    (sessionKey: string) =>
+    api.post<{ ok: true; intervalMs: number }>('/api/security/heartbeat', { sessionKey }),
+  endHeartbeat: (sessionKey: string) =>
+    api.post<{ ok: true }>('/api/security/heartbeat/end', { sessionKey }),
+
+  /* Lecture — réservé admin / SECURITY_MONITORING_READ */
+  overview: (period: SecurityPeriod = '24h') =>
+    api.get<SecurityOverview>(`/api/security/overview${qs({ period })}`),
+  online:   () =>
+    api.get<{ onlineCount: number; idleCount: number
+              thresholds: { onlineSeconds: number; idleSeconds: number }
+              users: OnlineUser[] }>('/api/security/online'),
+  events:   (f: EventFilters = {}) =>
+    api.get<{ rows: SecurityEventRow[]; limit: number; offset: number; hasMore: boolean
+              filters: { types: string[]; severities: string[]; statuses: string[] } }>(
+      `/api/security/events${qs(f as Record<string, unknown>)}`
+    ),
+  logins:   (f: { period?: SecurityPeriod; email?: string; ip?: string
+                  outcome?: 'success' | 'failed'; limit?: number; offset?: number } = {}) =>
+    api.get<{ rows: LoginRow[]; limit: number; offset: number; hasMore: boolean }>(
+      `/api/security/logins${qs(f as Record<string, unknown>)}`
+    ),
+  ipDetail: (ip: string, period: SecurityPeriod = '30d') =>
+    api.get<IpDetail>(`/api/security/ip/${encodeURIComponent(ip)}${qs({ period })}`),
+  alerts:   (f: { status?: 'open' | 'acknowledged' | 'resolved'; limit?: number; offset?: number } = {}) =>
+    api.get<{ rows: SecurityAlertRow[]; limit: number; offset: number; hasMore: boolean }>(
+      `/api/security/alerts${qs(f as Record<string, unknown>)}`
+    ),
+  acknowledgeAlert: (id: string) =>
+    api.post<{ ok: true }>(`/api/security/alerts/${id}/acknowledge`, {}),
 }
 
 /* ── Tenant API ──────────────────────────────────────────────── */
@@ -546,6 +713,48 @@ export const bonsLivraisonApi           = tableApi('bons_livraison')
 
 /* ── Bibliothèque de modèles de prestations (devis) ─────────────── */
 export const prestationModelsApi        = tableApi('prestation_models')
+
+/* ── Module financier ───────────────────────────────────────────
+   Lecture (et édition simple des prévisions) via le CRUD générique ;
+   tout mouvement d'argent passe par `financeApi` ci-dessous, où le
+   serveur garantit l'atomicité et refuse les doublons. */
+export const revenusApi                 = tableApi('revenus')
+export const previsionsApi              = tableApi('previsions_financieres')
+export const transfertsApi              = tableApi('transferts_comptes')
+export const ajustementsApi             = tableApi('bank_account_adjustments')
+
+/* Identifiant d'opération : un double-clic (ou un retry réseau) réutilise
+   le même `op_id`, le serveur ne l'écrit donc qu'une seule fois. */
+export function newOpId(): string {
+  return (globalThis.crypto?.randomUUID?.()
+    ?? `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`)
+}
+
+export const financeApi = {
+  createRevenu:  (data: Record<string, unknown>) => api.post<any>('/api/finance/revenus', data),
+  deleteRevenu:  (id: string) => api.delete<{ success: boolean }>(`/api/finance/revenus/${id}`),
+  deleteDepense: (id: string) => api.delete<{ success: boolean }>(`/api/finance/depenses/${id}`),
+
+  createTransfert: (data: Record<string, unknown>) => api.post<any>('/api/finance/transferts', data),
+  deleteTransfert: (id: string) => api.delete<{ success: boolean }>(`/api/finance/transferts/${id}`),
+
+  createAjustement: (data: Record<string, unknown>) => api.post<any>('/api/finance/ajustements', data),
+
+  settlePrevision: (id: string, data: Record<string, unknown>) =>
+    api.post<{ prevision: any; transaction: any; sens: 'revenu' | 'depense' }>(
+      `/api/finance/previsions/${id}/settle`, data),
+  cancelPrevision: (id: string) => api.post<any>(`/api/finance/previsions/${id}/cancel`, {}),
+  reopenPrevision: (id: string) => api.post<any>(`/api/finance/previsions/${id}/reopen`, {}),
+
+  /* Soldes recalculés par la base — sert de contrôle face au calcul client. */
+  soldes: () => api.get<{
+    comptes: any[]
+    disponible: number
+    revenus_prevus: number
+    depenses_prevues: number
+    solde_previsionnel: number
+  }>('/api/finance/soldes'),
+}
 
 /* ── Journal d'activité unifié (CRUD + membres + sécurité) ─────── */
 export interface ActivityEntry {

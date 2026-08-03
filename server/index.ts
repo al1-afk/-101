@@ -2,7 +2,7 @@ import express from 'express'
 import cors    from 'cors'
 import dotenv  from 'dotenv'
 import cookieParser from 'cookie-parser'
-import { pool } from './db/pool'
+import { pool, probeRlsRole } from './db/pool'
 import { apiLimiter, sanitizeBody, errorHandler, requestId } from './middleware/security'
 import helmet from 'helmet'
 
@@ -13,6 +13,7 @@ import tenantRoutes   from './routes/tenants'
 import stockRoutes    from './routes/stock'
 import vehiclesRoutes from './routes/vehicles'
 import financeAiRoutes from './routes/financeAi'
+import financeRoutes from './routes/finance'
 import aiRoutes from './routes/ai'
 import aiQuoteRoutes from './routes/aiQuote'
 import publicLeadsRoutes from './routes/publicLeads'
@@ -26,6 +27,11 @@ import activityRoutes  from './routes/activity'
 import outboundRoutes  from './routes/outbound'
 import paiementsRecoveryRoutes from './routes/paiementsRecovery'
 import admin2faRoutes from './routes/admin2fa'
+import securityRoutes from './routes/security'
+import { securityResponseMonitor } from './middleware/securityMonitor'
+import { startSecurityRetentionScheduler } from './lib/securityEvents'
+import { trustedProxyHops } from './lib/clientIp'
+import { reportUnscopedTables } from './db/tenantColumns'
 
 dotenv.config({ path: '.env.local' })
 
@@ -109,9 +115,17 @@ app.use((_req, res, next) => {
   next()
 })
 
-app.set('trust proxy', 1)
+/* Nombre de proxys de confiance devant l'app (Traefik/Dokploy = 1).
+   Cette valeur décide de l'IP retenue dans X-Forwarded-For : la
+   sur-déclarer permettrait à un client de forger son IP (rate limiting
+   contournable, journal de sécurité pollué). Voir lib/clientIp.ts. */
+app.set('trust proxy', trustedProxyHops())
 app.use(cookieParser())
 app.use(requestId)
+
+/* Observateur des refus HTTP (401/403/429) — journalise APRÈS la
+   réponse, n'écrit rien sur une requête normale. */
+app.use(securityResponseMonitor)
 
 /* ── CORS — strict origin list (localhost:* in dev, *.nextgital.tech in prod).
    /api/public/* is OPEN by design: it's the embeddable widget intake, so any
@@ -162,6 +176,7 @@ app.use('/api/tenants',  tenantRoutes)
 app.use('/api/stock',    stockRoutes)
 app.use('/api/vehicles', vehiclesRoutes)
 app.use('/api/finance-ai', financeAiRoutes)
+app.use('/api/finance',   financeRoutes)
 app.use('/api/ai',        aiRoutes)
 app.use('/api/ai-quote',  aiQuoteRoutes)
 app.use('/api/public',    publicLeadsRoutes)
@@ -173,6 +188,7 @@ app.use('/api/activity',  activityRoutes)
 app.use('/api/outbound',  outboundRoutes)
 app.use('/api/paiements-recovery', paiementsRecoveryRoutes)
 app.use('/api/admin/2fa', admin2faRoutes)
+app.use('/api/security',  securityRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */
@@ -220,4 +236,19 @@ app.listen(PORT, () => {
   startExpiryReminderScheduler(pool)
   /* Démarre l'autopilot Outbound (check chaque heure les tenants dont run_hour = maintenant) */
   startAutopilotScheduler(pool)
+  /* Purge quotidienne du Centre de sécurité — le monitoring ne doit pas
+     faire grossir la base indéfiniment (rétention par sévérité). */
+  startSecurityRetentionScheduler()
+  /* Diagnostic de cloisonnement : signale au démarrage toute table
+     exposée par l'API CRUD qui n'a pas de colonne tenant_id (donc
+     protégée par la seule RLS). Mieux vaut le savoir au boot que lors
+     d'un incident. */
+  void import('./routes/crud').then(m => reportUnscopedTables(m.EXPOSED_TABLES)).catch(() => {})
+  /* Vérifie au démarrage que les requêtes tenant s'exécuteront bien
+     sous un rôle soumis à la RLS (migration 082). Avertit sinon. */
+  void probeRlsRole().then(ok => {
+    console.log(ok
+      ? '[rls] requêtes tenant exécutées sous le rôle gestiq_rls (RLS garantie)'
+      : '[rls] ATTENTION — rôle RLS indisponible, cloisonnement dépendant du compte de connexion')
+  })
 })

@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from 'express'
 import type { Role } from './auth'
+import { trackSecurityEvent } from '../lib/securityEvents'
+import { markSecurityLogged } from './securityMonitor'
+import { getEffectiveRole } from '../lib/effectiveRole'
 
 /* ─────────────────────────────────────────────────────────────────
    RBAC matrix for table CRUD routes.
@@ -116,6 +119,32 @@ const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   /* Modèles de prestations (bibliothèque devis) — lecture pour tous
      (utilisée dans l'éditeur de devis), gestion admin/manager */
   prestation_models:         matrix(ALL,                  ['admin','manager'], ['admin','manager'], ['admin','manager']),
+
+  /* ── Module financier ────────────────────────────────────────────
+     Même périmètre que `paiements` : l'argent réellement encaissé ne
+     se manipule pas depuis un rôle commercial ou viewer.
+
+     Les créations/suppressions passant par /api/finance (atomicité,
+     anti-doublon, cohérence avec les prévisions) sont volontairement
+     FERMÉES ici : `create`/`delete` à [] force le chemin sûr.
+       · revenus                  → création via POST /api/finance/revenus
+                                    suppression via DELETE /api/finance/revenus/:id
+       · transferts_comptes       → POST/DELETE /api/finance/transferts
+       · bank_account_adjustments → journal en ajout seul, POST /api/finance/ajustements,
+                                    jamais modifiable ni supprimable (historique intact)
+     Les prévisions, elles, n'engagent aucun mouvement d'argent tant
+     qu'elles ne sont pas réalisées : CRUD classique. */
+  revenus:                   { view: ['admin','manager','comptable'], create: [],
+                               edit: ['admin','manager','comptable'], delete: [] },
+  /* Même périmètre de LECTURE que les autres tables financières : un rôle
+     qui ne peut pas lire les dépenses ni les ajustements ne doit pas voir
+     un prévisionnel calculé sur des données partielles. */
+  previsions_financieres:    matrix(['admin','manager','comptable'],
+                                    ['admin','manager','comptable'],
+                                    ['admin','manager','comptable'],
+                                    ['admin','manager','comptable']),
+  transferts_comptes:        { view: ['admin','manager','comptable'], create: [], edit: [], delete: [] },
+  bank_account_adjustments:  ro(['admin','manager','comptable']),
 }
 
 export function canTableAction(role: Role, table: string, action: Action): boolean {
@@ -124,17 +153,59 @@ export function canTableAction(role: Role, table: string, action: Action): boole
   return allowed.includes(role)
 }
 
-/* Express middleware — call AFTER requireAuth, on routes with :table param */
-export function tableRbac(req: Request, res: Response, next: NextFunction) {
+/* Express middleware — call AFTER requireAuth, on routes with :table param.
+   Le rôle vient de la BASE (lib/effectiveRole), pas du JWT : une
+   rétrogradation ou une révocation prend effet en moins de 30 s au lieu
+   d'attendre l'expiration du token (1 h). */
+export async function tableRbac(req: Request, res: Response, next: NextFunction) {
   const rawTable = req.params.table
   const table    = Array.isArray(rawTable) ? rawTable[0] : rawTable
   const action   = METHOD_TO_ACTION[req.method]
-  const role     = (req.user?.role ?? '') as Role
+  const jwtRole  = (req.user?.role ?? '') as Role
 
-  if (!table || !action || !role) {
+  if (!table || !action || !req.user?.userId || !req.user?.tenantId) {
     return res.status(401).json({ error: 'Non authentifié' })
   }
+
+  let role: Role | null
+  try {
+    role = await getEffectiveRole(req.user.userId, req.user.tenantId)
+  } catch {
+    /* Fail-closed : en cas de doute sur les droits, on refuse. */
+    return res.status(403).json({ error: 'Permissions insuffisantes pour cette action' })
+  }
+
+  /* Plus d'appartenance active (accès révoqué, compte désactivé) : le
+     token reste valide mais ne donne plus aucun droit. */
+  if (!role) {
+    markSecurityLogged(req)
+    trackSecurityEvent({
+      type: 'permission_denied',
+      req,
+      httpStatus: 403,
+      reason: 'membership_revoked',
+      metadata: { table, action, jwt_role: jwtRole },
+    })
+    return res.status(403).json({ error: 'Accès révoqué' })
+  }
+
   if (!canTableAction(role, table, action)) {
+    /* Refus de permission journalisé avec le contexte utile (table +
+       action + rôle), et rien d'autre : ni corps de requête, ni token.
+       MEDIUM/BLOCKED par défaut — c'est l'accumulation, pas l'occurrence
+       isolée, qui déclenche une alerte (un utilisateur qui clique sur un
+       module interdit produit ce refus tous les jours). */
+    markSecurityLogged(req)
+    trackSecurityEvent({
+      type: 'permission_denied',
+      req,
+      httpStatus: 403,
+      reason: `table_${action}_denied`,
+      /* jwt_role differs from role → token émis avant une
+         rétrogradation : c'est précisément le cas que ce contrôle
+         rattrape. */
+      metadata: { table, action, role, jwt_role: jwtRole },
+    })
     return res.status(403).json({ error: 'Permissions insuffisantes pour cette action' })
   }
   next()

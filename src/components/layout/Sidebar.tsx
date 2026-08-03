@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Users, UserCheck, FileText, Receipt, FileSignature,
   CreditCard, DollarSign, TrendingUp, Globe, Server, Package, ShoppingCart,
   Repeat, BarChart3, CheckSquare, Building2, ChevronDown, ChevronsLeft,
-  Settings, Briefcase, Banknote, Wallet, Activity, ShieldCheck,
+  Settings, Briefcase, Banknote, Wallet, Activity, ShieldCheck, ShieldAlert,
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
   Plus, Star, Command, Search, GripVertical,
@@ -63,6 +63,7 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'hebergements',      label: 'Hébergements' },
   { key: 'statistiques',      label: 'Statistiques' },
   { key: 'activite',          label: 'Journal d\'activité' },
+  { key: 'centre-securite',   label: 'Centre de sécurité' },
   { key: 'conseiller-ia',     label: 'Conseiller IA' },
   { key: 'automatisations',   label: 'Automatisations' },
   { key: 'integrations',      label: 'Intégrations' },
@@ -158,6 +159,9 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'Statistiques',       href: '/statistiques',  icon: BarChart3, module: 'statistiques' },
       { label: "Journal d'activité", href: '/activite',      icon: Activity, module: 'activite' },
+      /* Centre de sécurité — l'entrée est masquée hors admin, mais c'est
+         le backend (requireSecurityMonitoring) qui protège réellement. */
+      { label: 'Centre de sécurité', href: '/centre-securite', icon: ShieldAlert, module: 'centre-securite', adminOnly: true },
       { label: 'Conseiller IA',      href: '/conseiller-ia',    icon: Bot,     badge: 'IA', module: 'conseiller-ia' },
       { label: 'Automatisations',    href: '/automatisations',  icon: Zap,     badge: 'Auto', module: 'automatisations' },
       { label: 'Intégrations',       href: '/integrations',     icon: PlugZap, module: 'integrations' },

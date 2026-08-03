@@ -5,6 +5,11 @@ import { safeColumn } from '../middleware/security'
 import { tableRbac } from '../middleware/rbac'
 import { logger } from '../lib/logger'
 import {
+  trackSecurityEvent, noteResourceProbe, isProbeThresholdCrossed, PROBE_LIMITS,
+} from '../lib/securityEvents'
+import { markSecurityLogged } from '../middleware/securityMonitor'
+import { ensureTenantColumnCache, tableIsTenantScoped } from '../db/tenantColumns'
+import {
   notifyNewProspect, notifyTaskValidation, notifyNewPaiement, notifyDevisAccepte,
 } from '../lib/notificationEmails'
 
@@ -12,7 +17,7 @@ const router = Router()
 router.use(requireAuth)
 router.use('/:table', tableRbac)
 
-const ALLOWED_TABLES = new Set([
+export const EXPOSED_TABLES = new Set([
   'clients', 'prospects', 'devis', 'factures', 'paiements',
   'depenses', 'contrats', 'produits', 'fournisseurs', 'team_members',
   'domaines', 'hebergements', 'cheques_recus', 'cheques_emis',
@@ -46,18 +51,102 @@ const ALLOWED_TABLES = new Set([
   'prospect_logs',
   /* Bibliothèque de modèles de prestations (devis) */
   'prestation_models',
+  /* Module financier : revenus encaissés, prévisions (revenus/dépenses
+     à venir), virements internes, ajustements manuels de solde.
+     Les ÉCRITURES sensibles passent par /api/finance (atomicité +
+     anti-doublon) ; le CRUD générique sert la lecture et les
+     modifications simples (cf. TABLE_ACL). */
+  'revenus',
+  'previsions_financieres',
+  'transferts_comptes',
+  'bank_account_adjustments',
 ])
 
 const isProd = process.env.NODE_ENV === 'production'
 
 const SAFE_COL = /^[a-z_][a-z0-9_]{0,63}$/
 
-function guardTable(table: string, res: Response): boolean {
-  if (!ALLOWED_TABLES.has(table)) {
+/**
+ * Colonnes qu'aucun client n'a le droit d'écrire par le CRUD générique.
+ *
+ * Ce sont des champs posés par une transaction serveur, jamais par un
+ * formulaire : les écrire directement casserait l'invariant qu'ils
+ * représentent. Exemple concret : `previsions_financieres.revenu_id` et
+ * `statut` sont écrits ensemble par POST /api/finance/previsions/:id/settle.
+ * Un PATCH `{ statut: 'prevu' }` sur une prévision déjà encaissée la
+ * rouvrirait sans supprimer le revenu correspondant — et permettrait de
+ * l'encaisser une seconde fois. La base pose le même garde-fou (trigger
+ * previsions_guard_reouverture) ; ici on refuse plus tôt et plus clairement.
+ */
+const READONLY_COLUMNS: Record<string, Set<string>> = {
+  previsions_financieres: new Set([
+    'montant_realise', 'date_realisation', 'revenu_id', 'depense_id',
+  ]),
+  revenus:  new Set(['prevision_id']),
+  depenses: new Set(['prevision_id']),
+}
+
+function guardTable(table: string, res: Response, req?: Request): boolean {
+  if (!EXPOSED_TABLES.has(table)) {
+    /* Une table hors liste blanche, c'est soit un bug client, soit
+       quelqu'un qui cherche `users`, `refresh_tokens`, `security_events`…
+       Le nom demandé est journalisé (tronqué), la requête est refusée. */
+    if (req) {
+      trackSecurityEvent({
+        type: 'invalid_input', req,
+        httpStatus: 400,
+        reason: 'table_not_allowed',
+        metadata: { table: table.slice(0, 64) },
+      })
+    }
     res.status(400).json({ error: `Table non autorisée` })
     return false
   }
   return true
+}
+
+/**
+ * Détecte une falsification explicite de `tenant_id` dans le corps.
+ *
+ * Le serveur impose déjà le tenant du JWT (POST) ou retire la colonne
+ * (PATCH) : l'isolation n'est jamais en jeu. Mais recevoir un tenant_id
+ * DIFFÉRENT du sien n'arrive pas par hasard — aucun écran de l'app n'en
+ * envoie. C'est le signal IDOR/BOLA le plus net qu'on puisse capter ici,
+ * et il est sans faux positif.
+ */
+function detectForgedTenant(req: Request, table: string): void {
+  const claimed = (req.body as Record<string, unknown> | undefined)?.tenant_id
+  if (typeof claimed !== 'string' || !claimed) return
+  if (claimed === req.user!.tenantId) return
+  markSecurityLogged(req)
+  trackSecurityEvent({
+    type: 'tenant_scope_denied', req,
+    reason: 'forged_tenant_id',
+    metadata: { table, claimed_tenant: claimed.slice(0, 64) },
+  })
+}
+
+/**
+ * Un 404 isolé est normal ; un balayage d'identifiants ne l'est pas.
+ * On ne journalise qu'au franchissement du seuil (compteur en mémoire).
+ */
+function noteNotFound(req: Request, table: string): void {
+  const actor = req.user!.userId
+  const count = noteResourceProbe(`${actor}|notfound`)
+  if (!isProbeThresholdCrossed(count)) return
+  markSecurityLogged(req)
+  trackSecurityEvent({
+    type: 'tenant_scope_denied', req,
+    httpStatus: 404,
+    reason: 'resource_enumeration_suspected',
+    /* SUSPICIOUS et non CONFIRMED : un client mal synchronisé peut
+       produire ce volume. On signale, on n'accuse pas. */
+    status: 'suspicious',
+    metadata: {
+      table, misses: count,
+      window_minutes: PROBE_LIMITS.windowMs / 60000,
+    },
+  })
 }
 
 /* Express 5 types req.params[key] as string | string[]; our routes
@@ -70,7 +159,7 @@ function tableParam(req: Request): string {
 /* ── GET /api/:table ─────────────────────────────────────────── */
 router.get('/:table', async (req: Request, res: Response) => {
   const table = tableParam(req)
-  if (!guardTable(table, res)) return
+  if (!guardTable(table, res, req)) return
 
   const tenantId = req.user!.tenantId
   const orderBy  = safeColumn(String(req.query.orderBy || 'created_at'))
@@ -89,10 +178,21 @@ router.get('/:table', async (req: Request, res: Response) => {
     whereVals.push(v)
     whereClauses.push(`${k} = $${whereVals.length}`)
   }
-  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
 
   try {
-    /* RLS enforced by SET LOCAL app.current_tenant in tenantQuery */
+    /* DEUX lignes de défense indépendantes :
+       1. RLS PostgreSQL (SET LOCAL app.current_tenant dans tenantQuery) ;
+       2. ce filtre applicatif.
+       La 1re saute si le rôle est SUPERUSER/BYPASSRLS ou propriétaire
+       d'une table dont la RLS n'est pas FORCÉE — situation réellement
+       constatée. La 2e ne dépend d'aucune configuration de base. */
+    await ensureTenantColumnCache()
+    if (tableIsTenantScoped(table)) {
+      whereVals.push(tenantId)
+      whereClauses.push(`tenant_id = $${whereVals.length}`)
+    }
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
+
     const rows = await tenantQuery(
       tenantId,
       `SELECT * FROM ${table} ${whereSql} ORDER BY ${orderBy} ${order} LIMIT $${whereVals.length + 1} OFFSET $${whereVals.length + 2}`,
@@ -109,15 +209,21 @@ router.get('/:table', async (req: Request, res: Response) => {
 router.get('/:table/:id', async (req: Request, res: Response) => {
   const table = tableParam(req)
   const { id } = req.params
-  if (!guardTable(table, res)) return
+  if (!guardTable(table, res, req)) return
 
   try {
+    await ensureTenantColumnCache()
+    const scope = tableIsTenantScoped(table) ? ' AND tenant_id = $2' : ''
+    const params = tableIsTenantScoped(table) ? [id, req.user!.tenantId] : [id]
     const row = await tenantQueryOne(
       req.user!.tenantId,
-      `SELECT * FROM ${table} WHERE id = $1`,
-      [id]
+      `SELECT * FROM ${table} WHERE id = $1${scope}`,
+      params
     )
-    if (!row) return res.status(404).json({ error: 'Non trouvé' })
+    if (!row) {
+      noteNotFound(req, table)
+      return res.status(404).json({ error: 'Non trouvé' })
+    }
     res.json(row)
   } catch (err: any) {
     res.status(500).json({ error: 'Erreur serveur' })
@@ -169,8 +275,9 @@ function sendDbError(res: Response, err: any, ctx: string, extra?: unknown): voi
 /* ── POST /api/:table ────────────────────────────────────────── */
 router.post('/:table', async (req: Request, res: Response) => {
   const table = tableParam(req)
-  if (!guardTable(table, res)) return
+  if (!guardTable(table, res, req)) return
 
+  detectForgedTenant(req, table)
   const raw  = { ...req.body, tenant_id: req.user!.tenantId }
   const data = normalizeValues(Object.fromEntries(Object.entries(raw).filter(([k]) => SAFE_COL.test(k))))
   const keys = Object.keys(data)
@@ -205,11 +312,13 @@ router.post('/:table', async (req: Request, res: Response) => {
 router.patch('/:table/:id', async (req: Request, res: Response) => {
   const table = tableParam(req)
   const { id } = req.params
-  if (!guardTable(table, res)) return
+  if (!guardTable(table, res, req)) return
 
+  detectForgedTenant(req, table)
+  const readonly = READONLY_COLUMNS[table]
   const data = normalizeValues(Object.fromEntries(
     Object.entries(req.body as object)
-      .filter(([k]) => SAFE_COL.test(k) && k !== 'tenant_id')
+      .filter(([k]) => SAFE_COL.test(k) && k !== 'tenant_id' && !readonly?.has(k))
   ))
   const keys = Object.keys(data)
   if (!keys.length) return res.status(400).json({ error: 'Aucun champ à mettre à jour' })
@@ -218,12 +327,23 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
   const vals = [...Object.values(data), id]
 
   try {
+    await ensureTenantColumnCache()
+    /* Le tenant fait partie de la clause WHERE : une ligne d'un autre
+       espace ne peut pas être modifiée, même si la RLS est inopérante. */
+    let scope = ''
+    if (tableIsTenantScoped(table)) {
+      vals.push(req.user!.tenantId)
+      scope = ` AND tenant_id = $${vals.length}`
+    }
     const row = await tenantQueryOne<any>(
       req.user!.tenantId,
-      `UPDATE ${table} SET ${sets} WHERE id = $${keys.length + 1} RETURNING *`,
+      `UPDATE ${table} SET ${sets} WHERE id = $${keys.length + 1}${scope} RETURNING *`,
       vals
     )
-    if (!row) return res.status(404).json({ error: 'Non trouvé' })
+    if (!row) {
+      noteNotFound(req, table)
+      return res.status(404).json({ error: 'Non trouvé' })
+    }
     res.json(row)
 
     /* Fire-and-forget notifications email (post-update). */
@@ -242,18 +362,36 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
 router.delete('/:table/:id', async (req: Request, res: Response) => {
   const table = tableParam(req)
   const { id } = req.params
-  if (!guardTable(table, res)) return
+  if (!guardTable(table, res, req)) return
 
   try {
+    await ensureTenantColumnCache()
+    const scoped = tableIsTenantScoped(table)
     const row = await tenantQueryOne(
       req.user!.tenantId,
-      `DELETE FROM ${table} WHERE id = $1 RETURNING id`,
-      [id]
+      `DELETE FROM ${table} WHERE id = $1${scoped ? ' AND tenant_id = $2' : ''} RETURNING id`,
+      scoped ? [id, req.user!.tenantId] : [id]
     )
-    if (!row) return res.status(404).json({ error: 'Non trouvé' })
+    if (!row) {
+      noteNotFound(req, table)
+      return res.status(404).json({ error: 'Non trouvé' })
+    }
     res.json({ success: true })
   } catch (err: any) {
-    res.status(500).json({ error: 'Erreur serveur' })
+    /* 23503 sur un DELETE = la ligne est encore référencée par une FK
+       RESTRICT. Ce n'est pas une panne : c'est un refus métier, et
+       l'utilisateur doit savoir quoi faire. Cas réel : supprimer un compte
+       bancaire porteur de transferts effacerait la moitié d'un mouvement
+       et fausserait le solde de l'autre compte. */
+    if (err?.code === '23503') {
+      logger.warn(`[DELETE /api/${table}/${id}] référencé ailleurs:`, err?.detail)
+      return res.status(409).json({
+        error: table === 'bank_accounts'
+          ? "Ce compte est utilisé par des transferts : supprimez-les d'abord, ou désactivez le compte."
+          : 'Cet enregistrement est référencé par d\'autres données et ne peut pas être supprimé.',
+      })
+    }
+    sendDbError(res, err, `[DELETE /api/${table}/${id}]`)
   }
 })
 
