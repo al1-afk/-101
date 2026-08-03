@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -23,6 +23,8 @@ import {
 import {
   useProspectLogs, useAddProspectLog, type LogType,
 } from '@/hooks/useProspectLogs'
+import { useDevis, type Devis } from '@/hooks/useDevis'
+import { markListItemOpened, listNavKey } from '@/hooks/useListNavMemory'
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils'
 import { usePermissions } from '@/hooks/usePermissions'
 import AIQuoteGeneratorDialog from '@/components/devis/AIQuoteGeneratorDialog'
@@ -94,6 +96,16 @@ const CALL_OUTCOMES = [
   'Pas intéressé',
 ]
 
+/* Suivis WhatsApp fréquents — enregistrés en 1 clic (type='whatsapp').
+   Cas principal : on envoie un vocal au prospect et on le trace sans rien taper. */
+const WA_OUTCOMES = [
+  'Audio envoyé',
+  'Audio reçu',
+  'Message envoyé',
+  'Vu sans réponse',
+  'A répondu',
+]
+
 function formatDateTime(iso: string) {
   return new Intl.DateTimeFormat('fr-FR', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -107,6 +119,16 @@ const LOG_CONFIG: Record<LogType, { icon: React.ElementType; color: string; bg: 
   edit:     { icon: Edit2,          color: 'text-amber-600 dark:text-amber-400',     bg: 'bg-amber-500/20'   },
   appel:    { icon: PhoneCall,      color: 'text-cyan-600 dark:text-cyan-400',       bg: 'bg-cyan-500/20'    },
   email:    { icon: Mail,           color: 'text-pink-600 dark:text-pink-400',       bg: 'bg-pink-500/20'    },
+  whatsapp: { icon: MessageCircle,  color: 'text-green-600 dark:text-green-400',     bg: 'bg-green-500/20'   },
+}
+
+/* Statuts de devis — badge dans l'encart « Devis » de la colonne droite. */
+const DEVIS_STATUT: Record<Devis['statut'], { label: string; color: string; bg: string }> = {
+  brouillon: { label: 'Brouillon', color: 'text-muted-foreground',                 bg: 'bg-muted'                             },
+  envoye:    { label: 'Envoyé',    color: 'text-blue-600 dark:text-blue-400',      bg: 'bg-blue-50 dark:bg-blue-500/15'       },
+  accepte:   { label: 'Accepté',   color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-500/15' },
+  refuse:    { label: 'Refusé',    color: 'text-red-600 dark:text-red-400',        bg: 'bg-red-50 dark:bg-red-500/15'         },
+  expire:    { label: 'Expiré',    color: 'text-amber-600 dark:text-amber-400',    bg: 'bg-amber-50 dark:bg-amber-500/15'     },
 }
 
 /* ─── Collapsible section (repris de ClientDetail) ────────────────── */
@@ -420,8 +442,26 @@ export default function ProspectDetail() {
   /* Bouton « Générer un devis IA » : admin, manager (chef de projet) et
      commercial autorisés — aligné sur le droit de créer un devis. */
   const canGenerateQuote = can('devis', 'create')
+  const canViewQuotes    = can('devis', 'view')
 
   const prospect = prospects.find(p => p.id === id)
+
+  /* Mémorise la fiche ouverte et arme la restauration de la liste. Couvre les
+     entrées qui ne passent pas par la liste (notification de relance, URL
+     collée) : au retour, c'est bien CETTE ligne qui est surlignée. */
+  useEffect(() => {
+    if (id) markListItemOpened(listNavKey('prospects', tenantSlug), id)
+  }, [id, tenantSlug])
+
+  /* Devis présentés à ce prospect (cf. migration 078 : devis.prospect_id),
+     du plus récent au plus ancien. */
+  const { data: allDevis = [] } = useDevis()
+  const prospectDevis = useMemo(
+    () => allDevis
+      .filter(d => d.prospect_id === id)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [allDevis, id],
+  )
 
   const [editOpen,   setEditOpen]   = useState(false)
   const [aiQuoteOpen, setAiQuoteOpen] = useState(false)
@@ -554,6 +594,20 @@ export default function ProspectDetail() {
         ...(pastedImages.length ? { media: pastedImages } : {}),
       },
       { onSuccess: () => { setNoteText(''); setCallDuration(''); setPastedImages([]); toast.success(`Appel enregistré : ${outcome}`) } },
+    )
+  }
+
+  /* Suivi WhatsApp en 1 clic : « Audio envoyé » etc. Le texte libre éventuel
+     (et les captures collées) est joint au log. */
+  const quickLogWhatsapp = (outcome: string) => {
+    const extra = noteText.trim()
+    addLog.mutate(
+      {
+        prospect_id: prospect.id, type: 'whatsapp', auteur: 'Said',
+        message: extra ? `${outcome} — ${extra}` : outcome,
+        ...(pastedImages.length ? { media: pastedImages } : {}),
+      },
+      { onSuccess: () => { setNoteText(''); setPastedImages([]); toast.success(`WhatsApp enregistré : ${outcome}`) } },
     )
   }
 
@@ -848,10 +902,11 @@ export default function ProspectDetail() {
               <p className="text-xs font-bold text-foreground">Ajouter une activité</p>
               <div className="flex gap-1.5 flex-wrap">
                 {([
-                  { t: 'note'  as LogType, label: 'Note'  },
-                  { t: 'appel' as LogType, label: 'Appel' },
-                  { t: 'email' as LogType, label: 'Email' },
-                  { t: 'edit'  as LogType, label: 'Autre' },
+                  { t: 'note'     as LogType, label: 'Note'          },
+                  { t: 'appel'    as LogType, label: 'Appel'         },
+                  { t: 'whatsapp' as LogType, label: 'Audio WhatsApp' },
+                  { t: 'email'    as LogType, label: 'Email'         },
+                  { t: 'edit'     as LogType, label: 'Autre'         },
                 ]).map(({ t, label }) => {
                   const cfg = LOG_CONFIG[t]; const Icon = cfg.icon
                   return (
@@ -900,6 +955,35 @@ export default function ProspectDetail() {
                   </div>
                 </div>
               )}
+              {/* Suivi WhatsApp — 1 clic pour tracer un vocal envoyé/reçu */}
+              {noteType === 'whatsapp' && (
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1.5">Suivi WhatsApp (1 clic) :</p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {WA_OUTCOMES.map(o => (
+                      <button
+                        key={o}
+                        onClick={() => quickLogWhatsapp(o)}
+                        disabled={addLog.isPending}
+                        className="px-2.5 py-1 rounded-full text-xs font-medium border border-border text-foreground hover:bg-green-500/10 hover:border-green-500/40 hover:text-green-600 dark:hover:text-green-400 transition-all disabled:opacity-50"
+                      >
+                        {o}
+                      </button>
+                    ))}
+                    {prospect.telephone && (
+                      <a
+                        href={waLink(prospect.telephone)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Ouvrir la conversation WhatsApp"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-[#25D366] border border-[#25D366]/40 hover:bg-[#25D366]/10 transition-all"
+                      >
+                        <MessageCircle className="w-3 h-3" /> Ouvrir WhatsApp
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
               <AutocorrectTextarea
                 value={noteText}
                 onChange={e => setNoteText(e.target.value)}
@@ -908,6 +992,7 @@ export default function ProspectDetail() {
                 className="input-field resize-none h-20 text-sm"
                 placeholder={
                   noteType === 'appel' ? "Ex : Appel de 15 min, intéressé par l'offre premium…"
+                  : noteType === 'whatsapp' ? 'Ex : Vocal envoyé — présentation de l’offre et du devis…'
                   : noteType === 'email' ? 'Ex : Email de suivi envoyé avec devis joint…'
                   : 'Ajouter une note… (collez une capture avec ⌘/Ctrl + V)'
                 }
@@ -1015,6 +1100,66 @@ export default function ProspectDetail() {
               <InfoRow icon={Clock}     label="Créé le"     value={formatDate(prospect.created_at)} />
             </div>
           </div>
+
+          {/* ── Devis présentés à ce prospect ── */}
+          {canViewQuotes && (
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  Devis
+                  {prospectDevis.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                      {prospectDevis.length}
+                    </span>
+                  )}
+                </p>
+                {canGenerateQuote && (
+                  <button
+                    onClick={() => setAiQuoteOpen(true)}
+                    className="text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1"
+                  >
+                    <Sparkles className="w-3 h-3" /> Générer
+                  </button>
+                )}
+              </div>
+
+              {prospectDevis.length === 0 ? (
+                <p className="text-xs text-muted-foreground/70">
+                  Aucun devis présenté à ce prospect pour l’instant.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {prospectDevis.map(d => {
+                    const st = DEVIS_STATUT[d.statut] ?? DEVIS_STATUT.brouillon
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => navigate(`${base}/devis/${d.id}/preview`)}
+                        title="Ouvrir le devis"
+                        className="w-full text-left rounded-lg border border-border px-3 py-2.5 hover:border-blue-500/40 hover:bg-blue-500/5 transition-all"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-foreground truncate">{d.numero}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ${st.bg} ${st.color}`}>
+                            {st.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <span className="text-[11px] text-muted-foreground">
+                            {d.date_emission ? formatDate(d.date_emission) : formatDate(d.created_at)}
+                          </span>
+                          <span className="text-sm font-bold text-foreground">
+                            {formatCurrency(d.montant_ttc)}
+                          </span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

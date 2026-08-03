@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -10,6 +10,7 @@ import {
   Mail, Building2, User, Calendar, Bell, DollarSign, TrendingUp, UserCheck,
   Loader2, AlertCircle, Phone, PhoneCall, FileText, Edit2,
   UserPlus, ArrowRightLeft, Clock, CheckSquare, Square, AlertTriangle,
+  MessageCircle, Eye,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button }   from '@/components/ui/button'
@@ -31,8 +32,10 @@ import {
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { prospectsSchema } from '@/lib/importExportSchemas'
 import {
-  DateRangeFilter, makeDatePredicate, computeRange, type DateRange, type DatePreset,
+  DateRangeFilter, makeDatePredicate, computeRange, DEFAULT_RANGE,
+  type DateRange, type DatePreset,
 } from '@/components/ui/DateRangeFilter'
+import { useListNavMemory, listNavKey } from '@/hooks/useListNavMemory'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 /* Les colonnes DATE reviennent de l'API en timestamp décalé au fuseau
@@ -58,11 +61,25 @@ function relanceTime(v: string | null | undefined): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
 
-/* Filtre par défaut : prospects du mois en cours (au lieu de "Toute la période"). */
-const DEFAULT_MONTH_RANGE: DateRange = (() => {
-  const r = computeRange('month')
-  return { preset: 'month', from: r.from, to: r.to }
-})()
+/* Filtre par défaut : « Toute la période ». On ne masque jamais de prospects
+   à l'ouverture — la période se restreint ensuite d'un clic si besoin. */
+const DEFAULT_FILTERS: ListFilters = {
+  view:         'table',
+  search:       '',
+  filterStatut: 'all',
+  todayOnly:    false,
+  dateRange:    DEFAULT_RANGE,
+}
+
+/* État de liste mémorisé le temps de la session (cf. useListNavMemory) :
+   on retrouve la liste telle qu'on l'a quittée en revenant d'une fiche. */
+interface ListFilters {
+  view:         'table' | 'pipeline'
+  search:       string
+  filterStatut: string
+  todayOnly:    boolean
+  dateRange:    DateRange
+}
 
 const PAGE_SIZE = 50
 
@@ -94,6 +111,7 @@ const LOG_CONFIG: Record<LogType, { icon: React.ElementType; color: string; bg: 
   edit:     { icon: Edit2,           color: 'text-amber-600 dark:text-amber-600 dark:text-amber-400',     bg: 'bg-amber-500/20'   },
   appel:    { icon: PhoneCall,       color: 'text-cyan-600 dark:text-cyan-400',       bg: 'bg-cyan-500/20'    },
   email:    { icon: Mail,            color: 'text-pink-600 dark:text-pink-400',       bg: 'bg-pink-500/20'    },
+  whatsapp: { icon: MessageCircle,   color: 'text-green-600 dark:text-green-400',     bg: 'bg-green-500/20'   },
 }
 
 /* ─── Styles des résultats d'appel (badge « dernier appel » dans la liste) ── */
@@ -737,10 +755,11 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                     {/* Type pills */}
                     <div className="flex gap-1.5 flex-wrap">
                       {([
-                        { t: 'note'  as LogType, label: 'Note'   },
-                        { t: 'appel' as LogType, label: 'Appel'  },
-                        { t: 'email' as LogType, label: 'Email'  },
-                        { t: 'edit'  as LogType, label: 'Autre'  },
+                        { t: 'note'     as LogType, label: 'Note'           },
+                        { t: 'appel'    as LogType, label: 'Appel'          },
+                        { t: 'whatsapp' as LogType, label: 'Audio WhatsApp' },
+                        { t: 'email'    as LogType, label: 'Email'          },
+                        { t: 'edit'     as LogType, label: 'Autre'          },
                       ]).map(({ t, label }) => {
                         const cfg  = LOG_CONFIG[t]
                         const Icon = cfg.icon
@@ -768,6 +787,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                       className="input-field resize-none h-20 text-sm"
                       placeholder={
                         noteType === 'appel' ? "Ex : Appel de 15 min, intéressé par l'offre premium…"
+                        : noteType === 'whatsapp' ? "Ex : Vocal WhatsApp envoyé — présentation de l’offre…"
                         : noteType === 'email' ? "Ex : Email de suivi envoyé avec devis joint…"
                         : "Ajouter une note sur ce prospect…"
                       }
@@ -838,18 +858,30 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
 
 /* ─── ProspectRow (table) ─────────────────────────────────────────── */
 function ProspectRow({
-  p, onEdit, selected, onToggle, lastCall,
+  p, onEdit, selected, onToggle, lastCall, visited,
 }: {
   p: Prospect
   onEdit:   (p: Prospect) => void
   selected: boolean
   onToggle: (id: string) => void
   lastCall?: ProspectLog
+  /** Dernière fiche ouverte : surlignée pour retrouver sa place en un coup d'œil. */
+  visited?: boolean
 }) {
   const accent  = stageAccent(p.statut)
   const dot     = stageDot(p.statut)
   const label   = stageLabel(p.statut)
   const isToday = isRelanceToday(p)
+
+  /* Ordre de priorité : sélection (cases à cocher) > dernière fiche ouverte >
+     relance du jour. `row-visited` est une classe CSS (index.css) et non des
+     utilitaires Tailwind : le fond doit être posé sur les <td> pour survivre
+     aux zébrures et au survol. */
+  const tone =
+    selected  ? 'bg-blue-50/50 dark:bg-blue-900/10'
+    : visited ? 'row-visited'
+    : isToday ? 'bg-amber-50/70 dark:bg-amber-500/10 shadow-[inset_3px_0_0_0_#f59e0b]'
+    : ''
 
   return (
     <motion.tr
@@ -857,11 +889,7 @@ function ProspectRow({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -16 }}
-      className={`table-row cursor-pointer group ${
-        selected ? 'bg-blue-50/50 dark:bg-blue-900/10'
-        : isToday ? 'bg-amber-50/70 dark:bg-amber-500/10 shadow-[inset_3px_0_0_0_#f59e0b]'
-        : ''
-      }`}
+      className={`table-row cursor-pointer group ${tone}`}
       onClick={() => onEdit(p)}
     >
       {/* Checkbox */}
@@ -883,6 +911,14 @@ function ProspectRow({
             <div className="flex items-center gap-1.5">
               <p className="text-sm font-medium text-foreground leading-tight truncate">{p.nom}</p>
               {p.priorite && <PrioriteBadge priorite={p.priorite} />}
+              {visited && (
+                <span
+                  title="Dernière fiche ouverte"
+                  className="inline-flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300 text-[10px] font-bold"
+                >
+                  <Eye className="w-2.5 h-2.5" /> Vu
+                </span>
+              )}
             </div>
             {p.entreprise && <p className="text-xs text-muted-foreground truncate">{p.entreprise}</p>}
           </div>
@@ -950,13 +986,15 @@ function ProspectRow({
 
 /* ─── KanbanCard ──────────────────────────────────────────────────── */
 function KanbanCard({
-  p, index, onEdit, accent, lastCall,
+  p, index, onEdit, accent, lastCall, visited,
 }: {
   p: Prospect
   index: number
   onEdit: (p: Prospect) => void
   accent: string
   lastCall?: ProspectLog
+  /** Dernière fiche ouverte : carte surlignée pour retrouver sa place. */
+  visited?: boolean
 }) {
   const isToday = isRelanceToday(p)
   return (
@@ -985,14 +1023,28 @@ function KanbanCard({
             {...provided.draggableProps}
             {...provided.dragHandleProps}
             style={style}
-            className={`bg-[var(--surface-card)] border border-border rounded-lg p-3 select-none will-change-transform ${
+            className={`border rounded-lg p-3 select-none will-change-transform ${
+              visited
+                ? 'bg-violet-100/70 dark:bg-violet-500/15 border-violet-400 dark:border-violet-500/50 ring-1 ring-violet-400/50'
+                : 'bg-[var(--surface-card)] border-border'
+            } ${
               snapshot.isDragging
                 ? 'cursor-grabbing shadow-xl ring-1 ring-offset-0'
                 : 'cursor-grab hover:shadow-md hover:-translate-y-0.5 active:cursor-grabbing'
             }`}
             onClick={() => { if (!snapshot.isDragging) onEdit(p) }}
           >
-            <p className="text-sm font-medium text-foreground leading-snug mb-1">{p.nom}</p>
+            <div className="flex items-start justify-between gap-1.5 mb-1">
+              <p className="text-sm font-medium text-foreground leading-snug">{p.nom}</p>
+              {visited && (
+                <span
+                  title="Dernière fiche ouverte"
+                  className="inline-flex items-center gap-1 flex-shrink-0 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-600 dark:text-violet-300 text-[10px] font-bold"
+                >
+                  <Eye className="w-2.5 h-2.5" /> Vu
+                </span>
+              )}
+            </div>
             {p.entreprise && (
               <p className="text-xs text-muted-foreground flex items-center gap-1 mb-2">
                 <Building2 className="w-3 h-3 flex-shrink-0" />
@@ -1054,12 +1106,21 @@ export default function Prospects() {
     return m
   }, [allLogs])
 
-  const [view,         setView]         = useState<'table' | 'pipeline'>('table')
-  const [search,       setSearch]       = useState('')
-  const [filterStatut, setFilterStatut] = useState<string>('all')
-  const [todayOnly,    setTodayOnly]    = useState(false)
-  const [dateRange,    setDateRange]    = useState<DateRange>(DEFAULT_MONTH_RANGE)
-  const [page,         setPage]         = useState(1)
+  /* Mémoire de navigation : filtres + page + scroll + dernière fiche ouverte.
+     `ready` = les lignes sont rendues, condition pour restaurer le scroll. */
+  const [rowsReady, setRowsReady] = useState(false)
+  const nav = useListNavMemory<ListFilters>(
+    listNavKey('prospects', tenantSlug),
+    DEFAULT_FILTERS,
+    rowsReady,
+  )
+
+  const [view,         setView]         = useState<'table' | 'pipeline'>(nav.initialFilters.view)
+  const [search,       setSearch]       = useState(nav.initialFilters.search)
+  const [filterStatut, setFilterStatut] = useState<string>(nav.initialFilters.filterStatut)
+  const [todayOnly,    setTodayOnly]    = useState(nav.initialFilters.todayOnly)
+  const [dateRange,    setDateRange]    = useState<DateRange>(nav.initialFilters.dateRange)
+  const [page,         setPage]         = useState(nav.initialPage)
   const [drawerOpen,   setDrawerOpen]   = useState(false)
   const [editTarget,   setEditTarget]   = useState<Prospect | null>(null)
   const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
@@ -1129,14 +1190,39 @@ export default function Prospects() {
     return counts
   }, [baseFiltered, dateRange])
 
-  /* Pagination — 50 par page, reset à 1 quand les filtres changent. */
-  useEffect(() => { setPage(1) }, [search, filterStatut, todayOnly, dateRange])
+  /* Pagination — 50 par page, reset à 1 quand les filtres changent VRAIMENT.
+     On compare une signature plutôt que de « sauter le 1er passage » : sous
+     StrictMode l'effet est monté deux fois, et un simple drapeau laisserait le
+     2ᵉ passage écraser la page restaurée au retour d'une fiche. */
+  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dateRange })
+  const filterSigRef = useRef(filterSig)
+  useEffect(() => {
+    if (filterSigRef.current === filterSig) return
+    filterSigRef.current = filterSig
+    setPage(1)
+  }, [filterSig])
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  /* Page restaurée devenue hors-limites (prospects supprimés entre-temps) :
+     on recadre plutôt que d'afficher un tableau vide. */
+  useEffect(() => {
+    if (!isLoading && filtered.length > 0 && page > totalPages) setPage(totalPages)
+  }, [isLoading, filtered.length, page, totalPages])
   const pageStart  = (page - 1) * PAGE_SIZE
   const paginated  = filtered.slice(pageStart, pageStart + PAGE_SIZE)
 
+  /* Les lignes sont dans le DOM → la position de scroll peut être restaurée. */
+  useEffect(() => {
+    if (!rowsReady && !isLoading && filtered.length > 0) setRowsReady(true)
+  }, [rowsReady, isLoading, filtered.length])
+
   const openNew     = () => { setEditTarget(null); setDrawerOpen(true) }
-  const openEdit    = (p: Prospect) => navigate(`${base}/prospects/${p.id}`)
+  /* Ouvre la fiche EN MÉMORISANT l'état de la liste : au retour on retrouve
+     les mêmes filtres, la même page, la même position, et la ligne ouverte
+     reste surlignée pour enchaîner sur le prospect suivant. */
+  const openEdit    = (p: Prospect) => {
+    nav.remember(p.id, { view, search, filterStatut, todayOnly, dateRange }, page)
+    navigate(`${base}/prospects/${p.id}`)
+  }
   const closeDrawer = () => setDrawerOpen(false)
 
   const toggleSelect    = (id: string) =>
@@ -1447,6 +1533,7 @@ export default function Prospects() {
                         selected={selectedIds.has(p.id)}
                         onToggle={toggleSelect}
                         lastCall={lastCallByProspect.get(p.id)}
+                        visited={p.id === nav.lastOpenedId}
                       />
                     ))}
                   </AnimatePresence>
@@ -1567,6 +1654,7 @@ export default function Prospects() {
                             onEdit={openEdit}
                             accent={stage.accent}
                             lastCall={lastCallByProspect.get(p.id)}
+                            visited={p.id === nav.lastOpenedId}
                           />
                         ))}
                         {provided.placeholder}

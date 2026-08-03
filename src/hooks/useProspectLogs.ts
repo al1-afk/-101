@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 
-export type LogType = 'creation' | 'statut' | 'note' | 'edit' | 'appel' | 'email'
+export type LogType = 'creation' | 'statut' | 'note' | 'edit' | 'appel' | 'email' | 'whatsapp'
 
 export interface ProspectLog {
   id:               string

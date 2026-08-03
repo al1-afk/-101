@@ -71,6 +71,7 @@
     --surface-hover-muted:#F2F5FA;
     --surface-table-hd:   #F7F9FC;
     --surface-row-alt:    rgba(245,247,251,0.6);
+    --surface-row-visited:#EDE9FE;   /* dernière fiche ouverte (violet-100) */
     --surface-glass:      rgba(255,255,255,0.55);
     --surface-glass-border: rgba(15,30,54,0.08);
     --surface-input:      #FFFFFF;
@@ -188,6 +189,7 @@
     --surface-hover-muted:hsl(218 40% 12%);
     --surface-table-hd:   hsl(218 40% 11%);
     --surface-row-alt:    hsl(218 40% 10% / 0.5);
+    --surface-row-visited:hsl(258 55% 26%);  /* dernière fiche ouverte */
     --surface-glass:      rgba(15,30,54,0.55);
     --surface-glass-border: rgba(255,255,255,0.06);
     --surface-input:      hsl(218 35% 13%);
@@ -588,6 +590,21 @@
   .light .table-row:nth-child(even) td { background-color: var(--surface-row-alt); }
   :root .table-row:nth-child(even):hover td,
   .light .table-row:nth-child(even):hover td { background-color: var(--surface-hover) !important; }
+
+  /* Dernière fiche ouverte : la ligne doit rester repérable MALGRÉ les
+     zébrures (nth-child(even) td) et le survol, qui peignent le fond sur les
+     <td> — un background sur le <tr> serait recouvert. D'où ces sélecteurs
+     de spécificité au moins égale, avec la barre latérale sur 1ʳᵉ cellule
+     (fiable même en border-collapse, contrairement au shadow sur <tr>). */
+  :root .table-row.row-visited td,
+  :root .table-row.row-visited:nth-child(even) td,
+  :root .table-row.row-visited:hover td,
+  :root .table-row.row-visited:nth-child(even):hover td {
+    background-color: var(--surface-row-visited) !important;
+  }
+  .table-row.row-visited td:first-child {
+    box-shadow: inset 4px 0 0 0 #8b5cf6;
+  }
 
   /* ══ FORM ══ */
   .form-label { font-size:13px; font-weight:500; color:hsl(var(--foreground)/0.78); display:block; margin-bottom:5px; }
