@@ -16,11 +16,13 @@ import financeAiRoutes from './routes/financeAi'
 import financeRoutes from './routes/finance'
 import aiRoutes from './routes/ai'
 import aiQuoteRoutes from './routes/aiQuote'
+import googleContactsRoutes from './routes/googleContacts'
 import publicLeadsRoutes from './routes/publicLeads'
 import emailTrackingPublicRoutes from './routes/emailTrackingPublic'
 import teamRoutes      from './routes/team'
 import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib/expiryReminderScheduler'
 import { startAutopilotScheduler } from './lib/outboundAutopilot'
+import { startGoogleContactsScheduler } from './lib/googleContactsScheduler'
 import mySpaceRoutes   from './routes/mySpace'
 import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
@@ -179,6 +181,7 @@ app.use('/api/finance-ai', financeAiRoutes)
 app.use('/api/finance',   financeRoutes)
 app.use('/api/ai',        aiRoutes)
 app.use('/api/ai-quote',  aiQuoteRoutes)
+app.use('/api/google-contacts', googleContactsRoutes)
 app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/public',    emailTrackingPublicRoutes)
 app.use('/api/team',      teamRoutes)
@@ -236,6 +239,9 @@ app.listen(PORT, () => {
   startExpiryReminderScheduler(pool)
   /* Démarre l'autopilot Outbound (check chaque heure les tenants dont run_hour = maintenant) */
   startAutopilotScheduler(pool)
+  /* Sync Google Contacts (Caller ID) : pousse les prospects vers les contacts
+     Google des utilisateurs reliés → le nom s'affiche à l'appel entrant. */
+  startGoogleContactsScheduler(pool)
   /* Purge quotidienne du Centre de sécurité — le monitoring ne doit pas
      faire grossir la base indéfiniment (rétention par sévérité). */
   startSecurityRetentionScheduler()

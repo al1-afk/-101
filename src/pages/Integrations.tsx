@@ -11,6 +11,7 @@ import { Input }  from '@/components/ui/input'
 import { Badge }  from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import GoogleContactsCard from '@/components/integrations/GoogleContactsCard'
 
 /* ─── Types ─────────────────────────────────────────────────────── */
 type IntegStatus = 'connected' | 'disconnected' | 'error'
@@ -410,6 +411,12 @@ export default function Integrations() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Google Contacts — Caller ID (intégration réelle, connectée au backend) */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Identification des appels</h2>
+        <GoogleContactsCard />
       </div>
 
       {/* Integration cards */}
