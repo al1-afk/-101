@@ -3,7 +3,7 @@
  * Reproduit la maquette premium NEXT GITAL :
  *   en-tête (logo + panneau DEVIS + bloc client sectorisé) · OBJET DU DEVIS ·
  *   grille de cartes numérotées (une par prestation) · total en toutes lettres
- *   + encart totaux · équipe dédiée · conditions · double signature · pied de
+ *   + encart totaux · conditions · double signature · pied de
  *   page légal complet.
  * Piloté par le modèle de données existant (prestations / conditions / totaux)
  * plus deux champs optionnels : `objet` et `offreTitle`.
@@ -18,14 +18,6 @@ import {
 } from './templateShared'
 
 interface Props { devis: Devis; client?: Client }
-
-/* Équipe dédiée standard NEXT GITAL (générique, tous projets). */
-const DEFAULT_TEAM: { role: string; desc: string }[] = [
-  { role: 'Chef de projet',   desc: 'Votre interlocuteur unique. Il suit le planning, valide chaque étape avec vous et reste joignable par WhatsApp.' },
-  { role: 'Designer',         desc: 'Charte graphique, maquettes du site et visuels des réseaux sociaux.' },
-  { role: 'Développeur',      desc: 'Intégration, développement et mise en ligne de votre projet.' },
-  { role: 'Technicien support', desc: 'Hébergement, sauvegardes, sécurité et assistance après la mise en ligne.' },
-]
 
 const NAVY = '#0a1a3c'
 const BLUE = '#1e64c4'
@@ -221,21 +213,6 @@ const DevisTemplateExecutive = forwardRef<HTMLDivElement, Props>(({ devis: d, cl
               </div>
             </>
           )}
-        </div>
-      </div>
-
-      {/* ══ ÉQUIPE DÉDIÉE ═══════════════════════════════════════ */}
-      <div className="mb-7" style={{ breakInside: 'avoid' }}>
-        <p className="text-[11px] font-bold uppercase tracking-[0.15em] mb-3" style={{ color: NAVY }}>
-          Votre équipe dédiée
-        </p>
-        <div className="grid grid-cols-4 gap-3">
-          {DEFAULT_TEAM.map((m, i) => (
-            <div key={i} style={{ borderTop: `2px solid ${BLUE}`, paddingTop: 6 }}>
-              <p className="text-[10.5px] font-bold" style={{ color: NAVY }}>{m.role}</p>
-              <p className="text-[9px] leading-snug mt-1" style={{ color: '#475569' }}>{m.desc}</p>
-            </div>
-          ))}
         </div>
       </div>
 
