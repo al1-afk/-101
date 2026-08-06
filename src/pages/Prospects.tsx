@@ -10,7 +10,7 @@ import {
   Mail, Building2, User, Calendar, Bell, DollarSign, TrendingUp, UserCheck,
   Loader2, AlertCircle, Phone, PhoneCall, FileText, Edit2,
   UserPlus, ArrowRightLeft, Clock, CheckSquare, Square, AlertTriangle,
-  MessageCircle, Eye,
+  MessageCircle, Eye, Copy,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button }   from '@/components/ui/button'
@@ -36,6 +36,7 @@ import {
   type DateRange, type DatePreset,
 } from '@/components/ui/DateRangeFilter'
 import { useListNavMemory, listNavKey } from '@/hooks/useListNavMemory'
+import { canonicalPhone, groupByPhone } from '@/lib/phone'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 /* Les colonnes DATE reviennent de l'API en timestamp décalé au fuseau
@@ -68,6 +69,7 @@ const DEFAULT_FILTERS: ListFilters = {
   search:       '',
   filterStatut: 'all',
   todayOnly:    false,
+  dupOnly:      false,
   dateRange:    DEFAULT_RANGE,
 }
 
@@ -78,6 +80,8 @@ interface ListFilters {
   search:       string
   filterStatut: string
   todayOnly:    boolean
+  /** N'afficher que les prospects dont le téléphone apparaît plusieurs fois. */
+  dupOnly:      boolean
   dateRange:    DateRange
 }
 
@@ -282,6 +286,9 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
   )
   const [noteText, setNoteText] = useState('')
   const [noteType, setNoteType] = useState<LogType>('note')
+  /* Numéro dont l'utilisateur a déjà accepté le doublon (cf. handleSave).
+     Déclaré ici car le bloc de re-synchro ci-dessous le remet à zéro. */
+  const [ackedPhone, setAckedPhone] = useState<string | null>(null)
 
   // Re-sync form + reset tab when prospect changes
   const [prevProspect, setPrevProspect] = useState(prospect)
@@ -291,6 +298,26 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
     setTab('form')
     setNoteText('')
     setNoteType('note')
+    setAckedPhone(null)
+  }
+
+  /* Réinitialisation à chaque OUVERTURE du tiroir.
+     Le bloc ci-dessus ne suffit pas : l'édition d'une fiche passe désormais par
+     la page de détail, donc `prospect` vaut toujours null ici et la comparaison
+     n'est jamais vraie. Sans ce second garde-fou, « Nouveau prospect » rouvrait
+     avec les valeurs du prospect précédent, et surtout l'accord donné sur un
+     doublon survivait : la 2ᵉ création avec le même numéro passait sans aucune
+     confirmation. */
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (prevOpen !== open) {
+    setPrevOpen(open)
+    if (open) {
+      setForm(prospect ? prospectToForm(prospect) : { ...EMPTY_FORM })
+      setTab('form')
+      setNoteText('')
+      setNoteType('note')
+      setAckedPhone(null)
+    }
   }
 
   const set = (k: keyof typeof EMPTY_FORM) =>
@@ -298,6 +325,21 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
       setForm(p => ({ ...p, [k]: e.target.value }))
 
   const busy = create.isPending || update.isPending
+
+  /* Doublon de téléphone : détecté PENDANT la saisie, avant même d'enregistrer.
+     C'est le vrai garde-fou — un prospect créé deux fois (formulaire du site,
+     import, appel entrant) fait rappeler le même client. */
+  const { data: allProspects = [] } = useProspects()
+  const phoneTwins = useMemo(() => {
+    const key = canonicalPhone(form.telephone)
+    if (!key) return []
+    return allProspects.filter(o =>
+      o.id !== prospect?.id && canonicalPhone(o.telephone) === key
+    )
+  }, [allProspects, form.telephone, prospect?.id])
+
+  /* L'accord porte sur UN numéro précis : le modifier l'invalide aussitôt. */
+  const dupAcknowledged = ackedPhone !== null && ackedPhone === canonicalPhone(form.telephone)
 
   /* ── Compute what changed for auto-logging ── */
   const computeLogs = useCallback((pid: string): Array<{ type: LogType; message: string }> => {
@@ -359,6 +401,17 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
 
   const handleSave = () => {
     if (!form.nom.trim()) { toast.error('Le nom est requis'); return }
+    /* Doublon de téléphone : on n'interdit pas (un standard d'entreprise peut
+       servir à deux contacts) mais on exige une 2ᵉ validation consciente.
+       L'accord porte sur CE numéro : le modifier redemande confirmation. */
+    if (phoneTwins.length > 0 && !dupAcknowledged) {
+      setAckedPhone(canonicalPhone(form.telephone))
+      toast.warning(
+        `Numéro déjà utilisé par ${phoneTwins[0].nom}${phoneTwins.length > 1 ? ` et ${phoneTwins.length - 1} autre(s)` : ''}.`,
+        { description: 'Cliquez à nouveau sur Enregistrer pour créer quand même.', duration: 8000 },
+      )
+      return
+    }
     const payload = {
       nom:            form.nom.trim(),
       email:          form.email.trim() || null,
@@ -596,14 +649,40 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
                           className="pl-9"
                         />
                       </div>
-                      <div className="relative">
-                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                        <Input
-                          value={form.telephone}
-                          onChange={set('telephone')}
-                          placeholder="Téléphone"
-                          className="pl-9"
-                        />
+                      <div>
+                        <div className="relative">
+                          <Phone className={`absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none ${
+                            phoneTwins.length ? 'text-red-500' : 'text-muted-foreground'
+                          }`} />
+                          <Input
+                            value={form.telephone}
+                            onChange={set('telephone')}
+                            placeholder="Téléphone"
+                            className={`pl-9 ${phoneTwins.length ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                          />
+                        </div>
+                        {phoneTwins.length > 0 && (
+                          <div className="mt-1.5 rounded-lg border border-red-300 dark:border-red-800/60 bg-red-50 dark:bg-red-500/10 px-2.5 py-2">
+                            <p className="flex items-center gap-1.5 text-[11px] font-bold text-red-600 dark:text-red-400">
+                              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                              Ce numéro est déjà enregistré — ne rappelez pas ce client deux fois.
+                            </p>
+                            <ul className="mt-1 space-y-0.5">
+                              {phoneTwins.slice(0, 4).map(t => (
+                                <li key={t.id} className="text-[11px] text-red-700/90 dark:text-red-300/90 truncate">
+                                  • {t.nom}
+                                  {t.entreprise ? ` · ${t.entreprise}` : ''}
+                                  {' — '}{stageLabel(t.statut)}
+                                </li>
+                              ))}
+                              {phoneTwins.length > 4 && (
+                                <li className="text-[11px] text-red-700/70 dark:text-red-300/70">
+                                  et {phoneTwins.length - 4} autre{phoneTwins.length - 4 > 1 ? 's' : ''}…
+                                </li>
+                              )}
+                            </ul>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -858,7 +937,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
 
 /* ─── ProspectRow (table) ─────────────────────────────────────────── */
 function ProspectRow({
-  p, onEdit, selected, onToggle, lastCall, visited,
+  p, onEdit, selected, onToggle, lastCall, visited, twins,
 }: {
   p: Prospect
   onEdit:   (p: Prospect) => void
@@ -867,6 +946,8 @@ function ProspectRow({
   lastCall?: ProspectLog
   /** Dernière fiche ouverte : surlignée pour retrouver sa place en un coup d'œil. */
   visited?: boolean
+  /** Autres prospects partageant ce numéro — signalés pour ne pas rappeler deux fois. */
+  twins?: Prospect[]
 }) {
   const accent  = stageAccent(p.statut)
   const dot     = stageDot(p.statut)
@@ -927,7 +1008,20 @@ function ProspectRow({
       <td className="px-4 py-3">
         <div className="space-y-0.5">
           {p.email     && <p className="text-xs text-muted-foreground flex items-center gap-1"><Mail  className="w-3 h-3" />{p.email}</p>}
-          {p.telephone && <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{p.telephone}</p>}
+          {p.telephone && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
+              <Phone className="w-3 h-3" />{p.telephone}
+              {!!twins?.length && (
+                <span
+                  title={`Déjà présent sur : ${twins.map(t => t.nom).join(', ')}\nNe rappelez pas ce client deux fois.`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-bold"
+                >
+                  <Copy className="w-2.5 h-2.5" />
+                  Doublon{twins.length > 1 ? ` ×${twins.length + 1}` : ''}
+                </span>
+              )}
+            </p>
+          )}
         </div>
       </td>
       <td className="px-4 py-3">
@@ -986,7 +1080,7 @@ function ProspectRow({
 
 /* ─── KanbanCard ──────────────────────────────────────────────────── */
 function KanbanCard({
-  p, index, onEdit, accent, lastCall, visited,
+  p, index, onEdit, accent, lastCall, visited, twins,
 }: {
   p: Prospect
   index: number
@@ -995,6 +1089,8 @@ function KanbanCard({
   lastCall?: ProspectLog
   /** Dernière fiche ouverte : carte surlignée pour retrouver sa place. */
   visited?: boolean
+  /** Autres prospects partageant ce numéro. */
+  twins?: Prospect[]
 }) {
   const isToday = isRelanceToday(p)
   return (
@@ -1049,6 +1145,14 @@ function KanbanCard({
               <p className="text-xs text-muted-foreground flex items-center gap-1 mb-2">
                 <Building2 className="w-3 h-3 flex-shrink-0" />
                 {p.entreprise}
+              </p>
+            )}
+            {!!twins?.length && (
+              <p
+                title={`Déjà présent sur : ${twins.map(t => t.nom).join(', ')}\nNe rappelez pas ce client deux fois.`}
+                className="inline-flex items-center gap-1 mb-2 px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-bold"
+              >
+                <Copy className="w-2.5 h-2.5" /> Numéro en doublon
               </p>
             )}
             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1119,6 +1223,8 @@ export default function Prospects() {
   const [search,       setSearch]       = useState(nav.initialFilters.search)
   const [filterStatut, setFilterStatut] = useState<string>(nav.initialFilters.filterStatut)
   const [todayOnly,    setTodayOnly]    = useState(nav.initialFilters.todayOnly)
+  /* `?? false` : un instantané enregistré avant l'ajout du filtre n'a pas la clé. */
+  const [dupOnly,      setDupOnly]      = useState(nav.initialFilters.dupOnly ?? false)
   const [dateRange,    setDateRange]    = useState<DateRange>(nav.initialFilters.dateRange)
   const [page,         setPage]         = useState(nav.initialPage)
   const [drawerOpen,   setDrawerOpen]   = useState(false)
@@ -1130,6 +1236,23 @@ export default function Prospects() {
   const todayCount = useMemo(
     () => prospects.filter(isRelanceToday).length,
     [prospects]
+  )
+
+  /* Doublons de téléphone — calculés sur TOUS les prospects, pas sur la liste
+     filtrée : un doublon doit être signalé même si son jumeau est masqué par
+     la période ou le statut, sinon on rappellerait le client une 2ᵉ fois. */
+  const phoneGroups = useMemo(
+    () => groupByPhone(prospects, p => p.telephone),
+    [prospects],
+  )
+  const twinsOf = useCallback((p: Prospect): Prospect[] => {
+    const group = phoneGroups.get(canonicalPhone(p.telephone))
+    return group ? group.filter(o => o.id !== p.id) : []
+  }, [phoneGroups])
+  /* Nombre de prospects impliqués dans un doublon (pas le nombre de groupes). */
+  const duplicateCount = useMemo(
+    () => [...phoneGroups.values()].reduce((n, g) => n + g.length, 0),
+    [phoneGroups],
   )
 
   const dateMatch = useMemo(() => makeDatePredicate(dateRange), [dateRange])
@@ -1156,9 +1279,12 @@ export default function Prospects() {
       /* Une recherche active affiche la liste complète : on ignore les
          filtres de période (« Ce mois ») et « à contacter aujourd'hui ». */
       const matchToday   = !!q || !todayOnly || isRelanceToday(p)
-      return matchSearch && matchStatut && matchToday
+      /* Le filtre doublons reste actif même pendant une recherche : il sert
+         justement à retrouver l'autre fiche du même client. */
+      const matchDup     = !dupOnly || phoneGroups.has(canonicalPhone(p.telephone))
+      return matchSearch && matchStatut && matchToday && matchDup
     })
-  }, [prospects, search, filterStatut, todayOnly])
+  }, [prospects, search, filterStatut, todayOnly, dupOnly, phoneGroups])
 
   const filtered = useMemo(() => (
     baseFiltered
@@ -1194,7 +1320,7 @@ export default function Prospects() {
      On compare une signature plutôt que de « sauter le 1er passage » : sous
      StrictMode l'effet est monté deux fois, et un simple drapeau laisserait le
      2ᵉ passage écraser la page restaurée au retour d'une fiche. */
-  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dateRange })
+  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dupOnly, dateRange })
   const filterSigRef = useRef(filterSig)
   useEffect(() => {
     if (filterSigRef.current === filterSig) return
@@ -1220,7 +1346,7 @@ export default function Prospects() {
      les mêmes filtres, la même page, la même position, et la ligne ouverte
      reste surlignée pour enchaîner sur le prospect suivant. */
   const openEdit    = (p: Prospect) => {
-    nav.remember(p.id, { view, search, filterStatut, todayOnly, dateRange }, page)
+    nav.remember(p.id, { view, search, filterStatut, todayOnly, dupOnly, dateRange }, page)
     navigate(`${base}/prospects/${p.id}`)
   }
   const closeDrawer = () => setDrawerOpen(false)
@@ -1442,6 +1568,27 @@ export default function Prospects() {
             </span>
           )}
         </button>
+
+        {/* Doublons de téléphone — masqué s'il n'y en a pas, MAIS toujours
+            visible tant que le filtre est actif : sinon, résoudre le dernier
+            doublon ferait disparaître le bouton en laissant la liste vide. */}
+        {(duplicateCount > 0 || dupOnly) && (
+          <button
+            onClick={() => setDupOnly(p => !p)}
+            title="N'afficher que les prospects dont le numéro apparaît plusieurs fois"
+            className={`flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium transition-all border ${
+              dupOnly
+                ? 'bg-red-500/20 border-red-500/50 text-red-600 dark:text-red-400'
+                : 'bg-[var(--surface-card)] border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Copy className="w-3.5 h-3.5 text-red-500" />
+            Doublons
+            <span className="w-4 h-4 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center justify-center">
+              {duplicateCount}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Date filter */}
@@ -1534,6 +1681,7 @@ export default function Prospects() {
                         onToggle={toggleSelect}
                         lastCall={lastCallByProspect.get(p.id)}
                         visited={p.id === nav.lastOpenedId}
+                        twins={twinsOf(p)}
                       />
                     ))}
                   </AnimatePresence>
@@ -1655,6 +1803,7 @@ export default function Prospects() {
                             accent={stage.accent}
                             lastCall={lastCallByProspect.get(p.id)}
                             visited={p.id === nav.lastOpenedId}
+                            twins={twinsOf(p)}
                           />
                         ))}
                         {provided.placeholder}

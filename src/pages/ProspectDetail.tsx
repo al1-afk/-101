@@ -6,7 +6,7 @@ import {
   Calendar, Bell, DollarSign, Loader2, AlertCircle, Clock, FileText,
   ChevronDown, ChevronRight, UserPlus, ArrowRightLeft, PhoneCall,
   TrendingUp, Target, Tag, Check, AlertTriangle, MessageCircle, Sparkles, Languages,
-  Image as ImageIcon, X,
+  Image as ImageIcon, X, Copy,
 } from 'lucide-react'
 import { aiApi } from '@/lib/aiApi'
 import { extractImageFilesFromClipboard, compressImageToDataURL } from '@/lib/pasteImage'
@@ -25,6 +25,7 @@ import {
 } from '@/hooks/useProspectLogs'
 import { useDevis, type Devis } from '@/hooks/useDevis'
 import { markListItemOpened, listNavKey } from '@/hooks/useListNavMemory'
+import { canonicalPhone } from '@/lib/phone'
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils'
 import { usePermissions } from '@/hooks/usePermissions'
 import AIQuoteGeneratorDialog from '@/components/devis/AIQuoteGeneratorDialog'
@@ -453,6 +454,13 @@ export default function ProspectDetail() {
     if (id) markListItemOpened(listNavKey('prospects', tenantSlug), id)
   }, [id, tenantSlug])
 
+  /* Autres prospects partageant ce téléphone — averti AVANT d'appeler. */
+  const phoneTwins = useMemo(() => {
+    const key = canonicalPhone(prospect?.telephone)
+    if (!key) return []
+    return prospects.filter(o => o.id !== prospect?.id && canonicalPhone(o.telephone) === key)
+  }, [prospects, prospect?.id, prospect?.telephone])
+
   /* Devis présentés à ce prospect (cf. migration 078 : devis.prospect_id),
      du plus récent au plus ancien. */
   const { data: allDevis = [] } = useDevis()
@@ -674,6 +682,33 @@ export default function ProspectDetail() {
         <span className="text-muted-foreground/40">/</span>
         <span className="text-sm font-medium text-foreground">{prospect.nom}</span>
       </div>
+
+      {/* ── Alerte doublon de téléphone ── */}
+      {phoneTwins.length > 0 && (
+        <div className="rounded-xl border border-red-300 dark:border-red-800/60 bg-red-50 dark:bg-red-500/10 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm font-bold text-red-600 dark:text-red-400">
+            <Copy className="w-4 h-4 flex-shrink-0" />
+            Ce numéro existe déjà sur {phoneTwins.length} autre{phoneTwins.length > 1 ? 's' : ''} fiche{phoneTwins.length > 1 ? 's' : ''}
+          </p>
+          <p className="mt-0.5 text-xs text-red-700/80 dark:text-red-300/80">
+            Vérifiez avant d’appeler — ce client a peut-être déjà été contacté.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {phoneTwins.map(t => (
+              <button
+                key={t.id}
+                onClick={() => navigate(`${base}/prospects/${t.id}`)}
+                title={`Ouvrir la fiche de ${t.nom}`}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/70 dark:bg-red-500/15 border border-red-300 dark:border-red-800/60 text-xs font-semibold text-red-700 dark:text-red-300 hover:bg-white dark:hover:bg-red-500/25 transition-colors"
+              >
+                {t.nom}
+                <span className="font-normal opacity-70">· {stageLabel(t.statut)}</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Hero ── */}
       <div className="relative overflow-hidden rounded-2xl" style={{
