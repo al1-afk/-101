@@ -132,25 +132,33 @@ const DevisTemplateSimple = forwardRef<HTMLDivElement, Props>(({ devis: d, clien
         <table className="text-[10.5px]" style={{ borderCollapse: 'collapse' }}>
           <tbody>
             <tr>
-              <td className="text-right text-[#333] pr-4 py-1">Montant total HT :</td>
-              <td style={{ border: '1px solid #333', padding: '3px 10px', textAlign: 'right', minWidth: '38mm' }}>
+              <td className={`text-right pr-4 py-1 ${hasTVA ? 'text-[#333]' : 'font-bold text-[#0a1a3c]'}`}>Montant total HT :</td>
+              <td style={{
+                border: '1px solid #333',
+                padding: hasTVA ? '3px 10px' : '4px 10px',
+                textAlign: 'right',
+                minWidth: '38mm',
+                ...(hasTVA ? {} : { fontWeight: 'bold', background: '#e7edf7' }),
+              }}>
                 {fmtMoney(d.montant_ht, currency)}
               </td>
             </tr>
             {hasTVA && (
-              <tr>
-                <td className="text-right text-[#333] pr-4 py-1">TVA ({d.tva}%):</td>
-                <td style={{ border: '1px solid #333', padding: '3px 10px', textAlign: 'right' }}>
-                  {fmtMoney(tvaMont, currency)}
-                </td>
-              </tr>
+              <>
+                <tr>
+                  <td className="text-right text-[#333] pr-4 py-1">TVA ({d.tva}%):</td>
+                  <td style={{ border: '1px solid #333', padding: '3px 10px', textAlign: 'right' }}>
+                    {fmtMoney(tvaMont, currency)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="text-right font-bold text-[#0a1a3c] pr-4 py-1">Montant total TTC :</td>
+                  <td style={{ border: '1px solid #333', padding: '4px 10px', textAlign: 'right', fontWeight: 'bold', background: '#e7edf7' }}>
+                    {fmtMoney(d.montant_ttc, currency)}
+                  </td>
+                </tr>
+              </>
             )}
-            <tr>
-              <td className="text-right font-bold text-[#0a1a3c] pr-4 py-1">Montant total TTC :</td>
-              <td style={{ border: '1px solid #333', padding: '4px 10px', textAlign: 'right', fontWeight: 'bold', background: '#e7edf7' }}>
-                {fmtMoney(d.montant_ttc, currency)}
-              </td>
-            </tr>
           </tbody>
         </table>
       </div>

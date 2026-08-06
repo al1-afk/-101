@@ -138,19 +138,21 @@ const DevisTemplateProposal = forwardRef<HTMLDivElement, Props>(({ devis: d, cli
       {/* Totaux */}
       <div className="flex justify-end mb-7" style={{ breakInside: 'avoid' }}>
         <div style={{ minWidth: '72mm' }}>
-          <div className="flex justify-between py-1.5" style={{ borderBottom: '1px solid #e2e8f0' }}>
-            <span className="text-[10.5px]" style={{ color: '#64748b' }}>Sous-total HT</span>
-            <span className="text-[10.5px] font-bold" style={{ color: NAVY }}>{fmtMoney(d.montant_ht, currency)}</span>
-          </div>
           {hasTVA && (
-            <div className="flex justify-between py-1.5" style={{ borderBottom: '1px solid #e2e8f0' }}>
-              <span className="text-[10.5px]" style={{ color: '#64748b' }}>TVA {d.tva} %</span>
-              <span className="text-[10.5px] font-bold" style={{ color: NAVY }}>{fmtMoney(tvaMont, currency)}</span>
-            </div>
+            <>
+              <div className="flex justify-between py-1.5" style={{ borderBottom: '1px solid #e2e8f0' }}>
+                <span className="text-[10.5px]" style={{ color: '#64748b' }}>Sous-total HT</span>
+                <span className="text-[10.5px] font-bold" style={{ color: NAVY }}>{fmtMoney(d.montant_ht, currency)}</span>
+              </div>
+              <div className="flex justify-between py-1.5" style={{ borderBottom: '1px solid #e2e8f0' }}>
+                <span className="text-[10.5px]" style={{ color: '#64748b' }}>TVA {d.tva} %</span>
+                <span className="text-[10.5px] font-bold" style={{ color: NAVY }}>{fmtMoney(tvaMont, currency)}</span>
+              </div>
+            </>
           )}
           <div className="flex justify-between items-center mt-1.5 px-3 py-2.5 rounded" style={{ background: NAVY }}>
-            <span className="text-[12px] font-extrabold text-white tracking-wide">TOTAL TTC</span>
-            <span className="text-[14px] font-extrabold text-white">{fmtMoney(d.montant_ttc, currency)}</span>
+            <span className="text-[12px] font-extrabold text-white tracking-wide">{hasTVA ? 'TOTAL TTC' : 'TOTAL HT'}</span>
+            <span className="text-[14px] font-extrabold text-white">{fmtMoney(hasTVA ? d.montant_ttc : d.montant_ht, currency)}</span>
           </div>
         </div>
       </div>
