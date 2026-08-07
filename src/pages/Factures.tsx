@@ -64,6 +64,12 @@ const STATUT_CONFIG: Record<FactureStatut, { label: string; variant: BadgeVarian
 const fmtCur = (v: number, c: Currency = 'MAD') => (v === 0 ? '—' : formatCurrency(v, c))
 const fmtCurCompact = (v: number, c: Currency = 'MAD') => (v === 0 ? '—' : formatCurrencyCompact(v, c))
 
+/** Plancher du compteur des factures International (INV-YYYY-NNNN).
+    Une facture n° 001 annonce au client qu'il est le premier : la série
+    démarre donc à 1000. Les factures déjà émises gardent leur numéro —
+    le compteur reprend simplement au-dessus du plancher. */
+const INV_SEQ_START = 1000
+
 /** Read currency + intl flag from a Facture's notes JSON (safe for legacy rows). */
 function factureMeta(f: Facture): { isInternational: boolean; currency: Currency } {
   if (!f.notes) return { isInternational: false, currency: 'MAD' }
@@ -598,7 +604,7 @@ function FactureWizard({
 
     /* Numero generator:
        · Maroc        → AAA{n}/MM-YYYY (counter resets each month)
-       · International → INV-YYYY-NNN  (sequential per year) */
+       · International → INV-YYYY-NNNN (sequential per year, démarre à INV_SEQ_START) */
     const refDate = dateFacture ? new Date(dateFacture) : new Date()
     const year    = refDate.getFullYear()
     let newNumero: string
@@ -609,7 +615,9 @@ function FactureWizard({
           const m = x.numero.match(/^INV-\d{4}-(\d+)$/)
           return m ? Math.max(max, parseInt(m[1], 10)) : max
         }, 0)
-      newNumero = `INV-${year}-${String(maxSeq + 1).padStart(3, '0')}`
+      /* Le plancher ne s'applique qu'au PROCHAIN numéro : les anciennes
+         factures (INV-2026-001…) restent intactes, la suite passe à 1000. */
+      newNumero = `INV-${year}-${String(Math.max(maxSeq + 1, INV_SEQ_START)).padStart(4, '0')}`
     } else {
       const month  = String(refDate.getMonth() + 1).padStart(2, '0')
       const suffix = `/${month}-${year}`
@@ -655,7 +663,7 @@ function FactureWizard({
       id:            facture?.id ?? 'preview',
       created_at:    new Date().toISOString(),
       numero:        facture?.numero ?? (isInternational
-        ? `INV-${new Date(dateFacture || Date.now()).getFullYear()}-???`
+        ? `INV-${new Date(dateFacture || Date.now()).getFullYear()}-????`
         : `AAA?/${String(new Date(dateFacture || Date.now()).getMonth() + 1).padStart(2, '0')}-${new Date(dateFacture || Date.now()).getFullYear()}`),
       client_id:     selectedId,
       client_nom:    client?.entreprise ?? client?.nom,
