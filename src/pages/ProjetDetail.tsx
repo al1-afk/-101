@@ -103,6 +103,41 @@ function serializeProjetNotes(text: string, blocks: SopBlock[]): string {
 
 const memberName = (m?: TeamMember) => m ? `${m.prenom ?? ''} ${m.nom ?? ''}`.trim() || (m.email ?? '—') : '—'
 
+/** Convert a dropdown value ('none' | 'admin' | 'stag:<uuid>' | <member_uuid>)
+    into the trio of FK fields. Un seul des trois ids est renseigné à la fois.
+    Source de vérité unique : l'onglet Tâches et l'onglet Équipe l'utilisent
+    tous les deux, un 4ᵉ canal d'assignation ne doit pas la redéfinir. */
+function assigneeFieldsFor(v: string, adminUserId?: string | null): {
+  team_member_id:        string | null
+  assigned_user_id:      string | null
+  assigned_stagiaire_id: string | null
+} {
+  if (v === 'admin')          return { team_member_id: null, assigned_user_id: adminUserId ?? null, assigned_stagiaire_id: null }
+  if (v === 'none')           return { team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: null }
+  if (v.startsWith('stag:'))  return { team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: v.slice(5) }
+  return { team_member_id: v, assigned_user_id: null, assigned_stagiaire_id: null }
+}
+
+/** Clé d'assignation d'un membre projet, au format attendu par `assigneeFieldsFor`.
+    Le préfixe `stag:` est le discriminant : passer l'uuid nu d'un stagiaire
+    l'écrirait dans team_member_id (FK vers team_members) → violation de FK. */
+const assigneeKeyOf = (a: ProjetAssignee) =>
+  a.team_member_id ?? (a.stagiaire_id ? `stag:${a.stagiaire_id}` : 'none')
+
+/** La tâche est-elle déjà portée par cette cible d'assignation ? */
+const taskIsOn = (t: TeamMemberTask, targetKey: string) =>
+  targetKey.startsWith('stag:')
+    ? t.assigned_stagiaire_id === targetKey.slice(5)
+    : !!targetKey && t.team_member_id === targetKey
+
+/** Qui détient la tâche aujourd'hui — null si elle est libre. */
+const taskHolder = (t: TeamMemberTask, members: TeamMember[], stagiaires: Stagiaire[]): string | null => {
+  if (t.team_member_id)        return memberName(members.find(m => m.id === t.team_member_id))
+  if (t.assigned_stagiaire_id) return stagiaires.find(s => s.id === t.assigned_stagiaire_id)?.nom_complet ?? 'un stagiaire'
+  if (t.assigned_user_id)      return '🛡️ Admin'
+  return null
+}
+
 /* ─── Date input helper — ISO string → YYYY-MM-DD (local timezone) ── */
 function toDateInput(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -537,8 +572,13 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
   const removeAssignee = useRemoveProjetAssignee()
   const updateAssignee = useUpdateProjetAssignee()
   const { data: stagiaires = [] } = useStagiaires()
+  const qc = useQueryClient()
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search,     setSearch]     = useState('')
+  /* Assignation en masse : on garde la LIGNE d'assignation (pas un id), elle
+     porte déjà le discriminant membre/stagiaire. */
+  const [bulkFor,  setBulkFor]  = useState<ProjetAssignee | null>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const activeStagiaires = stagiaires.filter(s => s.statut === 'accepte' || s.statut === 'en_cours')
 
@@ -563,6 +603,52 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
     const pct = my.length > 0 ? Math.round((done / my.length) * 100) : 0
     const elapsed = my.reduce((s, t) => s + (t.elapsed_seconds ?? 0), 0)
     return { total: my.length, done, pct, elapsed }
+  }
+
+  /** Nom lisible d'un assigné, membre d'équipe ou stagiaire. */
+  const assigneeLabel = (a: ProjetAssignee) =>
+    a.team_member_id
+      ? memberName(members.find(m => m.id === a.team_member_id))
+      : stagiaires.find(s => s.id === a.stagiaire_id)?.nom_complet ?? 'ce stagiaire'
+
+  /* Assignation en masse — deux écarts délibérés au bulkAssign de l'onglet Tâches :
+
+     1. Par lots séquentiels de 5. Le pool Postgres est plafonné à 20 connexions
+        avec un connectionTimeout de 2 s (server/db/pool.ts) et chaque PATCH
+        monopolise une connexion le temps de sa transaction : 60 requêtes d'un
+        coup en feraient échouer une bonne partie sur timeout.
+
+     2. Appel direct de l'API plutôt que useUpdateTeamMemberTask, pour court-circuiter
+        son onSuccess — il invalide le cache à CHAQUE mutation (60 refetch), et
+        surtout il recrée une occurrence quand la tâche renvoyée est 'done' avec une
+        récurrence (useTeamMemberTasks.ts:108). Réassigner une tâche terminée
+        récurrente dupliquerait donc la tâche. Une seule invalidation à la fin. */
+  const runBulkAssign = async (a: ProjetAssignee, ids: string[]) => {
+    const key = assigneeKeyOf(a)
+    /* Une ligne d'assignation porte toujours un membre OU un stagiaire. Si les
+       deux sont nuls, `assigneeFieldsFor` renverrait le trio à null : on
+       désassignerait en masse au lieu d'assigner. On refuse plutôt. */
+    if (key === 'none') { toast.error('Membre introuvable — assignation annulée'); return }
+    const fields = assigneeFieldsFor(key)
+    const CHUNK  = 5
+    let ok = 0, ko = 0
+    setBulkBusy(true)
+    try {
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const res = await Promise.allSettled(
+          ids.slice(i, i + CHUNK).map(id => teamMemberTasksApi.update(id, fields)),
+        )
+        ok += res.filter(r => r.status === 'fulfilled').length
+        ko += res.filter(r => r.status === 'rejected').length
+      }
+    } finally {
+      /* Préfixe de la clé réelle [KEY, tenantId] — cf. useTeamMemberTasks.ts:40. */
+      await qc.invalidateQueries({ queryKey: ['team_member_tasks'] })
+      setBulkBusy(false)
+    }
+    if (ok > 0) toast.success(`${ok} tâche${ok > 1 ? 's' : ''} assignée${ok > 1 ? 's' : ''} à ${assigneeLabel(a)}`)
+    if (ko > 0) toast.error(`${ko} tâche${ko > 1 ? 's' : ''} en échec`)
+    setBulkFor(null)
   }
 
   return (
@@ -647,6 +733,21 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
                       'absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform',
                       a.share_infos !== false ? 'translate-x-4' : 'translate-x-0.5',
                     )} />
+                  </button>
+                </div>
+
+                {/* Assignation en masse des tâches du projet à ce membre */}
+                <div className="pl-12">
+                  <button
+                    type="button"
+                    onClick={() => setBulkFor(a)}
+                    disabled={tasks.length === 0}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-9 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                    title={tasks.length === 0 ? 'Ce projet n’a aucune tâche' : `Assigner des tâches du projet à ${displayName}`}
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    Assigner des tâches
+                    {tasks.length > 0 && <span className="font-mono opacity-60">({tasks.length})</span>}
                   </button>
                 </div>
 
@@ -736,7 +837,254 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Assignation en masse des tâches à un membre du projet */}
+      <BulkAssignTasksDialog
+        open={!!bulkFor}
+        onClose={() => { if (!bulkBusy) setBulkFor(null) }}
+        targetName={bulkFor ? assigneeLabel(bulkFor) : ''}
+        targetKey={bulkFor ? assigneeKeyOf(bulkFor) : ''}
+        tasks={tasks}
+        members={members}
+        stagiaires={stagiaires}
+        busy={bulkBusy}
+        onConfirm={ids => { if (bulkFor) void runBulkAssign(bulkFor, ids) }}
+      />
     </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BULK ASSIGN DIALOG — donne d'un coup tout ou partie des tâches
+   du projet à un membre. Sélection par tâche, par catégorie, ou tout.
+═══════════════════════════════════════════════════════════════════ */
+function BulkAssignTasksDialog({
+  open, onClose, targetName, targetKey, tasks, members, stagiaires, busy, onConfirm,
+}: {
+  open:       boolean
+  onClose:    () => void
+  targetName: string
+  /** Clé d'assignation de la cible : <member_uuid> ou `stag:<uuid>`. */
+  targetKey:  string
+  tasks:      TeamMemberTask[]
+  members:    TeamMember[]
+  stagiaires: Stagiaire[]
+  busy:       boolean
+  onConfirm:  (ids: string[]) => void
+}) {
+  /* On ne stocke que des IDS : `tasks` est re-dérivée du cache à chaque refetch
+     (polling 10 s), les objets changent d'identité mais pas les ids. */
+  const [sel,      setSel]      = useState<Set<string>>(() => new Set())
+  const [showDone, setShowDone] = useState(false)
+
+  /* Remise à zéro à l'ouverture, à la fermeture et au changement de cible.
+     Ajustement d'état en phase de rendu plutôt qu'un effet : pas de rendu
+     intermédiaire affichant la sélection du membre précédent. */
+  const openKey = open ? targetKey : null
+  const [prevKey, setPrevKey] = useState<string | null>(openKey)
+  if (prevKey !== openKey) {
+    setPrevKey(openKey)
+    setSel(new Set())
+    setShowDone(false)
+  }
+
+  const isOnTarget = (t: TeamMemberTask) => taskIsOn(t, targetKey)
+
+  const visible = useMemo(
+    () => tasks.filter(t => showDone || (t.status !== 'done' && t.status !== 'cancelled')),
+    [tasks, showDone],
+  )
+  const doneHidden = useMemo(
+    () => tasks.filter(t => t.status === 'done' || t.status === 'cancelled').length,
+    [tasks],
+  )
+  /** Sélectionnables = tout ce qui n'est pas déjà sur la cible. */
+  const selectable = useMemo(() => visible.filter(t => !taskIsOn(t, targetKey)), [visible, targetKey])
+
+  /* Groupes par catégorie, dans l'ordre de l'onglet Tâches (ancienneté du
+     premier élément), les demandes client isolées à la fin. */
+  const groups = useMemo(() => {
+    const ts = (s: string | null) => s ? new Date(s).getTime() : Infinity
+    const m = new Map<string, TeamMemberTask[]>()
+    for (const t of visible) {
+      const k = t.is_request ? '🔔 Demandes client' : (t.category || '— Sans catégorie —')
+      const arr = m.get(k) ?? []; arr.push(t); m.set(k, arr)
+    }
+    for (const [, arr] of m) arr.sort((a, b) => ts(a.created_at) - ts(b.created_at))
+    return Array.from(m.entries()).sort(([ka, a], [kb, b]) => {
+      if (ka === '🔔 Demandes client') return 1
+      if (kb === '🔔 Demandes client') return -1
+      return Math.min(...a.map(t => ts(t.created_at))) - Math.min(...b.map(t => ts(t.created_at)))
+    })
+  }, [visible])
+
+  const toggleTask = (id: string) =>
+    setSel(p => {
+      const n = new Set(p)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+
+  const toggleGroup = (items: TeamMemberTask[]) => {
+    const ids = items.filter(t => !isOnTarget(t)).map(t => t.id)
+    const all = ids.length > 0 && ids.every(id => sel.has(id))
+    setSel(p => {
+      const n = new Set(p)
+      ids.forEach(id => { if (all) n.delete(id); else n.add(id) })
+      return n
+    })
+  }
+
+  /* Sélection EFFECTIVE : on repart toujours de ce qui est affiché. Masquer les
+     tâches terminées, ou une tâche qui change de main via le polling 10 s, ne
+     doit jamais laisser dans le lot une ligne que l'utilisateur ne voit plus. */
+  const selectedIds = useMemo(
+    () => visible.filter(t => sel.has(t.id) && !taskIsOn(t, targetKey)).map(t => t.id),
+    [visible, sel, targetKey],
+  )
+
+  /* Combien de ces tâches appartiennent déjà à quelqu'un d'autre : c'est
+     l'avertissement qui évite de retirer son travail à un collègue. */
+  const stealing = useMemo(
+    () => visible.filter(t =>
+      selectedIds.includes(t.id) && taskHolder(t, members, stagiaires) !== null,
+    ).length,
+    [visible, selectedIds, members, stagiaires],
+  )
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-lg w-[95vw]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckSquare className="w-4 h-4 text-blue-500" />
+            <span className="truncate">Assigner des tâches à {targetName}</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {selectable.length === 0 ? (
+          <div className="empty-state py-10">
+            <CheckSquare className="empty-state-icon" />
+            <p className="empty-state-title">Rien à assigner</p>
+            <p className="empty-state-desc">
+              {visible.length === 0
+                ? 'Aucune tâche en cours sur ce projet'
+                : `Toutes les tâches affichées sont déjà assignées à ${targetName}`}
+            </p>
+            {doneHidden > 0 && !showDone && (
+              <Button size="sm" variant="secondary" className="mt-3" onClick={() => setShowDone(true)}>
+                Afficher les {doneHidden} terminée{doneHidden > 1 ? 's' : ''}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Barre d'outils */}
+            <div className="flex items-center flex-wrap gap-2 pb-2 border-b border-border">
+              <Button size="sm" variant="secondary" className="h-8"
+                onClick={() => setSel(new Set(selectable.map(t => t.id)))} disabled={busy}>
+                Tout sélectionner
+              </Button>
+              <Button size="sm" variant="secondary" className="h-8"
+                onClick={() => setSel(new Set())} disabled={busy || selectedIds.length === 0}>
+                Tout décocher
+              </Button>
+              {doneHidden > 0 && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer min-h-9 px-1">
+                  <input type="checkbox" checked={showDone} disabled={busy}
+                    onChange={e => setShowDone(e.target.checked)}
+                    className="w-4 h-4 accent-blue-600" />
+                  Terminées ({doneHidden})
+                </label>
+              )}
+              <span className="ml-auto text-[11px] font-mono text-muted-foreground">
+                {selectedIds.length}/{selectable.length}
+              </span>
+            </div>
+
+            {/* Liste groupée */}
+            <div className="max-h-[48dvh] overflow-y-auto space-y-3 pr-1">
+              {groups.map(([cat, items]) => {
+                const ids  = items.filter(t => !isOnTarget(t)).map(t => t.id)
+                const nSel = ids.filter(id => sel.has(id)).length
+                return (
+                  <div key={cat} className="space-y-1">
+                    <label className="flex items-center gap-2 py-1 cursor-pointer sticky top-0 bg-background z-10">
+                      <input type="checkbox"
+                        checked={ids.length > 0 && nSel === ids.length}
+                        ref={el => { if (el) el.indeterminate = nSel > 0 && nSel < ids.length }}
+                        disabled={busy || ids.length === 0}
+                        onChange={() => toggleGroup(items)}
+                        className="w-4 h-4 accent-blue-600" />
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">{cat}</span>
+                      <span className="text-[11px] text-muted-foreground">{nSel}/{items.length}</span>
+                    </label>
+
+                    {items.map(t => {
+                      const onTarget = isOnTarget(t)
+                      const holder   = onTarget ? null : taskHolder(t, members, stagiaires)
+                      const checked  = sel.has(t.id)
+                      return (
+                        <label key={t.id}
+                          className={cn(
+                            'flex items-start gap-3 p-2.5 min-h-11 rounded-lg border transition-colors',
+                            onTarget
+                              ? 'border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/40 dark:bg-emerald-950/10 cursor-default'
+                              : checked
+                                ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20 cursor-pointer'
+                                : 'border-border bg-background hover:border-blue-300 cursor-pointer',
+                          )}>
+                          <input type="checkbox"
+                            checked={checked} disabled={busy || onTarget}
+                            onChange={() => toggleTask(t.id)}
+                            className="mt-0.5 w-4 h-4 accent-blue-600 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] text-foreground break-words">{t.title}</p>
+                            <div className="flex items-center flex-wrap gap-1.5 mt-1">
+                              <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', TASK_STATUS_CFG[t.status].cls)}>
+                                {TASK_STATUS_CFG[t.status].label}
+                              </span>
+                              {onTarget && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                                  ✓ déjà assignée
+                                </span>
+                              )}
+                              {holder && (
+                                <span
+                                  title={`Actuellement à ${holder} — l'assigner à ${targetName} la lui retire`}
+                                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                                  ⚠ {holder}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-2 pt-3 border-t border-border">
+              <p className="text-[11px] text-muted-foreground min-w-0">
+                {stealing > 0
+                  ? <span className="text-amber-600 dark:text-amber-400 font-medium">⚠ {stealing} tâche{stealing > 1 ? 's' : ''} sera retirée à quelqu'un d'autre</span>
+                  : `${selectedIds.length} sélectionnée${selectedIds.length > 1 ? 's' : ''}`}
+              </p>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button size="sm" variant="secondary" onClick={onClose} disabled={busy}>Annuler</Button>
+                <Button size="sm" disabled={selectedIds.length === 0 || busy} onClick={() => onConfirm(selectedIds)}>
+                  {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Assigner {selectedIds.length} tâche{selectedIds.length > 1 ? 's' : ''}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -928,18 +1276,7 @@ function TasksTab({
     })
   }, [regular, auth.userId])
 
-  /** Convert a dropdown value ('none' | 'admin' | 'stag:<uuid>' | <member_uuid>)
-      into the trio of FK fields. Un seul des trois ids est renseigné à la fois. */
-  const assigneeFields = (v: string): {
-    team_member_id:        string | null
-    assigned_user_id:      string | null
-    assigned_stagiaire_id: string | null
-  } => {
-    if (v === 'admin')          return { team_member_id: null, assigned_user_id: auth.userId ?? null, assigned_stagiaire_id: null }
-    if (v === 'none')           return { team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: null }
-    if (v.startsWith('stag:'))  return { team_member_id: null, assigned_user_id: null, assigned_stagiaire_id: v.slice(5) }
-    return { team_member_id: v, assigned_user_id: null, assigned_stagiaire_id: null }
-  }
+  const assigneeFields = (v: string) => assigneeFieldsFor(v, auth.userId)
 
   const submitTask = (e: React.FormEvent) => {
     e.preventDefault()
