@@ -5,6 +5,10 @@ import { toast } from 'sonner'
 
 export type ProjetAssigneeRole = 'lead' | 'member'
 
+/** Périmètre des tâches visibles par la personne sur le projet.
+    'all' = toutes les tâches du projet, 'assigned' = uniquement les siennes. */
+export type ProjetTaskAccess = 'all' | 'assigned'
+
 export interface ProjetAssignee {
   id:              string
   tenant_id:       string
@@ -18,6 +22,11 @@ export interface ProjetAssignee {
   /** Si false : le membre n'a PAS accès aux Infos & Accès du projet
       (contact client, notes, identifiants, liens utiles). Default true. */
   share_infos:     boolean
+  /** 'all' : la personne consulte toutes les tâches du projet (les autres
+      en lecture seule). 'assigned' : uniquement celles qui lui sont
+      attribuées — les autres ne quittent jamais le serveur. Default
+      'assigned' (migration 085, rétrocompatibilité). */
+  task_access:     ProjetTaskAccess
   assigned_at:     string
   created_at:      string
   updated_at:      string
@@ -46,10 +55,10 @@ export function useAddProjetAssignee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data:
-      | { projet_id: string; team_member_id: string; stagiaire_id?: never; role?: ProjetAssigneeRole; notes?: string }
-      | { projet_id: string; stagiaire_id:   string; team_member_id?: never; role?: ProjetAssigneeRole; notes?: string }
+      | { projet_id: string; team_member_id: string; stagiaire_id?: never; role?: ProjetAssigneeRole; notes?: string; task_access?: ProjetTaskAccess; share_infos?: boolean }
+      | { projet_id: string; stagiaire_id:   string; team_member_id?: never; role?: ProjetAssigneeRole; notes?: string; task_access?: ProjetTaskAccess; share_infos?: boolean }
     ) =>
-      projetAssigneesApi.create({ role: 'member', ...data }) as Promise<ProjetAssignee>,
+      projetAssigneesApi.create({ role: 'member', task_access: 'assigned', ...data }) as Promise<ProjetAssignee>,
     onSuccess: async (created: ProjetAssignee) => {
       qc.setQueryData<ProjetAssignee[]>(tk(), (prev) => prev ? [created, ...prev] : [created])
       await qc.invalidateQueries({ queryKey: [KEY] })

@@ -403,7 +403,14 @@ router.post('/sops/activity', async (req: Request, res: Response) => {
 })
 
 /* ── GET /api/my-space/projets — projects this member is assigned to,
-   OR has at least one task on (direct or via linked stagiaire). ── */
+   OR has at least one task on (direct or via linked stagiaire).
+
+   L'assignation compte sous ses DEUX formes : ligne projet_assignees
+   portant team_member_id, ou portant stagiaire_id d'un stagiaire
+   rattaché à ce membre (migration 063 : les deux ids sont exclusifs sur
+   une même ligne). Ne tester que team_member_id masquait les projets où
+   la personne figure via sa fiche stagiaire — d'où des projets manquants
+   dans « Mes projets ». ── */
 router.get('/projets', async (req: Request, res: Response) => {
   const m = await resolveMember(req)
   if (!m) return res.status(403).json({ error: 'Compte inactif' })
@@ -414,8 +421,22 @@ router.get('/projets', async (req: Request, res: Response) => {
               p.date_debut, p.date_fin_prevue, p.date_fin_reelle,
               p.budget, p.progression,
               p.client_id, c.nom AS client_nom, c.entreprise AS client_entreprise,
-              (SELECT role FROM public.projet_assignees
-                WHERE projet_id = p.id AND team_member_id = $1 LIMIT 1) AS my_role,
+              /* Même règle d'élection que GET /projets/:id : la ligne membre
+                 prime sur la fiche stagiaire, et rôle et périmètre viennent
+                 de LA MÊME ligne — deux sous-requêtes triées différemment
+                 pourraient sinon décrire deux assignations distinctes. */
+              (SELECT pa.role FROM public.projet_assignees pa
+                WHERE pa.projet_id = p.id
+                  AND (pa.team_member_id = $1
+                       OR pa.stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))
+                ORDER BY (pa.team_member_id IS NOT NULL) DESC, pa.created_at ASC
+                LIMIT 1) AS my_role,
+              COALESCE((SELECT pa.task_access FROM public.projet_assignees pa
+                WHERE pa.projet_id = p.id
+                  AND (pa.team_member_id = $1
+                       OR pa.stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))
+                ORDER BY (pa.team_member_id IS NOT NULL) DESC, pa.created_at ASC
+                LIMIT 1), 'assigned') AS task_access,
               (SELECT COUNT(*)::int FROM public.team_member_tasks t
                 WHERE t.project_id = p.id
                   AND (t.team_member_id = $1
@@ -423,18 +444,24 @@ router.get('/projets', async (req: Request, res: Response) => {
               (SELECT COUNT(*)::int FROM public.team_member_tasks t
                 WHERE t.project_id = p.id AND t.status = 'done'
                   AND (t.team_member_id = $1
-                       OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))) AS my_tasks_done
+                       OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))) AS my_tasks_done,
+              (SELECT COUNT(*)::int FROM public.team_member_tasks t
+                WHERE t.project_id = p.id) AS project_tasks_count,
+              (SELECT COUNT(*)::int FROM public.team_member_tasks t
+                WHERE t.project_id = p.id AND t.status = 'done') AS project_tasks_done
          FROM public.projets p
          LEFT JOIN public.clients c ON c.id = p.client_id
         WHERE EXISTS (
                 SELECT 1 FROM public.projet_assignees pa
-                 WHERE pa.projet_id = p.id AND pa.team_member_id = $1)
+                 WHERE pa.projet_id = p.id
+                   AND (pa.team_member_id = $1
+                        OR pa.stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
            OR EXISTS (
                 SELECT 1 FROM public.team_member_tasks t
                  WHERE t.project_id = p.id
                    AND (t.team_member_id = $1
                         OR t.assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
-        ORDER BY p.updated_at DESC`,
+        ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC`,
       [m.id],
     )
     res.json(rows)
@@ -452,12 +479,26 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
 
   try {
-    /* Check assignment first + récupère share_infos.
+    /* Check assignment first + récupère share_infos et task_access.
+       L'assignation vaut sous ses deux formes (membre ou stagiaire lié).
        Fallback : accès via tâche (direct ou stagiaire lié) en mode restreint. */
-    let assigned = await tenantQueryOne<{ role: string; share_infos: boolean }>(
+    let assigned = await tenantQueryOne<{ role: string; share_infos: boolean; task_access: string }>(
       m.tenantId,
-      `SELECT role, COALESCE(share_infos, TRUE) AS share_infos FROM public.projet_assignees
-        WHERE team_member_id = $1 AND projet_id = $2 LIMIT 1`,
+      `SELECT pa.role,
+              COALESCE(pa.share_infos, TRUE)      AS share_infos,
+              COALESCE(pa.task_access, 'assigned') AS task_access
+         FROM public.projet_assignees pa
+        WHERE pa.projet_id = $2
+          AND (pa.team_member_id = $1
+               OR pa.stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1))
+        /* UNE ligne gouverne la personne, et les trois axes en viennent
+           ensemble. Trier par permissivité les mélangerait : un share_infos
+           coupé sur la ligne membre serait rétabli par la ligne stagiaire.
+           La ligne membre prime — c'était la seule lue avant ce changement,
+           donc rien ne bouge pour les assignations existantes ; la fiche
+           stagiaire ne sert que si la personne n'a pas de ligne membre. */
+        ORDER BY (pa.team_member_id IS NOT NULL) DESC, pa.created_at ASC
+        LIMIT 1`,
       [m.id, id],
     )
     if (!assigned) {
@@ -471,9 +512,12 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
         [m.id, id],
       )
       if (!hasTask) return res.status(403).json({ error: 'Tu n\'es pas assigné à ce projet' })
-      assigned = { role: 'member', share_infos: false }
+      /* Accès dérivé d'une tâche, sans ligne d'assignation : mode le plus
+         restreint des deux axes — ni infos sensibles, ni tâches des autres. */
+      assigned = { role: 'member', share_infos: false, task_access: 'assigned' }
     }
     const shareInfos = assigned.share_infos !== false
+    const seesAllTasks = assigned.task_access === 'all'
 
     let projet: any
     if (shareInfos) {
@@ -504,21 +548,59 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
     }
     if (!projet) return res.status(404).json({ error: 'Projet introuvable' })
 
-    /* Also pull the member's tasks on this project (direct or via stagiaire link) */
-    const myTasks = await tenantQuery(
-      m.tenantId,
-      `SELECT id, title, status, priority, due_date, category, elapsed_seconds, is_request
-         FROM public.team_member_tasks
-        WHERE project_id = $1
-          AND (team_member_id = $2
-               OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $2))
-        ORDER BY (status = 'done'), due_date NULLS LAST, created_at ASC`,
-      [id, m.id],
-    )
+    /* Tâches du projet, filtrées par task_access.
 
-    /* Coéquipiers : jamais exposés à l'espace membre.
-       Un membre ne doit pas savoir qui d'autre est sur le projet. */
-    res.json({ ...projet, my_role: (assigned as any).role, share_infos: shareInfos, my_tasks: myTasks, teammates: [] })
+       'assigned' : seules les siennes quittent le serveur. Le filtre n'est
+       pas cosmétique — renvoyer la liste complète en la masquant côté React
+       la laisserait lisible dans la réponse réseau.
+       'all' : tout le projet, avec is_mine pour distinguer ce sur quoi la
+       personne peut agir. L'écriture reste verrouillée par le PATCH
+       /api/my-space/tasks/:id, qui exige team_member_id (ou stagiaire lié). */
+    const taskCols = `t.id, t.title, t.status, t.priority, t.due_date, t.category,
+                      t.elapsed_seconds, t.is_request`
+    const isMineExpr = `((t.team_member_id IS NOT NULL AND t.team_member_id = $2)
+                         OR EXISTS (SELECT 1 FROM public.stagiaires s
+                                     WHERE s.id = t.assigned_stagiaire_id AND s.member_id = $2))`
+    const myTasks = seesAllTasks
+      ? await tenantQuery(
+          m.tenantId,
+          `SELECT ${taskCols},
+                  ${isMineExpr} AS is_mine,
+                  COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ', tm.prenom, tm.nom)), ''),
+                    st.nom_complet,
+                    CASE WHEN t.assigned_user_id IS NOT NULL THEN 'Admin' END
+                  ) AS assignee_name
+             FROM public.team_member_tasks t
+             LEFT JOIN public.team_members tm ON tm.id = t.team_member_id
+             LEFT JOIN public.stagiaires   st ON st.id = t.assigned_stagiaire_id
+            WHERE t.project_id = $1
+            ORDER BY ${isMineExpr} DESC, (t.status = 'done'), t.due_date NULLS LAST, t.created_at ASC`,
+          [id, m.id],
+        )
+      : await tenantQuery(
+          m.tenantId,
+          `SELECT ${taskCols}, TRUE AS is_mine, NULL::text AS assignee_name
+             FROM public.team_member_tasks t
+            WHERE t.project_id = $1
+              AND ${isMineExpr}
+            ORDER BY (t.status = 'done'), t.due_date NULLS LAST, t.created_at ASC`,
+          [id, m.id],
+        )
+
+    /* `teammates` reste vide : la composition de l'équipe n'est jamais
+       exposée en bloc à l'espace membre. En mode 'all', assignee_name
+       nomme malgré tout le porteur de chaque tâche — c'est indissociable
+       de « consulter toutes les tâches et suivre leur avancement », et
+       c'est un accès que l'admin accorde personne par personne. */
+    res.json({
+      ...projet,
+      my_role:     (assigned as any).role,
+      share_infos: shareInfos,
+      task_access: seesAllTasks ? 'all' : 'assigned',
+      my_tasks:    myTasks,
+      teammates:   [],
+    })
   } catch (err: any) {
     logger.error('[my-space:projet-detail]', err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
@@ -538,7 +620,9 @@ router.get('/projets/:id/messages', async (req: Request, res: Response) => {
       m.tenantId,
       `SELECT 1
          WHERE EXISTS (SELECT 1 FROM public.projet_assignees
-                        WHERE team_member_id = $1 AND projet_id = $2)
+                        WHERE projet_id = $2
+                          AND (team_member_id = $1
+                               OR stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
             OR EXISTS (SELECT 1 FROM public.team_member_tasks
                         WHERE project_id = $2
                           AND (team_member_id = $1
@@ -576,7 +660,9 @@ router.post('/projets/:id/messages', async (req: Request, res: Response) => {
       m.tenantId,
       `SELECT 1
          WHERE EXISTS (SELECT 1 FROM public.projet_assignees
-                        WHERE team_member_id = $1 AND projet_id = $2)
+                        WHERE projet_id = $2
+                          AND (team_member_id = $1
+                               OR stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
             OR EXISTS (SELECT 1 FROM public.team_member_tasks
                         WHERE project_id = $2
                           AND (team_member_id = $1

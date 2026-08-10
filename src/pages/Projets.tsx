@@ -18,11 +18,15 @@ import {
 } from '@/hooks/useProjets'
 import { useClients, useCreateClient } from '@/hooks/useClients'
 import { PROJET_TEMPLATES, type ProjetTemplate } from '@/lib/projetTemplates'
-import { teamMemberTasksApi } from '@/lib/api'
+import { teamMemberTasksApi, projetAssigneesApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useTeamMemberTasks } from '@/hooks/useTeamMemberTasks'
 import { useProjetAssignees } from '@/hooks/useProjetAssignees'
+import ProjetAssigneesField from '@/components/projet/ProjetAssigneesField'
+import {
+  assigneeToKey, keyToColumn, type AssigneeKey, type AssigneePick,
+} from '@/lib/projetAssigneeKeys'
 import { useTeam } from '@/hooks/useTeam'
 import { useCustomTemplates, rowToTemplate } from '@/hooks/useProjetTemplates'
 import TemplateEditorDialog from '@/components/projet/TemplateEditorDialog'
@@ -373,6 +377,7 @@ export default function Projets() {
   const { data: projets = [], isLoading } = useProjets()
   const { data: clients = [] }            = useClients()
   const { data: allTasks = [] }           = useTeamMemberTasks()
+  const { data: allAssignees = [], isSuccess: assigneesLoaded } = useProjetAssignees()
   const create = useCreateProjet()
   const update = useUpdateProjet()
   const remove = useDeleteProjet()
@@ -389,6 +394,17 @@ export default function Projets() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState<Projet | null>(null)
   const [form, setForm]         = useState<Partial<Projet>>(EMPTY)
+  /* Personnes assignées : rien n'est écrit avant « Enregistrer ». À la
+     création l'id du projet n'existe pas encore, et en édition appliquer
+     chaque case cochée aussitôt contredirait le bouton du dialog.
+
+     La sélection est DÉRIVÉE de la base tant que l'admin n'a rien touché
+     (null), puis figée par sa première action. Deux pièges évités d'un
+     coup : un dialog ouvert avant la fin du chargement de projet_assignees
+     n'affiche pas une équipe vide qu'un enregistrement effacerait, et le
+     refetch au focus de la fenêtre (staleTime 5 s) n'écrase pas les cases
+     que l'admin vient de cocher. */
+  const [assigneePicksEdited, setAssigneePicksEdited] = useState<AssigneePick[] | null>(null)
   const [selectedTemplates, setSelectedTemplates] = useState<string[]>([])
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false)
   const { data: customs = [] } = useCustomTemplates()
@@ -436,8 +452,96 @@ export default function Projets() {
     couts:    projets.reduce((s, p) => s + (p.cout_reel ?? 0), 0),
   }), [projets])
 
-  const openNew  = () => { setEditing(null); setForm(EMPTY); setSelectedTemplates([]); setShowForm(true) }
-  const openEdit = (p: Projet) => { setEditing(p); setSelectedTemplates([]); setShowForm(true) }
+  /* Assignations du projet en cours d'édition, telles qu'en base. */
+  const editingAssignees = useMemo(
+    () => (editing ? allAssignees.filter(a => a.projet_id === editing.id) : []),
+    [allAssignees, editing],
+  )
+  const editingLeadKey = useMemo<AssigneeKey | null>(() => {
+    const lead = editingAssignees.find(a => a.role === 'lead')
+    return lead ? assigneeToKey(lead) : null
+  }, [editingAssignees])
+
+  /* Équipe telle qu'en base, traduite en sélections cochables. */
+  const assigneePicksFromDb = useMemo<AssigneePick[]>(() => (
+    editingAssignees
+      .map(a => ({
+        key: assigneeToKey(a),
+        task_access: a.task_access === 'all' ? 'all' as const : 'assigned' as const,
+      }))
+      .filter((x): x is AssigneePick => x.key !== null)
+  ), [editingAssignees])
+
+  /* Ce que le formulaire affiche — et ce que l'enregistrement appliquera. */
+  const assigneePicks = assigneePicksEdited ?? assigneePicksFromDb
+
+  /* En édition, tant que projet_assignees n'a pas répondu, l'équipe actuelle
+     est inconnue : cocher quelqu'un à cet instant partirait d'une liste vide
+     et l'enregistrement retirerait tous les assignés déjà en base. On rend
+     donc la section inerte le temps du chargement. À la création il n'y a
+     rien à connaître — le projet n'existe pas encore. */
+  const teamPickerReady = !editing || assigneesLoaded
+
+  const openNew  = () => {
+    setEditing(null); setForm(EMPTY); setSelectedTemplates([]); setAssigneePicksEdited(null); setShowForm(true)
+  }
+  const openEdit = (p: Projet) => {
+    setEditing(p); setSelectedTemplates([]); setAssigneePicksEdited(null); setShowForm(true)
+  }
+
+  /** Réconcilie projet_assignees avec les cases du formulaire.
+      Appels directs à l'API plutôt que les hooks de mutation : ceux-ci
+      affichent un toast et invalident le cache à CHAQUE ligne — cinq
+      personnes, cinq toasts et cinq refetch. Une invalidation à la fin. */
+  const syncAssignees = async (projetId: string, picks: AssigneePick[]) => {
+    const existing = allAssignees.filter(a => a.projet_id === projetId)
+    const wanted   = new Map(picks.map(p => [p.key, p]))
+    let added = 0, removed = 0, updated = 0, failed = 0
+
+    for (const a of existing) {
+      const k = assigneeToKey(a)
+      if (!k) continue
+      const want = wanted.get(k)
+      try {
+        /* Second garde-fou après teamPickerReady : on ne retire jamais une
+           ligne sur la foi d'une liste qu'on n'a pas réussi à charger. */
+        if (!want) {
+          if (!assigneesLoaded) continue
+          await projetAssigneesApi.remove(a.id); removed++
+        }
+        else if ((a.task_access ?? 'assigned') !== want.task_access) {
+          await projetAssigneesApi.update(a.id, { task_access: want.task_access }); updated++
+        }
+      } catch (e) { failed++; console.error('[syncAssignees]', e) }
+    }
+
+    const known = new Set(existing.map(assigneeToKey).filter(Boolean) as AssigneeKey[])
+    /* Le lead reste celui déjà désigné s'il est conservé ; sinon la première
+       personne ajoutée le devient — même règle que le picker de l'onglet Équipe. */
+    let leadTaken = existing.some(a => a.role === 'lead' && wanted.has(assigneeToKey(a) as AssigneeKey))
+    for (const p of picks) {
+      if (known.has(p.key)) continue
+      try {
+        await projetAssigneesApi.create({
+          projet_id:   projetId,
+          role:        leadTaken ? 'member' : 'lead',
+          task_access: p.task_access,
+          ...keyToColumn(p.key),
+        })
+        leadTaken = true
+        added++
+      } catch (e) { failed++; console.error('[syncAssignees]', e) }
+    }
+
+    if (added || removed || updated) await qc.invalidateQueries({ queryKey: ['projet_assignees'] })
+    const parts = [
+      added   && `${added} assignée${added > 1 ? 's' : ''}`,
+      updated && `${updated} accès modifié${updated > 1 ? 's' : ''}`,
+      removed && `${removed} retirée${removed > 1 ? 's' : ''}`,
+    ].filter(Boolean)
+    if (parts.length) toast.success(`Équipe : ${parts.join(' · ')}`)
+    if (failed) toast.error(`${failed} assignation${failed > 1 ? 's' : ''} en échec`)
+  }
 
   /** Bulk-create tasks from selected templates after project is created. */
   const seedTasksFromTemplates = async (projetId: string, templateKeys: string[]) => {
@@ -480,14 +584,23 @@ export default function Projets() {
       progression: Math.max(0, Math.min(100, Number(form.progression ?? 0))),
     }
     if (editing) {
-      update.mutate({ id: editing.id, ...payload } as any, { onSuccess: () => { setShowForm(false); setEditing(null) } })
+      const projetId = editing.id
+      update.mutate({ id: projetId, ...payload } as any, {
+        onSuccess: async () => {
+          await syncAssignees(projetId, assigneePicks)
+          setShowForm(false); setEditing(null); setAssigneePicksEdited(null)
+        },
+      })
     } else {
       create.mutate(payload, {
         onSuccess: async (created: Projet) => {
+          if (created?.id && assigneePicks.length > 0) {
+            await syncAssignees(created.id, assigneePicks)
+          }
           if (selectedTemplates.length > 0 && created?.id) {
             await seedTasksFromTemplates(created.id, selectedTemplates)
           }
-          setShowForm(false); setForm(EMPTY); setSelectedTemplates([])
+          setShowForm(false); setForm(EMPTY); setSelectedTemplates([]); setAssigneePicksEdited(null)
         },
       })
     }
@@ -610,7 +723,7 @@ export default function Projets() {
       )}
 
       {/* Form dialog */}
-      <Dialog open={showForm} onOpenChange={(o) => { setShowForm(o); if (!o) setEditing(null) }}>
+      <Dialog open={showForm} onOpenChange={(o) => { setShowForm(o); if (!o) { setEditing(null); setAssigneePicksEdited(null) } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader className="relative">
             <DialogTitle>{editing ? 'Modifier le projet' : 'Nouveau projet'}</DialogTitle>
@@ -761,6 +874,16 @@ export default function Projets() {
                   placeholder="Suivi, blocages, décisions..."
                 />
               </div>
+
+              {/* Personnes assignées au projet — création ET édition.
+                  Les lignes projet_assignees sont écrites à l'enregistrement,
+                  pas à la case cochée (cf. syncAssignees). */}
+              <ProjetAssigneesField
+                value={assigneePicks}
+                onChange={setAssigneePicksEdited}
+                leadKey={editingLeadKey}
+                loading={!teamPickerReady}
+              />
 
               {/* Templates de tâches (création uniquement) */}
               {!editing && (

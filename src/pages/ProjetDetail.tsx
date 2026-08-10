@@ -8,6 +8,7 @@ import {
   Crown, User as UserIcon, LayoutGrid, List as ListIcon,
   Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
   MessageSquare, Settings, Globe, Server, CalendarCheck, UserPlus,
+  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -31,6 +32,7 @@ import {
   useAssigneesOf, useAddProjetAssignee, useRemoveProjetAssignee, useUpdateProjetAssignee,
   type ProjetAssignee, type ProjetAssigneeRole,
 } from '@/hooks/useProjetAssignees'
+import TaskAccessToggle from '@/components/projet/TaskAccessToggle'
 import {
   useProjectTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask, useDeleteTeamMemberTask,
   type TaskStatus, type TaskPriority, type TeamMemberTask,
@@ -734,6 +736,25 @@ function TeamTab({ projet, assignees, members, tasks }: { projet: Projet; assign
                       a.share_infos !== false ? 'translate-x-4' : 'translate-x-0.5',
                     )} />
                   </button>
+                </div>
+
+                {/* Périmètre des tâches visibles côté espace membre (migration 085).
+                    Le filtre est appliqué par l'API : en mode « Par tâche », les
+                    tâches des autres ne sont pas envoyées, pas seulement masquées. */}
+                <div className="flex items-center justify-between gap-2 flex-wrap pl-12 pr-1 py-1.5 rounded-lg bg-background border border-border/60">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Eye className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    <span className="text-[11px] font-medium text-foreground">Tâches visibles</span>
+                    <span className="text-[10px] text-muted-foreground truncate">
+                      {a.task_access === 'all'
+                        ? '(tout le projet, avancement compris)'
+                        : '(uniquement les siennes)'}
+                    </span>
+                  </div>
+                  <TaskAccessToggle
+                    value={a.task_access === 'all' ? 'all' : 'assigned'}
+                    onChange={v => updateAssignee.mutate({ id: a.id, task_access: v })}
+                  />
                 </div>
 
                 {/* Assignation en masse des tâches du projet à ce membre */}

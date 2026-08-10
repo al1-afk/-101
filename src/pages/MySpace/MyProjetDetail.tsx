@@ -34,6 +34,19 @@ function fmtDate(s?: string | null) {
   return new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+/** Tâche telle que renvoyée par GET /api/my-space/projets/:id.
+    `is_mine` et `assignee_name` n'existent que depuis la migration 085 :
+    absents, on retombe sur l'ancien comportement (tout est à moi). */
+interface MemberProjectTask {
+  id:               string
+  title:            string
+  status:           string
+  category?:        string | null
+  is_request?:      boolean | null
+  is_mine?:         boolean
+  assignee_name?:   string | null
+}
+
 function copy(text: string, label: string) {
   if (!text) return
   navigator.clipboard.writeText(text).then(() => toast.success(`✓ ${label} copié`)).catch(() => {})
@@ -76,6 +89,12 @@ export default function MyProjetDetail() {
   const parsed = parseProjet(projet.notes)
   const statut = STATUT_CFG[projet.statut] ?? STATUT_CFG.planifie
   const shareInfos = projet.share_infos !== false
+  /* Périmètre des tâches (projet_assignees.task_access, migration 085).
+     Le tri est déjà fait côté serveur : la liste reçue EST le périmètre. */
+  const seesAllTasks = projet.task_access === 'all'
+  const allTasks: MemberProjectTask[] = projet.my_tasks ?? []
+  const myCount     = allTasks.filter(t => t.is_mine !== false).length
+  const othersCount = allTasks.length - myCount
 
   return (
     <div className="space-y-5">
@@ -241,36 +260,70 @@ export default function MyProjetDetail() {
         />
       </Section>
 
-      {/* ── Mes tâches sur ce projet ── */}
-      <Section title={`Mes tâches (${projet.my_tasks?.length ?? 0})`} icon={CheckSquare} color="blue">
-        {(projet.my_tasks ?? []).length === 0 ? (
-          <p className="text-sm text-slate-500 italic text-center py-4">Aucune tâche assignée pour ce projet.</p>
+      {/* ── Tâches du projet — périmètre décidé par projet_assignees.task_access.
+             En mode 'assigned' l'API n'envoie que les tâches de la personne ;
+             en mode 'all' elle envoie tout le projet, avec is_mine pour
+             distinguer ce sur quoi elle peut agir. ── */}
+      <Section
+        title={seesAllTasks
+          ? `Tâches du projet (${allTasks.length})`
+          : `Mes tâches (${allTasks.length})`}
+        icon={CheckSquare}
+        color="blue"
+      >
+        {seesAllTasks && (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-2">
+            Tu as accès à toutes les tâches de ce projet.
+            {othersCount > 0 && <> {myCount} à toi · {othersCount} suivie{othersCount > 1 ? 's' : ''} en lecture seule.</>}
+          </p>
+        )}
+        {allTasks.length === 0 ? (
+          <p className="text-sm text-slate-500 italic text-center py-4">
+            {seesAllTasks ? 'Ce projet n’a aucune tâche.' : 'Aucune tâche assignée pour ce projet.'}
+          </p>
         ) : (
           <div className="space-y-1.5">
-            {projet.my_tasks.map((t: any) => {
+            {allTasks.map((t) => {
               const isDone = t.status === 'done'
               const isInProgress = t.status === 'in_progress'
               const isValidation = t.status === 'validation'
+              /* Serveur antérieur à la migration 085 : pas de is_mine dans la
+                 réponse, et la liste ne contenait que les tâches du membre. */
+              const isMine = t.is_mine !== false
               return (
                 <div key={t.id} className={cn(
                   'flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800',
                   isValidation && 'border-violet-300 dark:border-violet-800/60 bg-violet-50/30 dark:bg-violet-950/10',
+                  !isMine && 'bg-slate-50/60 dark:bg-slate-800/20 border-dashed',
                   isDone && 'opacity-60',
                 )}>
-                  <button onClick={() => updateTask.mutate({ id: t.id, status: isDone ? 'todo' : 'done' })}>
-                    {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600" /> :
-                     isInProgress ? <CircleDot className="w-4 h-4 text-blue-600" /> :
-                     <Square className="w-4 h-4 text-slate-300" />}
-                  </button>
+                  {isMine ? (
+                    <button onClick={() => updateTask.mutate({ id: t.id, status: isDone ? 'todo' : 'done' })}>
+                      {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600" /> :
+                       isInProgress ? <CircleDot className="w-4 h-4 text-blue-600" /> :
+                       <Square className="w-4 h-4 text-slate-300" />}
+                    </button>
+                  ) : (
+                    <span title="Tâche d'un autre membre — lecture seule">
+                      {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600/60" /> :
+                       isInProgress ? <CircleDot className="w-4 h-4 text-blue-600/60" /> :
+                       <Square className="w-4 h-4 text-slate-300" />}
+                    </span>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       {t.category && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">{t.category}</span>}
                       {t.is_request && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 flex items-center gap-1"><Sparkles className="w-2.5 h-2.5" /> Demande</span>}
                       {isValidation && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-200 dark:bg-violet-800/60 text-violet-800 dark:text-violet-200">⚑ En validation</span>}
+                      {!isMine && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
+                          {t.assignee_name ? `👤 ${t.assignee_name}` : 'Non assignée'}
+                        </span>
+                      )}
                     </div>
                     <div className={cn('text-sm font-medium text-slate-900 dark:text-slate-100 mt-0.5', isDone && 'line-through')}>{t.title}</div>
                   </div>
-                  {!isDone && !isValidation && (
+                  {isMine && !isDone && !isValidation && (
                     <div className="flex gap-1">
                       {!isInProgress ? (
                         <Button size="sm" variant="outline" className="h-7 text-xs"
@@ -289,9 +342,14 @@ export default function MyProjetDetail() {
                       </Button>
                     </div>
                   )}
-                  {isValidation && (
+                  {isMine && isValidation && (
                     <span className="text-[11px] text-violet-700 dark:text-violet-400 italic flex items-center gap-1">
                       <Check className="w-3 h-3" /> En attente du manager
+                    </span>
+                  )}
+                  {!isMine && (
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500 italic whitespace-nowrap">
+                      {isDone ? 'Terminée' : isValidation ? 'En validation' : isInProgress ? 'En cours' : 'À faire'}
                     </span>
                   )}
                 </div>

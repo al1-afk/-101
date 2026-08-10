@@ -47,8 +47,13 @@ export default function MyProjets() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {projets.map((p) => {
             const statut = STATUT_CFG[p.statut] ?? STATUT_CFG.planifie
-            const pct = p.my_tasks_count > 0
-              ? Math.round((p.my_tasks_done / p.my_tasks_count) * 100)
+            /* Accès « toutes les tâches » : la carte suit l'avancement du
+               projet entier, pas seulement celui des tâches de la personne. */
+            const seesAll = p.task_access === 'all'
+            const count   = seesAll ? (p.project_tasks_count ?? 0) : p.my_tasks_count
+            const done    = seesAll ? (p.project_tasks_done  ?? 0) : p.my_tasks_done
+            const pct = count > 0
+              ? Math.round((done / count) * 100)
               : p.progression ?? 0
             return (
               <Link
@@ -94,7 +99,7 @@ export default function MyProjets() {
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                     <span className="flex items-center gap-1">
                       <CheckSquare className="w-3 h-3" />
-                      {p.my_tasks_done}/{p.my_tasks_count} tâches
+                      {done}/{count} tâches{seesAll ? ' du projet' : ''}
                     </span>
                     {p.date_fin_prevue && (
                       <span className="flex items-center gap-1">
