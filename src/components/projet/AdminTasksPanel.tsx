@@ -1,23 +1,47 @@
 /**
  * Panneau "Mes tâches admin" — sur la page /projets.
  * Liste toutes les tâches assignées à l'admin connecté (assigned_user_id),
- * à travers tous les projets, avec quick-actions (timer + done).
+ * à travers tous les projets, avec quick-actions (timer + done) et un
+ * ajout rapide où le projet est facultatif.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
   Shield, Play, Pause, Check, Square as SquareIcon, Calendar, AlertTriangle,
-  Briefcase, Inbox, CircleDot,
+  Briefcase, Inbox, CircleDot, Plus, X, Loader2,
 } from 'lucide-react'
-import { useTeamMemberTasks } from '@/hooks/useTeamMemberTasks'
+import { useTeamMemberTasks, useCreateTeamMemberTask, type TaskPriority } from '@/hooks/useTeamMemberTasks'
 import { useProjets } from '@/hooks/useProjets'
 import { useAuth } from '@/hooks/useAuth'
 import { teamMemberTasksApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getActiveTimer, setActiveTimer, formatHMS } from '@/lib/taskTimer'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+
+/** Date du jour en YYYY-MM-DD, fuseau local — toISOString() renverrait la
+    veille en soirée depuis le Maroc. Même helper que ProjetDetail. */
+const todayISO = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const PRIORITES: { value: TaskPriority; label: string }[] = [
+  { value: 'low',    label: 'Basse'   },
+  { value: 'normal', label: 'Normale' },
+  { value: 'high',   label: 'Haute'   },
+  { value: 'urgent', label: 'Urgente' },
+]
+
+/** Tâche sans projet : project_id est nullable et la FK est ON DELETE SET
+    NULL, une tâche isolée est donc une ligne parfaitement valide. */
+const NO_PROJECT = 'none'
+
+/** Tâches montrées avant repli — le panneau n'est pas la liste complète. */
+const VISIBLE = 8
 
 function dueLabel(due?: string | null): { text: string; tone: 'overdue' | 'today' | 'soon' | 'later' | 'none' } {
   if (!due) return { text: '', tone: 'none' }
@@ -41,6 +65,50 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team_member_tasks'] }),
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
+
+  /* ── Ajout rapide ─────────────────────────────────────────────
+     Le projet est facultatif : c'est tout l'intérêt du panneau, pouvoir
+     noter une tâche sans passer par la fiche d'un projet. */
+  const createTask = useCreateTeamMemberTask()
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft]   = useState({
+    title: '', due_date: todayISO(), priority: 'normal' as TaskPriority, project_id: NO_PROJECT,
+  })
+  const titleRef = useRef<HTMLInputElement>(null)
+  const [showAll, setShowAll] = useState(false)
+
+  const openAdd = () => {
+    setDraft(d => ({ ...d, title: '', due_date: todayISO() }))
+    setAdding(true)
+    /* Le champ n'existe pas encore au moment du clic. */
+    requestAnimationFrame(() => titleRef.current?.focus())
+  }
+
+  const submitDraft = (e: React.FormEvent) => {
+    e.preventDefault()
+    const title = draft.title.trim()
+    if (!title || createTask.isPending) return
+    createTask.mutate({
+      title,
+      /* Se l'assigner : sans ça la tâche n'apparaîtrait pas dans ce panneau,
+         qui filtre sur assigned_user_id. Les trois colonnes d'assignation
+         sont exclusives entre elles. */
+      assigned_user_id:      userId ?? null,
+      team_member_id:        null,
+      assigned_stagiaire_id: null,
+      project_id: draft.project_id === NO_PROJECT ? null : draft.project_id,
+      due_date:   draft.due_date || null,
+      priority:   draft.priority,
+      status:     'todo',
+    }, {
+      onSuccess: () => {
+        /* Le formulaire reste ouvert, projet/priorité/date conservés : on
+           enchaîne les tâches d'une même série sans tout resaisir. */
+        setDraft(d => ({ ...d, title: '' }))
+        titleRef.current?.focus()
+      },
+    })
+  }
 
   /* Live tick for running timer */
   const [, setTick] = useState(0)
@@ -110,18 +178,79 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
             </span>
           )}
         </h2>
+
+        {!adding && (
+          <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={openAdd}>
+            <Plus className="w-3 h-3" /> Ajouter une tâche
+          </Button>
+        )}
       </div>
+
+      {/* Ajout rapide — sans projet par défaut. */}
+      {adding && (
+        <form onSubmit={submitDraft} className="mb-3 p-2.5 rounded-lg border border-blue-200 dark:border-blue-900/50 bg-card space-y-2">
+          <div className="flex items-center gap-2">
+            <Input
+              ref={titleRef}
+              value={draft.title}
+              onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Escape') setAdding(false) }}
+              placeholder="Que faut-il faire ?"
+              className="h-8 text-sm"
+            />
+            <Button type="submit" size="sm" className="h-8 text-[11px] flex-shrink-0"
+              disabled={!draft.title.trim() || createTask.isPending}>
+              {createTask.isPending
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Plus className="w-3 h-3" />}
+              Ajouter
+            </Button>
+            <button type="button" onClick={() => setAdding(false)}
+              className="p-1.5 rounded text-muted-foreground hover:text-foreground flex-shrink-0" title="Fermer">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={draft.project_id} onValueChange={v => setDraft(d => ({ ...d, project_id: v }))}>
+              <SelectTrigger className="h-7 text-[11px] w-auto min-w-[10rem]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_PROJECT}>Sans projet</SelectItem>
+                {projets.map(p => <SelectItem key={p.id} value={p.id}>{p.nom}</SelectItem>)}
+              </SelectContent>
+            </Select>
+
+            <Select value={draft.priority} onValueChange={v => setDraft(d => ({ ...d, priority: v as TaskPriority }))}>
+              <SelectTrigger className="h-7 text-[11px] w-auto min-w-[6.5rem]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PRIORITES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+
+            <Input
+              type="date"
+              value={draft.due_date}
+              onChange={e => setDraft(d => ({ ...d, due_date: e.target.value }))}
+              className="h-7 text-[11px] w-auto"
+            />
+            <span className="text-[11px] text-muted-foreground">
+              Entrée pour enregistrer et enchaîner.
+            </span>
+          </div>
+        </form>
+      )}
 
       {mine.length === 0 ? (
         <div className="py-6 text-center">
           <Inbox className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />
           <p className="text-xs text-muted-foreground">
-            Aucune tâche ne t'est assignée. Ouvre un projet, onglet <strong>Tâches</strong>, et sélectionne <strong>🛡️ Moi (Admin)</strong> dans l'assignation.
+            Aucune tâche ne t'est assignée. Utilise <strong>Ajouter une tâche</strong> ci-dessus — le projet est
+            facultatif — ou ouvre un projet, onglet <strong>Tâches</strong>, et sélectionne <strong>🛡️ Moi (Admin)</strong>.
           </p>
         </div>
       ) : (
         <div className="space-y-1.5">
-          {mine.slice(0, 8).map(t => {
+          {mine.slice(0, showAll ? mine.length : VISIBLE).map(t => {
             const projet = projets.find(p => p.id === t.project_id)
             const due = dueLabel(t.due_date)
             const isRunning = active?.taskId === t.id
@@ -147,10 +276,16 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
                   <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
-                    {projet && (
+                    {projet ? (
                       <Link to={`${basePath}/projets/${projet.id}`} className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate">
                         <Briefcase className="w-2.5 h-2.5" /> {projet.nom}
                       </Link>
+                    ) : (
+                      /* Tâche isolée : sans repère, elle se confondrait avec une
+                         tâche dont le projet a simplement été supprimé. */
+                      <span className="flex items-center gap-1 italic">
+                        <Briefcase className="w-2.5 h-2.5" /> Sans projet
+                      </span>
                     )}
                     {due.tone !== 'none' && (
                       <span className={cn(
@@ -196,10 +331,16 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
               </div>
             )
           })}
-          {mine.length > 8 && (
-            <p className="text-[11px] text-muted-foreground italic text-center pt-1">
-              +{mine.length - 8} autres tâches non affichées
-            </p>
+          {mine.length > VISIBLE && (
+            /* Repliable, sinon les tâches ajoutées à la suite tombent hors
+               du plafond sans que rien ne permette d'aller les voir. */
+            <button
+              type="button"
+              onClick={() => setShowAll(v => !v)}
+              className="w-full text-[11px] text-muted-foreground italic text-center pt-1 hover:text-blue-600 dark:hover:text-blue-400"
+            >
+              {showAll ? 'Réduire la liste' : `Voir les ${mine.length - VISIBLE} autres tâches`}
+            </button>
           )}
         </div>
       )}
