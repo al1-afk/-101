@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import NotificationsAutoSettings from '@/components/settings/NotificationsAutoSettings'
+import TaskRemindersSettings from '@/components/settings/TaskRemindersSettings'
 
 const LS = {
   company:  'gestiq_company',
@@ -296,6 +297,9 @@ export default function Parametres() {
 
           {/* Envois automatiques pilotés par le serveur (alertes + rapports) */}
           <NotificationsAutoSettings />
+
+          {/* Rappels AVANT l'échéance des tâches (cloche + email + navigateur) */}
+          <TaskRemindersSettings />
 
           <div className="card-premium p-6 space-y-4">
             <h2 className="section-title flex items-center gap-2">

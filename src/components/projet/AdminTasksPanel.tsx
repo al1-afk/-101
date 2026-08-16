@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { useTeamMemberTasks, useCreateTeamMemberTask, type TaskPriority } from '@/hooks/useTeamMemberTasks'
 import { useProjets } from '@/hooks/useProjets'
+import { useTaskReminderPrefs } from '@/hooks/useTaskReminders'
+import { ReminderPicker } from '@/components/taches/ReminderPicker'
 import { useAuth } from '@/hooks/useAuth'
 import { teamMemberTasksApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -58,6 +60,7 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
   const { userId } = useAuth()
   const { data: tasks = [] } = useTeamMemberTasks()
   const { data: projets = [] } = useProjets()
+  const { prefs } = useTaskReminderPrefs()
   const qc = useQueryClient()
 
   const update = useMutation({
@@ -73,6 +76,11 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft]   = useState({
     title: '', due_date: todayISO(), priority: 'normal' as TaskPriority, project_id: NO_PROJECT,
+    /* Heure facultative : sans elle, la tâche est due à l'heure par
+       défaut de la personne (réglages → Notifications). */
+    due_time: '',
+    /* null = suivre les rappels par défaut, cf. ReminderPicker. */
+    reminder_offsets: null as number[] | null,
   })
   const titleRef = useRef<HTMLInputElement>(null)
   const [showAll, setShowAll] = useState(false)
@@ -98,6 +106,8 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
       assigned_stagiaire_id: null,
       project_id: draft.project_id === NO_PROJECT ? null : draft.project_id,
       due_date:   draft.due_date || null,
+      due_time:   draft.due_time || null,
+      reminder_offsets: draft.reminder_offsets,
       priority:   draft.priority,
       status:     'todo',
     }, {
@@ -233,6 +243,25 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
               onChange={e => setDraft(d => ({ ...d, due_date: e.target.value }))}
               className="h-7 text-[11px] w-auto"
             />
+
+            {/* L'heure décide de la précision du rappel : « 5 minutes
+                avant » n'a de sens que si l'échéance en a une. */}
+            <Input
+              type="time"
+              value={draft.due_time}
+              onChange={e => setDraft(d => ({ ...d, due_time: e.target.value }))}
+              className="h-7 text-[11px] w-auto"
+              title="Heure d'échéance (facultative)"
+            />
+
+            <ReminderPicker
+              compact
+              value={draft.reminder_offsets}
+              defaults={prefs.default_offsets}
+              onChange={next => setDraft(d => ({ ...d, reminder_offsets: next }))}
+              className="!h-7 !text-[11px] !px-2"
+            />
+
             <span className="text-[11px] text-muted-foreground">
               Entrée pour enregistrer et enchaîner.
             </span>
@@ -302,11 +331,24 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
                         ⏱ {formatHMS(elapsed)}{isRunning && ' · en cours'}
                       </span>
                     )}
+                    {t.due_time && (
+                      <span className="tabular-nums">{t.due_time.slice(0, 5)}</span>
+                    )}
                     {t.priority === 'urgent' && (
                       <span className="px-1.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 font-bold">URGENT</span>
                     )}
                   </div>
                 </div>
+
+                {t.due_date && (
+                  <ReminderPicker
+                    compact
+                    value={t.reminder_offsets ?? null}
+                    defaults={prefs.default_offsets}
+                    onChange={next => update.mutate({ id: t.id, patch: { reminder_offsets: next } })}
+                    className="!h-7 !text-[11px] !px-2 hidden lg:inline-flex flex-shrink-0"
+                  />
+                )}
 
                 {!isValidation && (
                   <div className="flex gap-1 flex-shrink-0">

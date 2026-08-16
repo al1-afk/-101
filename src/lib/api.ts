@@ -920,3 +920,30 @@ export interface TimeSettingsDTO {
   reminder_enabled:        boolean
   reminder_hour:           number
 }
+
+/* ── Rappels de tâches (5 min / 30 min / 1 jour avant l'échéance) ──
+   Réglages personnels : le serveur scope à req.user.userId. */
+export interface TaskReminderPrefs {
+  /** Minutes avant l'échéance, du plus lointain au plus proche. */
+  default_offsets:  number[]
+  /** Heure supposée d'une tâche datée sans heure (« 09:00:00 »). */
+  default_due_time: string
+  email_enabled: boolean
+  push_enabled:  boolean
+  inapp_enabled: boolean
+}
+
+export interface PushDevice {
+  id:           string
+  label:        string | null
+  user_agent:   string | null
+  created_at:   string
+  last_seen_at: string
+}
+
+export const taskRemindersApi = {
+  prefs:     () => api.get<TaskReminderPrefs>('/api/task-reminders/prefs'),
+  savePrefs: (patch: Partial<TaskReminderPrefs>) =>
+    api.put<TaskReminderPrefs>('/api/task-reminders/prefs', patch),
+  devices:   () => api.get<PushDevice[]>('/api/push/devices'),
+}

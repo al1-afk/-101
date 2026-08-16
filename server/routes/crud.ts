@@ -230,15 +230,30 @@ router.get('/:table/:id', async (req: Request, res: Response) => {
   }
 })
 
+/* Colonnes qui sont de VRAIS tableaux Postgres (int[], text[]…) et non
+   du jsonb. Elles doivent échapper à la sérialisation JSON ci-dessous :
+   pg-node sait déjà écrire un tableau JS en syntaxe Postgres `{30,1440}`,
+   alors qu'un JSON.stringify produirait `[30,1440]` — rejeté par la base
+   avec « malformed array literal ».
+
+   La liste est explicite plutôt que déduite du schéma : une colonne jsonb
+   traitée par erreur comme un tableau natif casserait silencieusement des
+   écritures qui fonctionnent aujourd'hui (attachments, recurrence…). */
+const NATIVE_ARRAY_COLUMNS: Record<string, Set<string>> = {
+  team_member_tasks: new Set(['reminder_offsets']),
+}
+
 /* Empty string → null (Postgres rejects "" for date/numeric/uuid/enum columns).
    Arrays/plain objects → JSON string (for jsonb columns — sans cast, pg-node
    les sérialise en syntaxe array Postgres `{a,b}` qui échoue côté jsonb avec
    "Expected ':', but found ','"). */
-function normalizeValues(obj: Record<string, unknown>): Record<string, unknown> {
+function normalizeValues(obj: Record<string, unknown>, table?: string): Record<string, unknown> {
+  const nativeArrays = table ? NATIVE_ARRAY_COLUMNS[table] : undefined
   return Object.fromEntries(
     Object.entries(obj).map(([k, v]) => {
       if (v === '') return [k, null]
       if (v === null || v === undefined) return [k, v]
+      if (Array.isArray(v) && nativeArrays?.has(k)) return [k, v]
       if (Array.isArray(v) || (typeof v === 'object' && (v as object).constructor === Object)) {
         return [k, JSON.stringify(v)]
       }
@@ -279,7 +294,7 @@ router.post('/:table', async (req: Request, res: Response) => {
 
   detectForgedTenant(req, table)
   const raw  = { ...req.body, tenant_id: req.user!.tenantId }
-  const data = normalizeValues(Object.fromEntries(Object.entries(raw).filter(([k]) => SAFE_COL.test(k))))
+  const data = normalizeValues(Object.fromEntries(Object.entries(raw).filter(([k]) => SAFE_COL.test(k))), table)
   const keys = Object.keys(data)
   const vals = Object.values(data)
   const ph   = keys.map((_, i) => `$${i + 1}`).join(', ')
@@ -319,7 +334,7 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
   const data = normalizeValues(Object.fromEntries(
     Object.entries(req.body as object)
       .filter(([k]) => SAFE_COL.test(k) && k !== 'tenant_id' && !readonly?.has(k))
-  ))
+  ), table)
   const keys = Object.keys(data)
   if (!keys.length) return res.status(400).json({ error: 'Aucun champ à mettre à jour' })
 

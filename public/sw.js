@@ -65,3 +65,54 @@ self.addEventListener('fetch', e => {
       .catch(() => caches.match(e.request).then(cached => cached || caches.match('/'))),
   )
 })
+
+/* ══════════════════════════════════════════════════════════════════
+   Web Push — notifications reçues APPLICATION FERMÉE.
+
+   C'est ici que se joue la différence avec l'API Notification côté
+   page : le service worker est réveillé par le navigateur même si
+   aucun onglet n'est ouvert. Sur Mac, la PWA installée fait passer
+   ces notifications par le centre de notifications du système.
+
+   Le serveur envoie un JSON { title, body, url, tag, icon } chiffré
+   pour cet abonnement (cf. server/lib/webPush.ts).
+   ══════════════════════════════════════════════════════════════════ */
+
+self.addEventListener('push', e => {
+  /* Un push sans données reste possible (test d'un service tiers) :
+     on affiche quelque chose de correct plutôt que de planter. */
+  let data = {}
+  try { data = e.data ? e.data.json() : {} } catch { data = {} }
+
+  const title = data.title || 'NEXT GITAL'
+  const options = {
+    body: data.body || '',
+    icon: data.icon || '/icon-192.png',
+    badge: '/icon-192.png',
+    /* `tag` fait qu'un nouveau rappel REMPLACE le précédent de la même
+       tâche, au lieu d'empiler « demain » puis « dans 30 min ». */
+    tag: data.tag || 'gestiq',
+    renotify: true,
+    data: { url: data.url || '/' },
+  }
+  e.waitUntil(self.registration.showNotification(title, options))
+})
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close()
+  const target = (e.notification.data && e.notification.data.url) || '/'
+
+  /* Réutiliser un onglet déjà ouvert plutôt qu'en empiler un nouveau à
+     chaque rappel — et le mettre au premier plan. */
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      for (const client of list) {
+        if ('focus' in client) {
+          client.navigate?.(target)
+          return client.focus()
+        }
+      }
+      return self.clients.openWindow(target)
+    }),
+  )
+})

@@ -23,6 +23,11 @@ export interface TeamMemberTask {
   priority:          TaskPriority
   status:            TaskStatus
   due_date:          string | null
+  /** Heure d'échéance « HH:MM[:SS] ». null = heure par défaut de la personne. */
+  due_time:          string | null
+  /** Minutes avant l'échéance pour être prévenu.
+   *  null = réglages par défaut, [] = aucun rappel sur cette tâche. */
+  reminder_offsets:  number[] | null
   category:          string | null     // Analyse, Design, Développement, SEO, etc.
   elapsed_seconds:   number            // total time tracked
   is_request:        boolean           // change request from client

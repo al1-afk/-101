@@ -25,6 +25,10 @@ import { startAutopilotScheduler } from './lib/outboundAutopilot'
 import { startGoogleContactsScheduler } from './lib/googleContactsScheduler'
 import { startReportScheduler } from './lib/reportScheduler'
 import { startTimeReminderScheduler } from './lib/timeReminderScheduler'
+import { startTaskReminderScheduler } from './lib/taskReminderScheduler'
+import { initWebPush } from './lib/webPush'
+import pushRoutes from './routes/push'
+import taskRemindersRoutes from './routes/taskReminders'
 import notificationsRoutes from './routes/notifications'
 import timeTrackingRoutes from './routes/timeTracking'
 import mySpaceRoutes   from './routes/mySpace'
@@ -201,6 +205,10 @@ app.use('/api/notifications', notificationsRoutes)
    personnelles : la route scope à req.user.userId, pas seulement au
    tenant ; d'où l'absence de ces tables dans le CRUD générique). */
 app.use('/api/time',      timeTrackingRoutes)
+/* Abonnements Web Push (un par navigateur) — sert les rappels de tâches
+   hors application. Sans clés VAPID, la route répond « désactivé ». */
+app.use('/api/push',      pushRoutes)
+app.use('/api/task-reminders', taskRemindersRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */
@@ -263,6 +271,13 @@ app.listen(PORT, () => {
      cloche de la personne concernée, et UNIQUEMENT si sa journée n'est
      pas déjà expliquée. Une seule fois par jour (dedupe_key). */
   startTimeReminderScheduler(pool)
+  /* Charge les clés VAPID. Sans elles, les notifications navigateur
+     sont simplement inactives — le reste continue de fonctionner. */
+  initWebPush()
+  /* Rappels de tâches AVANT l'échéance (5 min / 30 min / 1 jour) —
+     cloche + email + navigateur. Passage chaque minute : c'est la
+     granularité minimale pour qu'un « 5 minutes avant » soit juste. */
+  startTaskReminderScheduler(pool)
   /* Diagnostic de cloisonnement : signale au démarrage toute table
      exposée par l'API CRUD qui n'a pas de colonne tenant_id (donc
      protégée par la seule RLS). Mieux vaut le savoir au boot que lors
