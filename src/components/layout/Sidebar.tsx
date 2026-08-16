@@ -13,7 +13,7 @@ import {
   Bot, CalendarDays, Zap, RefreshCcw, PlugZap, FileDown, Rocket, Boxes, Car, Target, Sparkles,
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
   Plus, Star, Command, Search, GripVertical,
-  Radar, Route, LineChart, MessagesSquare, LayoutGrid, Bell, Layers,
+  Radar, Route, LineChart, MessagesSquare, LayoutGrid, Bell, Layers, Hourglass,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
@@ -39,6 +39,7 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'projets',           label: 'Projets' },
   { key: 'calendrier',        label: 'Calendrier' },
   { key: 'planificateur',     label: 'Planificateur' },
+  { key: '7aty',              label: '7aty — Où va mon temps' },
   { key: 'devis',             label: 'Devis' },
   { key: 'factures',          label: 'Factures' },
   { key: 'contrats',          label: 'Contrats' },
@@ -90,6 +91,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'Tableau de bord', href: '/',          icon: LayoutDashboard, module: 'dashboard' },
       { label: 'Planificateur',   href: '/planificateur', icon: Target, badge: 'New', module: 'planificateur' },
+      { label: '7aty — Mon temps', href: '/7aty',     icon: Hourglass, badge: 'New', module: '7aty' },
       { label: 'Ma Vision',       href: '/vision',    icon: Crown, module: 'vision', adminOnly: true },
       { label: 'CRM / Prospects', href: '/prospects', icon: UserCheck, badge: 'IA', module: 'prospects' },
       { label: 'Clients',         href: '/clients',   icon: Users, module: 'clients' },

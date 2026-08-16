@@ -53,6 +53,7 @@ const Templates      = lazy(() => import('@/pages/Templates'))
 const ProjetDetail   = lazy(() => import('@/pages/ProjetDetail'))
 const Calendrier     = lazy(() => import('@/pages/Calendrier'))
 const Planificateur  = lazy(() => import('@/pages/Planificateur'))
+const MonTemps       = lazy(() => import('@/pages/MonTemps'))
 const Parametres       = lazy(() => import('@/pages/Parametres'))
 const ModelesPrestations = lazy(() => import('@/pages/ModelesPrestations'))
 const AdminSecurity    = lazy(() => import('@/pages/AdminSecurity'))
@@ -171,6 +172,7 @@ export default function App() {
               <Route path="templates"                  element={<Templates />} />
               <Route path="calendrier"                 element={<Calendrier />} />
               <Route path="planificateur"              element={<Planificateur />} />
+              <Route path="7aty"                       element={<MonTemps />} />
               <Route path="devis"                      element={<Devis />} />
               <Route path="devis/:id/preview"          element={<DevisPreview />} />
               {/* Backwards-compat: old shared links missing the /devis/ segment */}

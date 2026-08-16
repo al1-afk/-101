@@ -1,6 +1,14 @@
 /**
  * NotificationBell — petit composant cloche + dropdown réutilisable
- * (admin et membre). Lit depuis le notificationStore (localStorage).
+ * (admin et membre).
+ *
+ * Deux sources fusionnées, triées par date :
+ *   • le notificationStore (localStorage) — événements temps réel captés
+ *     pendant que l'onglet est ouvert ;
+ *   • l'API /api/notifications (côté admin) — ce que le serveur a produit
+ *     tout seul : alertes tâches / clients, rapports quotidien et hebdo.
+ *     Elles survivent à la déconnexion et suivent l'utilisateur de poste
+ *     en poste, contrairement au store local.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -10,6 +18,7 @@ import {
   readNotifications, subscribe, markAllRead, markRead, clearAll,
   type Notification,
 } from '@/lib/notificationStore'
+import { useNotificationCenter } from '@/hooks/useNotificationCenter'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -19,12 +28,44 @@ interface Props {
   align?:      'left' | 'right' // dropdown side (default 'right')
 }
 
+/* Élément affiché, quelle que soit sa provenance. */
+interface Item {
+  id:        string
+  source:    'local' | 'server'
+  title:     string
+  message?:  string
+  link?:     string
+  icon?:     string
+  is_read:   boolean
+  created_at:string
+  severity?: 'info' | 'success' | 'warning' | 'critical'
+}
+
 export default function NotificationBell({ scope, className, direction = 'down', align = 'right' }: Props) {
   const notifications = useSyncExternalStore(
     subscribe,
     () => JSON.stringify(readNotifications(scope)),
   )
-  const list: Notification[] = JSON.parse(notifications)
+  const localList: Notification[] = JSON.parse(notifications)
+
+  /* Les notifications serveur sont adressées à un compte `users` : elles
+     n'existent que pour l'espace admin, pas pour la session membre. */
+  const center = useNotificationCenter(scope === 'admin')
+
+  const list: Item[] = [
+    ...center.notifications.map(n => ({
+      id: n.id, source: 'server' as const,
+      title: n.title, message: n.message ?? undefined, link: n.link ?? undefined,
+      icon: n.icon ?? undefined, is_read: n.is_read, created_at: n.created_at,
+      severity: n.severity,
+    })),
+    ...localList.map(n => ({
+      id: n.id, source: 'local' as const,
+      title: n.title, message: n.message, link: n.link, icon: n.icon,
+      is_read: n.is_read, created_at: n.created_at,
+    })),
+  ].sort((a, b) => b.created_at.localeCompare(a.created_at))
+
   const unread = list.filter(n => !n.is_read).length
 
   const [open, setOpen] = useState(false)
@@ -38,12 +79,23 @@ export default function NotificationBell({ scope, className, direction = 'down',
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  const onItemClick = (n: Notification) => {
-    markRead(scope, n.id)
+  const onItemClick = (n: Item) => {
+    if (n.source === 'server') center.markRead(n.id)
+    else markRead(scope, n.id)
     if (n.link) {
       navigate(n.link)
       setOpen(false)
     }
+  }
+
+  const onMarkAllRead = () => {
+    markAllRead(scope)
+    if (scope === 'admin') center.markAllRead()
+  }
+
+  const onClearAll = () => {
+    clearAll(scope)
+    if (scope === 'admin') center.clearAll()
   }
 
   return (
@@ -89,11 +141,11 @@ export default function NotificationBell({ scope, className, direction = 'down',
                 {list.length > 0 && (
                   <div className="flex items-center gap-2">
                     {unread > 0 && (
-                      <button onClick={() => markAllRead(scope)} className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                      <button onClick={onMarkAllRead} className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline">
                         <CheckCheck className="w-3.5 h-3.5" /> Tout lire
                       </button>
                     )}
-                    <button onClick={() => clearAll(scope)} className="text-xs text-slate-400 hover:text-red-500" title="Effacer tout">
+                    <button onClick={onClearAll} className="text-xs text-slate-400 hover:text-red-500" title="Effacer tout">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -119,7 +171,12 @@ export default function NotificationBell({ scope, className, direction = 'down',
                           )}
                         >
                           {!n.is_read && (
-                            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            <span className={cn(
+                              'absolute left-1.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full',
+                              n.severity === 'critical' ? 'bg-red-500'
+                                : n.severity === 'warning' ? 'bg-amber-500'
+                                : 'bg-blue-500',
+                            )} />
                           )}
                           <span className="text-base flex-shrink-0">{n.icon ?? '🔔'}</span>
                           <div className="flex-1 min-w-0">

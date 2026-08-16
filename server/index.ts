@@ -23,6 +23,10 @@ import teamRoutes      from './routes/team'
 import { startExpiryReminderScheduler, checkAndSendExpiryReminders } from './lib/expiryReminderScheduler'
 import { startAutopilotScheduler } from './lib/outboundAutopilot'
 import { startGoogleContactsScheduler } from './lib/googleContactsScheduler'
+import { startReportScheduler } from './lib/reportScheduler'
+import { startTimeReminderScheduler } from './lib/timeReminderScheduler'
+import notificationsRoutes from './routes/notifications'
+import timeTrackingRoutes from './routes/timeTracking'
 import mySpaceRoutes   from './routes/mySpace'
 import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
@@ -192,6 +196,11 @@ app.use('/api/outbound',  outboundRoutes)
 app.use('/api/paiements-recovery', paiementsRecoveryRoutes)
 app.use('/api/admin/2fa', admin2faRoutes)
 app.use('/api/security',  securityRoutes)
+app.use('/api/notifications', notificationsRoutes)
+/* 7aty — suivi du temps & des distractions (données strictement
+   personnelles : la route scope à req.user.userId, pas seulement au
+   tenant ; d'où l'absence de ces tables dans le CRUD générique). */
+app.use('/api/time',      timeTrackingRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */
@@ -245,6 +254,15 @@ app.listen(PORT, () => {
   /* Purge quotidienne du Centre de sécurité — le monitoring ne doit pas
      faire grossir la base indéfiniment (rétention par sévérité). */
   startSecurityRetentionScheduler()
+  /* Notifications & rapports automatiques : alertes tâches en retard et
+     clients à contacter, rapport quotidien, bilan hebdomadaire. Le
+     scheduler vérifie toutes les 10 min l'heure LOCALE de chaque espace ;
+     l'unicité (espace, type, jour) en base empêche tout doublon. */
+  startReportScheduler(pool)
+  /* 7aty — rappel du soir « as-tu saisi ta journée ? », déposé dans la
+     cloche de la personne concernée, et UNIQUEMENT si sa journée n'est
+     pas déjà expliquée. Une seule fois par jour (dedupe_key). */
+  startTimeReminderScheduler(pool)
   /* Diagnostic de cloisonnement : signale au démarrage toute table
      exposée par l'API CRUD qui n'a pas de colonne tenant_id (donc
      protégée par la seule RLS). Mieux vaut le savoir au boot que lors

@@ -7,7 +7,7 @@ import {
   CreditCard, FileCheck, DollarSign, Package, Upload,
   ChevronDown, ChevronRight, Calendar,
   Loader2, AlertCircle, Circle, CheckCircle2, AlertTriangle,
-  TrendingUp, Star, FolderKanban, Globe, Server,
+  TrendingUp, Star, FolderKanban, Globe, Server, PhoneCall,
 } from 'lucide-react'
 import { parseClientNotes, serializeClientNotes, daysUntil, type ClientMeta } from '@/lib/clientNotes'
 import BlockEditor from '@/components/BlockEditor'
@@ -244,6 +244,24 @@ export default function ClientDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocks])
 
+  /* « Marquer comme contacté » — sort le client de l'alerte quotidienne
+     « clients à contacter » et alimente le rapport hebdomadaire
+     (colonne clients.date_dernier_contact, migration 086). */
+  const [markingContact, setMarkingContact] = useState(false)
+  const markContacted = async () => {
+    if (!client) return
+    setMarkingContact(true)
+    try {
+      await clientsApi.update(client.id, { date_dernier_contact: new Date().toISOString() })
+      qc.invalidateQueries({ queryKey: ['clients'] })
+      toast.success('Contact enregistré')
+    } catch (e: unknown) {
+      toast.error((e as Error)?.message ?? 'Enregistrement impossible')
+    } finally {
+      setMarkingContact(false)
+    }
+  }
+
   const [tasks,      setTasks]      = useState<{ id: string; titre: string; done: boolean }[]>([])
   const [notes,      setNotes]      = useState<ClientNote[]>([
     clientNotes.text
@@ -367,6 +385,21 @@ export default function ClientDetail() {
 
           {/* Actions */}
           <div className="flex gap-2 flex-shrink-0">
+            <Button
+              size="sm"
+              className="bg-white/20 hover:bg-white/30 text-white border-white/30 border backdrop-blur-sm h-9"
+              variant="ghost"
+              onClick={markContacted}
+              disabled={markingContact}
+              title={client.date_dernier_contact
+                ? `Dernier contact : ${formatDate(client.date_dernier_contact)}`
+                : 'Aucun contact enregistré — ce client apparaît dans l\'alerte quotidienne'}
+            >
+              <PhoneCall className="w-3.5 h-3.5" />
+              {client.date_dernier_contact
+                ? `Contacté le ${formatDate(client.date_dernier_contact)}`
+                : 'Marquer comme contacté'}
+            </Button>
             <Button
               size="sm"
               className="bg-white/20 hover:bg-white/30 text-white border-white/30 border backdrop-blur-sm h-9"

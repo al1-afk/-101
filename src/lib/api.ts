@@ -209,6 +209,7 @@ export const api = {
   get:    <T>(path: string)                  => request<T>('GET',    path),
   post:   <T>(path: string, body: unknown)   => request<T>('POST',   path, body),
   patch:  <T>(path: string, body: unknown)   => request<T>('PATCH',  path, body),
+  put:    <T>(path: string, body: unknown)   => request<T>('PUT',    path, body),
   delete: <T>(path: string)                  => request<T>('DELETE', path),
   publicGet: <T>(path: string)               => request<T>('GET',    path, undefined, false),
   publicPost:<T>(path: string, body: unknown)=> request<T>('POST',   path, body, false),
@@ -772,4 +773,150 @@ export interface ActivityEntry {
 }
 export const activityApi = {
   list: (limit = 500) => api.get<ActivityEntry[]>(`/api/activity?limit=${limit}`),
+}
+
+/* ── Notifications & rapports automatiques ───────────────────── */
+export type ReportKind = 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
+
+export interface ServerNotification {
+  id:        string
+  kind:      string
+  severity:  'info' | 'success' | 'warning' | 'critical'
+  title:     string
+  message:   string | null
+  link:      string | null
+  icon:      string | null
+  data:      Record<string, number>
+  is_read:   boolean
+  read_at:   string | null
+  created_at:string
+}
+
+export interface NotificationSettings {
+  tenant_id:  string
+  enabled:    boolean
+  timezone:   string
+  recipients: string[]
+  email_enabled: boolean
+  inapp_enabled: boolean
+  tasks_alert_enabled: boolean
+  tasks_alert_hour:    number
+  tasks_stale_days:    number
+  contacts_alert_enabled: boolean
+  contacts_alert_hour:    number
+  contact_delay_days:     number
+  new_lead_grace_days:    number
+  daily_report_enabled: boolean
+  daily_report_hour:    number
+  weekly_report_enabled: boolean
+  weekly_report_hour:    number
+  weekly_report_weekday: number
+  updated_at: string
+}
+
+export interface NotificationRun {
+  id:            string
+  kind:          ReportKind
+  run_date:      string
+  scheduled_hour: number | null
+  trigger:       'auto' | 'manual'
+  status:        'running' | 'ok' | 'empty' | 'error'
+  attempt:       number
+  recipients:    number
+  emails_sent:   number
+  emails_failed: number
+  summary:       Record<string, number>
+  error:         string | null
+  started_at:    string
+  finished_at:   string | null
+}
+
+export const notificationsApi = {
+  /* Cloche */
+  list:     (limit = 50) => api.get<{ notifications: ServerNotification[]; unread: number }>(`/api/notifications?limit=${limit}`),
+  markRead: (id: string) => api.patch<{ success: true }>(`/api/notifications/${id}/read`, {}),
+  markAllRead: ()        => api.post<{ success: true; updated: number }>('/api/notifications/read-all', {}),
+  remove:   (id: string) => api.delete<{ success: true }>(`/api/notifications/${id}`),
+  clear:    ()           => api.post<{ success: true }>('/api/notifications/clear', {}),
+
+  /* Configuration (admin) */
+  settings: () => api.get<{
+    settings: NotificationSettings
+    clock:    { local_time: string; local_date: string; local_dow: number }
+    kinds:    Record<ReportKind, string>
+  }>('/api/notifications/settings'),
+  saveSettings: (patch: Partial<NotificationSettings>) =>
+    api.put<{ success: true; settings: NotificationSettings }>('/api/notifications/settings', patch),
+
+  runs: () => api.get<{ runs: NotificationRun[]; last: Array<Pick<NotificationRun, 'kind' | 'status' | 'emails_sent' | 'started_at' | 'finished_at' | 'summary'>> }>('/api/notifications/runs'),
+
+  /* Envoi immédiat + aperçu */
+  runNow:  (kind: ReportKind) => api.post<{ ok: boolean; empty: boolean; subject?: string }>(`/api/notifications/run/${kind}`, {}),
+  preview: (kind: ReportKind) => api.get<{
+    subject: string; empty: boolean; summary: Record<string, number>; html: string; text: string
+  }>(`/api/notifications/preview/${kind}`),
+}
+
+/* ── 7aty — suivi du temps & des distractions ─────────────────────
+   Route dédiée (et non tableApi) parce que ces lignes sont PERSONNELLES :
+   le serveur scope chaque requête à req.user.userId, jamais au seul
+   tenant. Aucun paramètre d'identité ne transite donc par le client. */
+export const timeApi = {
+  entries: (from?: Date, to?: Date) => {
+    const qs = new URLSearchParams()
+    if (from) qs.set('from', from.toISOString())
+    if (to)   qs.set('to',   to.toISOString())
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return api.get<TimeEntryDTO[]>(`/api/time/entries${suffix}`)
+  },
+  create: (data: Partial<TimeEntryDTO>) => api.post<TimeEntryDTO>('/api/time/entries', data),
+  update: (id: string, data: Partial<TimeEntryDTO>) => api.patch<TimeEntryDTO>(`/api/time/entries/${id}`, data),
+  remove: (id: string) => api.delete<{ success: boolean }>(`/api/time/entries/${id}`),
+
+  running: () => api.get<TimeEntryDTO | null>('/api/time/running'),
+  start:   (data: Partial<TimeEntryDTO>) =>
+    api.post<{ running: TimeEntryDTO; stopped: TimeEntryDTO | null }>('/api/time/start', data),
+  stop:    (data: Partial<TimeEntryDTO> = {}) => api.post<TimeEntryDTO>('/api/time/stop', data),
+  cancelRunning: () => api.delete<{ success: boolean }>('/api/time/running'),
+
+  goals:     () => api.get<TimeGoalDTO[]>('/api/time/goals'),
+  saveGoals: (goals: { category_key: string; max_minutes_week: number }[]) =>
+    api.put<TimeGoalDTO[]>('/api/time/goals', { goals }),
+
+  settings:     () => api.get<TimeSettingsDTO>('/api/time/settings'),
+  saveSettings: (patch: Partial<TimeSettingsDTO>) => api.put<TimeSettingsDTO>('/api/time/settings', patch),
+}
+
+export interface TimeEntryDTO {
+  id:            string
+  tenant_id:     string
+  user_id:       string
+  label:         string
+  category_key:  string
+  kind:          'valeur' | 'neutre' | 'repos' | 'perdu'
+  control_level: 'controle' | 'necessaire' | 'non_planifie' | 'perte_controle' | null
+  started_at:    string
+  ended_at:      string | null
+  duration_min:  number | null
+  notes:         string | null
+  source:        'manual' | 'timer' | 'quick'
+  created_at:    string
+  updated_at:    string
+}
+
+export interface TimeGoalDTO {
+  id:               string
+  category_key:     string
+  max_minutes_week: number
+}
+
+export interface TimeSettingsDTO {
+  work_start_hour:         number
+  work_end_hour:           number
+  work_days:               number[]
+  alert_threshold_min:     number
+  alerts_enabled:          boolean
+  weekly_high_value_hours: number
+  reminder_enabled:        boolean
+  reminder_hour:           number
 }

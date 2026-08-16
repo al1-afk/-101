@@ -887,6 +887,14 @@ router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
 })
 
 /* ── POST /api/auth/logout ───────────────────────────────────── */
+/* Le logout doit invalider :
+   1. Le refresh token (empêche le prolongement de session)
+   2. Le trusted_device COURANT (force la 2FA à la prochaine connexion — spec produit)
+
+   Point critique : la fermeture du navigateur NE doit PAS déclencher de re-2FA
+   — le cookie gestiq_device reste (HttpOnly, 90j) et la ligne trusted_devices
+   reste active. Ce n'est QUE le clic explicite sur "Se déconnecter" qui
+   révoque le trusted_device. */
 router.post('/logout', requireAuth, async (req: Request, res: Response) => {
   const rawToken = req.cookies?.gestiq_refresh
   if (rawToken) {
@@ -896,11 +904,26 @@ router.post('/logout', requireAuth, async (req: Request, res: Response) => {
       [tokenHash]
     ).catch(() => {})
   }
+
+  /* Révocation du device de confiance courant : la prochaine connexion
+     réclamera le code email. On révoque UNIQUEMENT ce device — les autres
+     appareils (bureau, tablette…) restent trusted. */
+  const deviceHash = getDeviceHash(req)
+  if (deviceHash) {
+    await query(
+      `UPDATE trusted_devices
+          SET revoked_at = NOW()
+        WHERE user_id = $1 AND device_hash = $2 AND revoked_at IS NULL`,
+      [req.user!.userId, deviceHash]
+    ).catch(() => {})
+  }
+
   /* La présence disparaît immédiatement du « qui est en ligne » — sans
      ça, l'utilisateur y resterait jusqu'à expiration du heartbeat. */
   void endPresence(req.user!.userId, String(req.body?.sessionKey ?? '') || null)
   trackSecurityEvent({ type: 'logout', req, reason: 'user_logout' })
   res.clearCookie('gestiq_refresh', { path: '/api/auth' })
+  res.clearCookie(DEVICE_COOKIE,   { ...cookieBaseOpts() })
   res.json({ success: true })
 })
 

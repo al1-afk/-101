@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import NotificationsAutoSettings from '@/components/settings/NotificationsAutoSettings'
 
 const LS = {
   company:  'gestiq_company',
@@ -292,6 +293,9 @@ export default function Parametres() {
         <TabsContent value="notifications" className="space-y-4">
           {/* Notifs système (son + navigateur) */}
           <SystemNotificationsPanel />
+
+          {/* Envois automatiques pilotés par le serveur (alertes + rapports) */}
+          <NotificationsAutoSettings />
 
           <div className="card-premium p-6 space-y-4">
             <h2 className="section-title flex items-center gap-2">

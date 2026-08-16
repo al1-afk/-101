@@ -27,6 +27,10 @@ export interface Client {
   statut?:              string | null  // 'Nouveau' | 'Actif' | 'Inactif'
   /* Client Premium : mis en avant (badge + tri en tête de liste). */
   is_premium?:          boolean | null
+  /* Dernier contact enregistré (migration 086). NULL = jamais contacté :
+     le client remonte alors dans l'alerte quotidienne « clients à
+     contacter » et dans les rapports. */
+  date_dernier_contact?: string | null
 }
 
 const KEY = 'clients'
