@@ -10,7 +10,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { taskRemindersApi, type TaskReminderPrefs } from '@/lib/api'
 import { currentTenantIdForCache } from '@/lib/authToken'
-import { pushStatus, enablePush, disablePush, type PushStatus } from '@/lib/pushClient'
+import {
+  pushStatus, enablePush, disablePush, syncPushSubscription, type PushStatus,
+} from '@/lib/pushClient'
 
 const PREFS   = 'task_reminder_prefs'
 const DEVICES = 'push_devices'
@@ -68,7 +70,12 @@ export function usePushSubscription() {
     setStatus(await pushStatus())
   }, [])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    /* Redéposer AVANT de lire l'état : un abonnement que le serveur a
+       perdu redevient ainsi actif tout seul, sans que la personne ait à
+       recliquer sur « Activer ». */
+    void syncPushSubscription().finally(() => { void refresh() })
+  }, [refresh])
 
   const enable = useCallback(async () => {
     setBusy(true)

@@ -13,6 +13,17 @@
  * qui cesse de s'en servir cesse d'être relancé au bout de deux semaines.
  * `time_settings.reminder_enabled = FALSE` coupe le rappel explicitement.
  *
+ * ── Pourquoi une boucle PAR ESPACE ─────────────────────────────────
+ * `time_entries`, `time_settings` et `notifications` portent FORCE ROW
+ * LEVEL SECURITY, avec la politique `tenant_id = current_tenant_id()`.
+ * Une requête passée par le pool NU ne pose jamais ce réglage : la
+ * comparaison vaut NULL et la requête ne ramène RIEN — silencieusement.
+ * En développement le compte local est SUPERUSER et masque le problème ;
+ * en production (`gestiq_api`) le rappel ne serait jamais parti. On
+ * énumère donc les espaces (table `tenants`, non FORCÉE) puis on
+ * interroge chacun via `tenantQuery`, qui pose le réglage et bascule sur
+ * le rôle soumis à la RLS.
+ *
  * ── Pourquoi ça ne peut pas notifier deux fois ──────────────────────
  * `notifications.dedupe_key` = « 7aty_reminder:<date locale> », couvert
  * par un index unique (tenant_id, user_id, dedupe_key) posé par la
@@ -27,6 +38,7 @@
  * dans la table `notifications`, qui est le contrat stable entre les deux.
  */
 import type { Pool } from 'pg'
+import { tenantQuery } from '../db/pool'
 import { logger } from './logger'
 
 /* Fuseau retenu quand l'espace n'a pas encore de configuration de
@@ -52,7 +64,6 @@ const OFF_DAY_MIN = 60
 export interface ReminderCandidate {
   tenant_id:   string
   user_id:     string
-  tenant_slug: string
   local_date:  string
   local_hour:  number
   local_dow:   number      // 1 = lundi … 7 = dimanche
@@ -144,18 +155,36 @@ export function buildReminderText(d: ReminderDecision): { title: string; message
 ───────────────────────────────────────────────────────────────────── */
 
 export async function tickTimeReminders(pool: Pool): Promise<number> {
+  /* `tenants` n'est pas FORCÉE : c'est le seul point de départ lisible
+     sans contexte tenant. */
+  const { rows: tenants } = await pool.query<{ id: string; slug: string }>(
+    `SELECT id, slug FROM public.tenants WHERE is_active = TRUE`
+  )
+
+  let sent = 0
+  for (const tenant of tenants) {
+    try {
+      sent += await tickTenant(tenant.id, tenant.slug)
+    } catch (e: any) {
+      logger.error(`[7aty] espace ${tenant.slug} :`, e?.message ?? e)
+    }
+  }
+  return sent
+}
+
+async function tickTenant(tenantId: string, tenantSlug: string): Promise<number> {
   /* L'heure locale est calculée par PostgreSQL : le serveur tourne en UTC
      en production, et convertir soi-même reviendrait à réimplémenter la
      base de fuseaux (heure d'été comprise). */
-  const { rows } = await pool.query<ReminderCandidate>(`
+  const rows = await tenantQuery<ReminderCandidate>(tenantId, `
     WITH actifs AS (
       SELECT DISTINCT tenant_id, user_id
-        FROM public.time_entries
-       WHERE started_at > NOW() - INTERVAL '${ACTIVE_WINDOW_DAYS} days'
+        FROM time_entries
+       WHERE tenant_id = $2
+         AND started_at > NOW() - INTERVAL '${ACTIVE_WINDOW_DAYS} days'
     )
     SELECT a.tenant_id,
            a.user_id,
-           t.slug AS tenant_slug,
            COALESCE(ns.timezone, $1)               AS timezone,
            to_char(NOW() AT TIME ZONE COALESCE(ns.timezone, $1), 'YYYY-MM-DD')  AS local_date,
            EXTRACT(hour   FROM NOW() AT TIME ZONE COALESCE(ns.timezone, $1))::int AS local_hour,
@@ -165,13 +194,15 @@ export async function tickTimeReminders(pool: Pool): Promise<number> {
            COALESCE(s.work_end_hour,   18)         AS work_end_hour,
            COALESCE(s.work_days, '{1,2,3,4,5,6}')  AS work_days
       FROM actifs a
-      JOIN public.tenants t ON t.id = a.tenant_id AND t.is_active = TRUE
-      LEFT JOIN public.time_settings s
+      /* Appartenance vérifiée : une personne retirée de l'espace ne doit
+         plus être relancée sur ses données. */
+      JOIN tenant_users tu ON tu.user_id = a.user_id AND tu.tenant_id = a.tenant_id
+      LEFT JOIN time_settings s
              ON s.tenant_id = a.tenant_id AND s.user_id = a.user_id
-      LEFT JOIN public.notification_settings ns
+      LEFT JOIN notification_settings ns
              ON ns.tenant_id = a.tenant_id
      WHERE COALESCE(s.reminder_enabled, TRUE) = TRUE
-  `, [FALLBACK_TZ])
+  `, [FALLBACK_TZ, tenantId])
 
   let sent = 0
   for (const c of rows) {
@@ -181,29 +212,30 @@ export async function tickTimeReminders(pool: Pool): Promise<number> {
     if (c.local_hour < c.reminder_hour) continue
 
     try {
-      const tracked = await trackedMinutesForDay(pool, c)
+      const tracked = await trackedMinutesForDay(c)
       const decision = decideReminder(c, tracked)
       if (!decision.send) continue
 
       const { title, message } = buildReminderText(decision)
-      const { rowCount } = await pool.query(`
-        INSERT INTO public.notifications
+      const inserted = await tenantQuery<{ id: string }>(tenantId, `
+        INSERT INTO notifications
           (tenant_id, user_id, kind, severity, title, message, link, icon, data, dedupe_key)
         VALUES ($1, $2, '7aty_reminder', 'info', $3, $4, $5, '⏳',
                 jsonb_build_object('tracked_min', $6::int, 'missing_min', $7::int), $8)
         ON CONFLICT (tenant_id, user_id, dedupe_key) WHERE dedupe_key IS NOT NULL
         DO NOTHING
+        RETURNING id
       `, [
         c.tenant_id, c.user_id, title, message,
-        `/${c.tenant_slug}/7aty`,
+        `/${tenantSlug}/7aty`,
         Math.round(decision.trackedMin), Math.round(decision.missingMin),
         `7aty_reminder:${c.local_date}`,
       ])
-      if (rowCount) sent++
+      if (inserted.length) sent++
     } catch (e: any) {
       /* L'échec d'une personne ne doit pas priver les autres de leur
          rappel — on journalise et on continue. */
-      logger.error(`[7aty] rappel ${c.tenant_slug}/${c.user_id} :`, e?.message ?? e)
+      logger.error(`[7aty] rappel ${tenantSlug}/${c.user_id} :`, e?.message ?? e)
     }
   }
   return sent
@@ -216,12 +248,12 @@ export async function tickTimeReminders(pool: Pool): Promise<number> {
  * quelqu'un qui a laissé tourner son bloc de travail toute la soirée
  * serait relancé alors qu'il est justement en train de mesurer.
  */
-async function trackedMinutesForDay(pool: Pool, c: ReminderCandidate): Promise<number> {
-  const { rows } = await pool.query<{ tracked: string }>(`
+async function trackedMinutesForDay(c: ReminderCandidate): Promise<number> {
+  const rows = await tenantQuery<{ tracked: string }>(c.tenant_id, `
     SELECT COALESCE(SUM(
              COALESCE(duration_min, EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)
            ), 0) AS tracked
-      FROM public.time_entries
+      FROM time_entries
      WHERE tenant_id = $1
        AND user_id   = $2
        AND (started_at AT TIME ZONE $3)::date = $4::date

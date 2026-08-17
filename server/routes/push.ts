@@ -17,10 +17,13 @@
  * personne qui n'utilise plus ce poste.
  */
 import { Router, Request, Response, NextFunction } from 'express'
-import { pool } from '../db/pool'
+import { tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { logger } from '../lib/logger'
-import { getVapidPublicKey, isPushConfigured, sendPushToUser } from '../lib/webPush'
+import {
+  getVapidPublicKey, isPushConfigured, sendPushToUser,
+  isAllowedPushEndpoint, MAX_DEVICES_PER_USER,
+} from '../lib/webPush'
 
 const router = Router()
 
@@ -48,10 +51,12 @@ router.post('/subscribe', async (req: Request, res: Response) => {
   const p256dh   = typeof sub?.keys?.p256dh === 'string' ? sub.keys.p256dh : ''
   const auth     = typeof sub?.keys?.auth   === 'string' ? sub.keys.auth   : ''
 
-  /* Un endpoint est toujours une URL https du service de push. Refuser
-     tout le reste évite de stocker n'importe quoi — et coupe court à
-     une tentative de faire émettre le serveur vers une cible choisie. */
-  if (!endpoint || !/^https:\/\//i.test(endpoint) || endpoint.length > 2000) {
+  /* L'endpoint est une URL CHOISIE PAR LE CLIENT vers laquelle le
+     serveur émettra ensuite des requêtes. Seuls les hôtes des services
+     de push réellement existants sont acceptés : sans cette liste
+     blanche, la route est une SSRF authentifiée doublée d'un scanner de
+     réseau interne (cf. server/lib/webPush.ts). */
+  if (!endpoint || endpoint.length > 2000 || !isAllowedPushEndpoint(endpoint)) {
     return res.status(400).json({ error: 'Abonnement invalide' })
   }
   if (!p256dh || !auth) {
@@ -61,9 +66,10 @@ router.post('/subscribe', async (req: Request, res: Response) => {
   const label = typeof req.body?.label === 'string' ? req.body.label.slice(0, 80) : null
   const ua = String(req.headers['user-agent'] ?? '').slice(0, 300)
 
+  const tenantId = req.user!.tenantId
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO public.push_subscriptions
+    const row = await tenantQueryOne<{ id: string }>(tenantId,
+      `INSERT INTO push_subscriptions
          (tenant_id, user_id, endpoint, p256dh, auth, user_agent, label)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (endpoint) DO UPDATE SET
@@ -72,12 +78,28 @@ router.post('/subscribe', async (req: Request, res: Response) => {
          p256dh       = EXCLUDED.p256dh,
          auth         = EXCLUDED.auth,
          user_agent   = EXCLUDED.user_agent,
-         label        = COALESCE(EXCLUDED.label, public.push_subscriptions.label),
+         label        = COALESCE(EXCLUDED.label, push_subscriptions.label),
          last_seen_at = NOW()
        RETURNING id`,
-      [req.user!.tenantId, req.user!.userId, endpoint, p256dh, auth, ua, label]
+      [tenantId, req.user!.userId, endpoint, p256dh, auth, ua, label]
     )
-    res.status(201).json({ success: true, id: rows[0]?.id })
+
+    /* Plafond d'appareils : on garde les plus récemment vus. Sans lui,
+       un compte pourrait accumuler des milliers d'abonnements et faire
+       de chaque rappel une rafale de requêtes sortantes. */
+    await tenantQuery(tenantId,
+      `DELETE FROM push_subscriptions
+        WHERE tenant_id = $1 AND user_id = $2
+          AND id NOT IN (
+            SELECT id FROM push_subscriptions
+             WHERE tenant_id = $1 AND user_id = $2
+             ORDER BY last_seen_at DESC
+             LIMIT ${MAX_DEVICES_PER_USER}
+          )`,
+      [tenantId, req.user!.userId]
+    ).catch(() => {})
+
+    res.status(201).json({ success: true, id: row?.id })
   } catch (err: any) {
     logger.error('[POST /api/push/subscribe]', err?.code, err?.message)
     res.status(500).json({ error: 'Erreur serveur' })
@@ -89,8 +111,8 @@ router.post('/unsubscribe', async (req: Request, res: Response) => {
   const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint.trim() : ''
   if (!endpoint) return res.status(400).json({ error: 'Endpoint manquant' })
   try {
-    await pool.query(
-      `DELETE FROM public.push_subscriptions
+    await tenantQuery(req.user!.tenantId,
+      `DELETE FROM push_subscriptions
         WHERE endpoint = $1 AND tenant_id = $2 AND user_id = $3`,
       [endpoint, req.user!.tenantId, req.user!.userId]
     )
@@ -104,9 +126,9 @@ router.post('/unsubscribe', async (req: Request, res: Response) => {
 /* ── GET /api/push/devices ────────────────────────────────────────── */
 router.get('/devices', async (req: Request, res: Response) => {
   try {
-    const { rows } = await pool.query(
+    const rows = await tenantQuery(req.user!.tenantId,
       `SELECT id, label, user_agent, created_at, last_seen_at
-         FROM public.push_subscriptions
+         FROM push_subscriptions
         WHERE tenant_id = $1 AND user_id = $2
         ORDER BY last_seen_at DESC`,
       [req.user!.tenantId, req.user!.userId]
@@ -118,6 +140,12 @@ router.get('/devices', async (req: Request, res: Response) => {
   }
 })
 
+/* Un test par minute et par compte. Le test déclenche des requêtes
+   sortantes ; sans cadence, il resterait un moyen commode de générer du
+   trafic depuis le serveur. */
+const TEST_COOLDOWN_MS = 60_000
+const lastTestAt = new Map<string, number>()
+
 /* ── POST /api/push/test ──────────────────────────────────────────────
    « Envoie-moi une notification maintenant » : c'est le seul moyen de
    vérifier toute la chaîne (autorisation navigateur → abonnement →
@@ -126,8 +154,15 @@ router.post('/test', async (req: Request, res: Response) => {
   if (!isPushConfigured()) {
     return res.status(503).json({ error: 'Web Push non configuré sur le serveur' })
   }
+  const key = `${req.user!.tenantId}:${req.user!.userId}`
+  const previous = lastTestAt.get(key) ?? 0
+  if (Date.now() - previous < TEST_COOLDOWN_MS) {
+    return res.status(429).json({ error: 'Patiente une minute avant un nouveau test' })
+  }
+  lastTestAt.set(key, Date.now())
+
   try {
-    const delivered = await sendPushToUser(pool, req.user!.tenantId, req.user!.userId, {
+    const delivered = await sendPushToUser(req.user!.tenantId, req.user!.userId, {
       title: 'Notification de test ✅',
       body:  'Si tu lis ceci, les rappels de tâches t\'atteindront même app fermée.',
       tag:   'push-test',

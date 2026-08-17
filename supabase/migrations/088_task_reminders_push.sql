@@ -50,11 +50,31 @@ COMMENT ON COLUMN public.team_member_tasks.due_time IS
 COMMENT ON COLUMN public.team_member_tasks.reminder_offsets IS
   'Minutes avant l''échéance. NULL = défauts de la personne, {} = aucun rappel';
 
--- Le planificateur balaie les tâches datées non terminées, une fois par
--- minute : sans cet index il relirait toute la table à chaque passage.
+-- Un rappel n'a de sens que sur une tâche encore ouverte. « Annulée »
+-- est un statut de premier plan (migration 051, et le menu de statut de
+-- ProjetDetail le propose) : l'exclure ici ET dans le planificateur est
+-- la même règle que partout ailleurs dans le dépôt — reportData.ts et
+-- les cinq écrans de tâches filtrent déjà `NOT IN ('done','cancelled')`.
+DROP INDEX IF EXISTS public.idx_team_tasks_due_pending;
 CREATE INDEX IF NOT EXISTS idx_team_tasks_due_pending
   ON public.team_member_tasks (tenant_id, due_date)
-  WHERE due_date IS NOT NULL AND status <> 'done';
+  WHERE due_date IS NOT NULL AND status NOT IN ('done', 'cancelled');
+
+-- Les rappels portés par la TÂCHE méritent le même garde-fou que ceux
+-- des préférences : ils entrent par le CRUD générique, qui ne valide
+-- rien. Sans cette contrainte, un client mal intentionné (ou un bug)
+-- pourrait poser 500 rappels sur une tâche.
+ALTER TABLE public.team_member_tasks
+  DROP CONSTRAINT IF EXISTS team_member_tasks_reminder_offsets_ck;
+ALTER TABLE public.team_member_tasks
+  ADD CONSTRAINT team_member_tasks_reminder_offsets_ck
+  CHECK (
+    reminder_offsets IS NULL
+    OR array_length(reminder_offsets, 1) IS NULL
+    OR (array_length(reminder_offsets, 1) <= 5
+        AND 0 <= ALL(reminder_offsets)
+        AND 43200 >= ALL(reminder_offsets))
+  );
 
 -- ────────────────────────────────────────────────────────────────────
 --  2. PRÉFÉRENCES DE RAPPEL (par personne)
@@ -140,10 +160,24 @@ COMMENT ON TABLE public.push_subscriptions IS
 --  La clé porte l'échéance VISÉE, pas seulement la tâche : repousser
 --  une tâche à demain réarme naturellement ses rappels, sans qu'on ait
 --  à nettoyer quoi que ce soit.
+--
+--  ── Pourquoi `due_key` et non l'instant `due_at` ───────────────────
+--  `due_at` est CALCULÉ : date + heure de la tâche, résolues avec
+--  l'heure par défaut de la personne et le fuseau de l'espace. Ces deux
+--  réglages sont modifiables. Prendre l'instant comme clé ferait donc
+--  qu'un simple passage de « 09:00 » à « 10:00 » dans les préférences
+--  change la clé de TOUTES les tâches sans heure — et renvoie des
+--  rappels déjà partis.
+--
+--  `due_key` ne retient que ce que la personne a réellement saisi sur
+--  la tâche : « 2026-08-18T14:00 », ou « 2026-08-18T~ » quand l'heure
+--  est laissée vide. Elle ne change que si l'ÉCHÉANCE change, ce qui
+--  est exactement le moment où un nouveau rappel est légitime.
 -- ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.task_reminders_sent (
   task_id    UUID NOT NULL REFERENCES public.team_member_tasks(id) ON DELETE CASCADE,
   offset_min INTEGER NOT NULL,
+  -- Instant visé, conservé pour l'analyse (« ce rappel visait quand ? »).
   due_at     TIMESTAMPTZ NOT NULL,
 
   tenant_id  UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -154,7 +188,45 @@ CREATE TABLE IF NOT EXISTS public.task_reminders_sent (
   PRIMARY KEY (task_id, offset_min, due_at)
 );
 
+-- Clé stable de l'échéance SAISIE (voir l'explication ci-dessus).
+-- Ajoutée par ALTER pour reprendre proprement une base où la 088 avait
+-- déjà tourné avec l'ancienne clé.
+ALTER TABLE public.task_reminders_sent
+  ADD COLUMN IF NOT EXISTS due_key TEXT;
+
+UPDATE public.task_reminders_sent
+   SET due_key = to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI')
+ WHERE due_key IS NULL;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.task_reminders_sent WHERE due_key IS NULL) THEN
+    RAISE EXCEPTION 'due_key non renseignée — reprise impossible';
+  END IF;
+  ALTER TABLE public.task_reminders_sent ALTER COLUMN due_key SET NOT NULL;
+
+  -- Bascule de clé primaire : (tâche, offset, échéance saisie).
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'public.task_reminders_sent'::regclass
+       AND contype = 'p'
+       AND pg_get_constraintdef(oid) LIKE '%due_at%'
+  ) THEN
+    ALTER TABLE public.task_reminders_sent DROP CONSTRAINT task_reminders_sent_pkey;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'public.task_reminders_sent'::regclass AND contype = 'p'
+  ) THEN
+    ALTER TABLE public.task_reminders_sent
+      ADD CONSTRAINT task_reminders_sent_pkey PRIMARY KEY (task_id, offset_min, due_key);
+  END IF;
+END $$;
+
 -- Purge : les rappels d'il y a plus de 90 jours n'apprennent plus rien.
+-- Elle est exécutée par le planificateur (server/lib/taskReminderScheduler.ts,
+-- purgeOldReminders) — cet index est là pour elle.
 CREATE INDEX IF NOT EXISTS idx_task_reminders_sent_at
   ON public.task_reminders_sent (sent_at);
 

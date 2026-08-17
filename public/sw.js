@@ -108,8 +108,14 @@ self.addEventListener('notificationclick', e => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
       for (const client of list) {
         if ('focus' in client) {
-          client.navigate?.(target)
-          return client.focus()
+          /* `navigate()` REJETTE quand le client n'est pas contrôlé par
+             ce service worker (spec) — et `matchAll` est justement
+             appelé avec includeUncontrolled. Sans ce rattrapage, le
+             rejet non géré empêchait la mise au premier plan. */
+          const navigated = client.navigate
+            ? Promise.resolve(client.navigate(target)).catch(() => null)
+            : Promise.resolve(null)
+          return navigated.then(c => (c || client).focus())
         }
       }
       return self.clients.openWindow(target)

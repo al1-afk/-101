@@ -18,6 +18,20 @@
  * part (`npm run test:time`). Écrit en SQL, il aurait été impossible à
  * vérifier sans base.
  *
+ * ── Pourquoi une boucle PAR ESPACE et non une seule requête ────────
+ * Les tables portent `FORCE ROW LEVEL SECURITY` et leur politique est
+ * `tenant_id = current_tenant_id()`. Une requête passée par le pool
+ * NU ne pose jamais ce réglage : `current_tenant_id()` vaut NULL, la
+ * comparaison vaut NULL, et la requête ne ramène RIEN — silencieusement.
+ * En développement le piège est invisible, parce que le compte local est
+ * SUPERUSER et échappe à la RLS ; en production (`gestiq_api`, ni
+ * superuser ni BYPASSRLS) le planificateur n'aurait jamais rien envoyé.
+ *
+ * On énumère donc les espaces actifs (table `tenants`, non FORCÉE), puis
+ * on interroge chacun via `tenantQuery`, qui pose le réglage et bascule
+ * sur le rôle soumis à la RLS. Le cloisonnement reste vrai même pour un
+ * travail de fond, et le nombre d'espaces se compte en dizaines.
+ *
  * ── Pourquoi ça ne peut pas notifier deux fois ─────────────────────
  * `task_reminders_sent` a pour clé (tâche, offset, échéance visée).
  * L'INSERT ... ON CONFLICT DO NOTHING RETURNING sert de verrou : la
@@ -27,6 +41,7 @@
  * repousser une tâche réarme naturellement ses rappels.
  */
 import type { Pool } from 'pg'
+import { tenantQuery } from '../db/pool'
 import { sendEmail } from './email'
 import { logger } from './logger'
 import { sendPushToUser, isPushConfigured } from './webPush'
@@ -116,6 +131,21 @@ export function offsetLabel(offsetMin: number): string {
   return d === 1 ? 'demain' : `dans ${d} jours`
 }
 
+/**
+ * Clé stable de l'échéance, telle qu'elle a été SAISIE.
+ *
+ * Volontairement construite sur `due_date` + `due_time` bruts, et non
+ * sur l'instant calculé : l'instant dépend de l'heure par défaut de la
+ * personne et du fuseau de l'espace, deux réglages modifiables. Passer
+ * ses préférences de 09:00 à 10:00 renverrait sinon tous les rappels
+ * déjà partis des tâches sans heure. Le « ~ » marque justement ce cas.
+ */
+export function buildDueKey(dueDate: string | Date, dueTime: string | null): string {
+  const date = typeof dueDate === 'string' ? dueDate.slice(0, 10)
+    : `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}-${String(dueDate.getDate()).padStart(2, '0')}`
+  return `${date}T${dueTime ? dueTime.slice(0, 5) : '~'}`
+}
+
 /** « 14:30 » dans le fuseau demandé — l'heure telle que la personne la lit. */
 export function formatLocalTime(d: Date, timeZone: string): string {
   try {
@@ -134,19 +164,45 @@ export function formatLocalTime(d: Date, timeZone: string): string {
 export async function tickTaskReminders(pool: Pool): Promise<number> {
   const now = new Date()
 
+  /* `tenants` n'est pas FORCÉE : elle se lit sans contexte tenant.
+     C'est le point d'entrée qui permet ensuite d'ouvrir un contexte
+     propre à chaque espace. */
+  const { rows: tenants } = await pool.query<{ id: string; slug: string }>(
+    `SELECT id, slug FROM public.tenants WHERE is_active = TRUE`
+  )
+
+  let sent = 0
+  for (const tenant of tenants) {
+    try {
+      sent += await tickTenant(pool, tenant.id, tenant.slug, now)
+    } catch (e: any) {
+      /* Un espace en échec ne prive pas les autres de leurs rappels. */
+      logger.error(`[task-reminders] espace ${tenant.slug} :`, e?.message ?? e)
+    }
+  }
+  return sent
+}
+
+async function tickTenant(
+  pool: Pool,
+  tenantId: string,
+  tenantSlug: string,
+  now: Date,
+): Promise<number> {
   /* L'échéance est une heure LOCALE (« mardi 14 h »), pas un instant
      UTC : `date + heure AT TIME ZONE fuseau` la convertit en instant
      réel, en laissant PostgreSQL gérer l'heure d'été. */
-  const { rows } = await pool.query<any>(`
+  const rows = await tenantQuery<any>(tenantId, `
     SELECT t.id                AS task_id,
            t.tenant_id,
-           tn.slug             AS tenant_slug,
            u.id                AS user_id,
            u.email,
            u.name              AS user_name,
            t.title,
            t.priority,
            t.project_id,
+           t.due_date,
+           t.due_time,
            pr.nom              AS project_name,
            COALESCE(ns.timezone, 'Africa/Casablanca') AS timezone,
            ((t.due_date + COALESCE(t.due_time, p.default_due_time, '09:00'::time))
@@ -156,54 +212,79 @@ export async function tickTaskReminders(pool: Pool): Promise<number> {
            COALESCE(p.push_enabled,  TRUE) AS push_enabled,
            COALESCE(p.inapp_enabled, TRUE) AS inapp_enabled
       FROM public.team_member_tasks t
-      JOIN public.tenants tn ON tn.id = t.tenant_id AND tn.is_active = TRUE
       /* Destinataire : la personne à qui la tâche est attribuée ; à
          défaut, celle qui l'a créée. Les tâches confiées à un membre
          d'équipe ou à un stagiaire sortent d'ici — ces comptes n'ont pas
          de ligne dans la table users et relèvent de /api/my-space. */
       JOIN public.users u ON u.id = COALESCE(t.assigned_user_id, t.created_by)
                          AND u.is_active = TRUE
+      /* Appartenance VÉRIFIÉE : sans elle, une personne retirée de
+         l'espace continuerait de recevoir par email le titre et le
+         projet des tâches de ce tenant. */
+      JOIN public.tenant_users tu ON tu.user_id = u.id AND tu.tenant_id = t.tenant_id
       LEFT JOIN public.projets pr ON pr.id = t.project_id
       LEFT JOIN public.notification_settings ns ON ns.tenant_id = t.tenant_id
       LEFT JOIN public.task_reminder_prefs p
              ON p.tenant_id = t.tenant_id
             AND p.user_id   = COALESCE(t.assigned_user_id, t.created_by)
-     WHERE t.due_date IS NOT NULL
-       AND t.status <> 'done'
+     WHERE t.tenant_id = $1
+       AND t.due_date IS NOT NULL
+       /* « Annulée » est fermée au même titre que « terminée » —
+          même règle que reportData.ts et les écrans de tâches. */
+       AND t.status NOT IN ('done', 'cancelled')
        AND t.team_member_id IS NULL
        AND t.assigned_stagiaire_id IS NULL
        AND t.due_date BETWEEN CURRENT_DATE - 1 AND CURRENT_DATE + ${HORIZON_DAYS}
-  `)
+  `, [tenantId])
 
   let sent = 0
   for (const row of rows) {
     const dueAt = new Date(row.due_at)
     const offsets = Array.isArray(row.offsets) ? row.offsets.map(Number) : []
+    const dueKey = buildDueKey(row.due_date, row.due_time)
 
     for (const offset of pendingOffsets(dueAt, offsets, now)) {
       try {
         /* Verrou : qui obtient la ligne envoie, les autres passent. */
-        const lock = await pool.query(
+        const lock = await tenantQuery(tenantId,
           `INSERT INTO public.task_reminders_sent
-             (task_id, offset_min, due_at, tenant_id, user_id)
-           VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (task_id, offset_min, due_at) DO NOTHING
+             (task_id, offset_min, due_key, due_at, tenant_id, user_id)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (task_id, offset_min, due_key) DO NOTHING
            RETURNING task_id`,
-          [row.task_id, offset, dueAt.toISOString(), row.tenant_id, row.user_id]
+          [row.task_id, offset, dueKey, dueAt.toISOString(), tenantId, row.user_id]
         )
-        if (!lock.rowCount) continue
+        if (!lock.length) continue
 
-        const channels = await deliver(pool, row, dueAt, offset)
-        await pool.query(
-          `UPDATE public.task_reminders_sent SET channels = $1
-            WHERE task_id = $2 AND offset_min = $3 AND due_at = $4`,
-          [channels, row.task_id, offset, dueAt.toISOString()]
-        ).catch(() => {})
+        const channels = await deliver(pool, { ...row, tenant_slug: tenantSlug }, dueAt, offset, dueKey)
 
-        sent++
+        if (channels.length) {
+          await tenantQuery(tenantId,
+            `UPDATE public.task_reminders_sent SET channels = $1
+              WHERE task_id = $2 AND offset_min = $3 AND due_key = $4`,
+            [channels, row.task_id, offset, dueKey]
+          ).catch(() => {})
+          sent++
+        } else {
+          /* AUCUN canal n'a abouti : garder le verrou perdrait le rappel
+             pour toujours. On le relâche pour que le passage suivant
+             retente, tant que la fenêtre de rattrapage le permet. */
+          await tenantQuery(tenantId,
+            `DELETE FROM public.task_reminders_sent
+              WHERE task_id = $1 AND offset_min = $2 AND due_key = $3`,
+            [row.task_id, offset, dueKey]
+          ).catch(() => {})
+          logger.error(`[task-reminders] ${row.task_id}/${offset} : aucun canal, verrou relâché`)
+        }
       } catch (e: any) {
-        /* L'échec d'un rappel ne doit pas priver les suivants. */
+        /* L'échec d'un rappel ne doit pas priver les suivants. Le verrou
+           est relâché pour la même raison que ci-dessus. */
         logger.error(`[task-reminders] ${row.task_id}/${offset} :`, e?.message ?? e)
+        await tenantQuery(tenantId,
+          `DELETE FROM public.task_reminders_sent
+            WHERE task_id = $1 AND offset_min = $2 AND due_key = $3 AND channels = '{}'`,
+          [row.task_id, offset, dueKey]
+        ).catch(() => {})
       }
     }
   }
@@ -216,6 +297,7 @@ async function deliver(
   row: any,
   dueAt: Date,
   offset: number,
+  dueKey: string,
 ): Promise<string[]> {
   /* L'heure affichée est celle de l'espace : « échéance 14:30 » doit
      vouloir dire 14 h 30 à Oujda, pas en UTC. */
@@ -232,7 +314,9 @@ async function deliver(
         une trace consultable même si l'email part en spam. */
   if (row.inapp_enabled) {
     try {
-      await pool.query(
+      /* `notifications` est FORCE RLS : sans contexte tenant, l'INSERT
+         est refusé par la politique WITH CHECK. */
+      await tenantQuery(row.tenant_id,
         `INSERT INTO public.notifications
            (tenant_id, user_id, kind, severity, title, message, link, icon, data, dedupe_key)
          VALUES ($1,$2,'task_reminder',$3,$4,$5,$6,'⏰',
@@ -243,7 +327,9 @@ async function deliver(
           row.tenant_id, row.user_id,
           row.priority === 'urgent' ? 'warning' : 'info',
           title, body, link, row.task_id, offset,
-          `task_reminder:${row.task_id}:${offset}:${dueAt.toISOString()}`,
+          /* Même clé stable que le verrou : la cloche ne doit pas se
+             dédoubler quand une préférence d'heure change. */
+          `task_reminder:${row.task_id}:${offset}:${dueKey}`,
         ]
       )
       channels.push('inapp')
@@ -255,7 +341,7 @@ async function deliver(
   /* 2. Navigateur — atteint la personne même application fermée. */
   if (row.push_enabled && isPushConfigured()) {
     try {
-      const delivered = await sendPushToUser(pool, row.tenant_id, row.user_id, {
+      const delivered = await sendPushToUser(row.tenant_id, row.user_id, {
         title, body, url: link,
         /* Une même tâche remplace son propre rappel plutôt que d'empiler
            « 1 jour avant » et « 30 min avant » à l'écran. */
@@ -323,6 +409,34 @@ function reminderHtml(o: {
 </body></html>`
 }
 
+/**
+ * Purge des verrous d'envoi de plus de 90 jours.
+ *
+ * La table ne sert qu'à empêcher un doublon ; passé l'échéance de
+ * plusieurs mois, une ligne n'empêche plus rien et n'apprend plus rien.
+ * Sans cette purge, elle grossit d'une ligne par rappel et par tâche,
+ * indéfiniment — l'index posé par la migration 088 existe pour elle.
+ */
+export async function purgeOldReminders(pool: Pool): Promise<number> {
+  const { rows: tenants } = await pool.query<{ id: string }>(
+    `SELECT id FROM public.tenants WHERE is_active = TRUE`
+  )
+  let purged = 0
+  for (const t of tenants) {
+    try {
+      const rows = await tenantQuery<{ task_id: string }>(t.id,
+        `DELETE FROM public.task_reminders_sent
+          WHERE sent_at < NOW() - INTERVAL '90 days'
+          RETURNING task_id`
+      )
+      purged += rows.length
+    } catch (e: any) {
+      logger.error('[task-reminders] purge :', e?.message ?? e)
+    }
+  }
+  return purged
+}
+
 /* ─────────────────────────────────────────────────────────────────────
    Démarrage
 ───────────────────────────────────────────────────────────────────── */
@@ -341,5 +455,13 @@ export function startTaskReminderScheduler(pool: Pool): void {
      de migration. */
   setTimeout(safeTick, 90_000)
   setInterval(safeTick, TICK_MS)
+
+  /* Purge quotidienne — décalée de 10 min pour ne pas tomber en même
+     temps que la vague de rappels du démarrage. */
+  const purge = () => purgeOldReminders(pool)
+    .then(n => { if (n) logger.info(`[task-reminders] ${n} verrou(x) purgé(s)`) })
+    .catch(err => logger.error('[task-reminders] purge échouée (ignorée) :', err?.message ?? err))
+  setTimeout(purge, 10 * 60_000)
+  setInterval(purge, 24 * 3600_000)
   logger.info('[task-reminders] planificateur démarré (passage chaque minute)')
 }

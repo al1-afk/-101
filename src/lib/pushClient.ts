@@ -84,9 +84,47 @@ export async function pushStatus(): Promise<PushStatus> {
   if (Notification.permission === 'denied') return status('denied')
 
   const existing = await reg.pushManager.getSubscription()
-  if (existing) return status('ready', existing.endpoint)
+  if (existing) {
+    /* Un abonnement navigateur ne prouve pas que le SERVEUR le connaît :
+       la base a pu être restaurée, l'abonnement enregistré sous un autre
+       compte, ou les clés VAPID changées. On ne se déclare « prêt » que
+       si l'abonnement correspond à la clé du serveur ET qu'il y figure. */
+    if (!matchesServerKey(existing, serverKey)) return status('available')
+    return status('ready', existing.endpoint)
+  }
 
-  return { ...status('available'), endpoint: serverKey ? null : null }
+  return status('available')
+}
+
+/** L'abonnement a-t-il été créé avec la clé publique actuelle du serveur ? */
+function matchesServerKey(sub: PushSubscription, serverKey: string): boolean {
+  const raw = sub.options?.applicationServerKey
+  if (!raw || !serverKey) return false
+  const encoded = btoa(String.fromCharCode(...new Uint8Array(raw)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return encoded === serverKey
+}
+
+/**
+ * Redépose l'abonnement de ce navigateur auprès du serveur.
+ *
+ * À appeler à chaque ouverture de l'application : l'abonnement peut
+ * avoir été renouvelé par le navigateur, ou avoir disparu côté serveur
+ * (restauration, changement de compte). L'UPSERT est sans effet quand
+ * tout est déjà en ordre — mais sans lui, un abonnement orphelin ne
+ * reçoit plus jamais rien, en silence.
+ */
+export async function syncPushSubscription(): Promise<boolean> {
+  try {
+    if (!('PushManager' in window) || Notification.permission !== 'granted') return false
+    const reg = await registration()
+    const sub = await reg?.pushManager.getSubscription()
+    if (!sub) return false
+    await api.post('/api/push/subscribe', { subscription: sub.toJSON(), label: deviceLabel() })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -118,12 +156,8 @@ export async function enablePush(label?: string): Promise<PushStatus> {
      publique (serveur redéployé, clés régénérées) : il ne recevrait
      plus rien. On le remplace au lieu de le réutiliser aveuglément. */
   const existing = await reg.pushManager.getSubscription()
-  if (existing) {
-    const sameKey = existing.options?.applicationServerKey
-      ? btoa(String.fromCharCode(...new Uint8Array(existing.options.applicationServerKey)))
-          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') === publicKey
-      : false
-    if (!sameKey) await existing.unsubscribe().catch(() => {})
+  if (existing && !matchesServerKey(existing, publicKey)) {
+    await existing.unsubscribe().catch(() => {})
   }
 
   const sub = (await reg.pushManager.getSubscription())

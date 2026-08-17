@@ -16,8 +16,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  pendingOffsets, offsetLabel, formatLocalTime,
+  pendingOffsets, offsetLabel, formatLocalTime, buildDueKey,
 } from '../server/lib/taskReminderScheduler'
+import { isAllowedPushEndpoint } from '../server/lib/webPush'
 import { normalizeOffsets, normalizeTime } from '../server/routes/taskReminders'
 
 /* Échéance de référence : mardi 18 août 2026 à 14:00 (heure locale). */
@@ -140,4 +141,62 @@ test('l\'heure par défaut accepte HH:MM et HH:MM:SS, refuse le reste', () => {
   assert.equal(normalizeTime('24:00'), null)
   assert.equal(normalizeTime('9h'), null)
   assert.equal(normalizeTime(''), null)
+})
+
+/* ════════════════════════════════════════════════════════════════
+   Clé d'idempotence stable
+   ════════════════════════════════════════════════════════════════ */
+
+test('la clé porte l\'échéance SAISIE, pas l\'instant calculé', () => {
+  assert.equal(buildDueKey('2026-08-18', '14:00:00'), '2026-08-18T14:00')
+  assert.equal(buildDueKey('2026-08-18', '14:00'), '2026-08-18T14:00')
+  /* Sans heure : le « ~ » marque le recours à l'heure par défaut. Changer
+     cette préférence ne doit PAS renvoyer les rappels déjà partis. */
+  assert.equal(buildDueKey('2026-08-18', null), '2026-08-18T~')
+})
+
+test('la clé change quand — et seulement quand — l\'échéance change', () => {
+  const initial = buildDueKey('2026-08-18', '14:00')
+  assert.equal(buildDueKey('2026-08-18', '14:00'), initial)     // rien n'a bougé
+  assert.notEqual(buildDueKey('2026-08-19', '14:00'), initial)  // reportée d'un jour
+  assert.notEqual(buildDueKey('2026-08-18', '16:00'), initial)  // décalée de 2 h
+})
+
+test('une date renvoyée comme objet Date reste dans le fuseau local', () => {
+  /* 1er septembre à 00:30 locales : une conversion via toISOString()
+     renverrait le 31 août sur un fuseau à l'est de Greenwich. */
+  assert.equal(buildDueKey(new Date(2026, 8, 1, 0, 30), '09:00'), '2026-09-01T09:00')
+})
+
+/* ════════════════════════════════════════════════════════════════
+   Liste blanche des endpoints push (anti-SSRF)
+   ════════════════════════════════════════════════════════════════ */
+
+test('les vrais services de push sont acceptés', () => {
+  assert.equal(isAllowedPushEndpoint('https://fcm.googleapis.com/fcm/send/abc123'), true)
+  assert.equal(isAllowedPushEndpoint('https://updates.push.services.mozilla.com/wpush/v2/xyz'), true)
+  assert.equal(isAllowedPushEndpoint('https://web.push.apple.com/QxyZ'), true)
+  assert.equal(isAllowedPushEndpoint('https://wns2-par02p.notify.windows.com/w/?token=a'), true)
+})
+
+test('une adresse du réseau interne est refusée — c\'est le cœur de la faille', () => {
+  assert.equal(isAllowedPushEndpoint('https://10.0.0.12:6443/'), false)
+  assert.equal(isAllowedPushEndpoint('https://127.0.0.1/'), false)
+  assert.equal(isAllowedPushEndpoint('https://localhost/api'), false)
+  assert.equal(isAllowedPushEndpoint('https://169.254.169.254/latest/meta-data/'), false)
+  assert.equal(isAllowedPushEndpoint('https://[::1]/'), false)
+})
+
+test('un hôte qui imite un service de push ne passe pas', () => {
+  assert.equal(isAllowedPushEndpoint('https://fcm.googleapis.com.attaquant.net/send'), false)
+  assert.equal(isAllowedPushEndpoint('https://evil-fcm.googleapis.com.evil.io/'), false)
+  assert.equal(isAllowedPushEndpoint('https://notfcm.googleapis.com/'), false)
+})
+
+test('protocole, port et identifiants d\'URL sont contrôlés', () => {
+  assert.equal(isAllowedPushEndpoint('http://fcm.googleapis.com/send'), false)   // pas de TLS
+  assert.equal(isAllowedPushEndpoint('https://fcm.googleapis.com:8443/send'), false)
+  assert.equal(isAllowedPushEndpoint('https://user:pass@fcm.googleapis.com/send'), false)
+  assert.equal(isAllowedPushEndpoint('pas-une-url'), false)
+  assert.equal(isAllowedPushEndpoint(''), false)
 })

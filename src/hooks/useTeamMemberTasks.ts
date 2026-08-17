@@ -125,6 +125,11 @@ export function useUpdateTeamMemberTask() {
               priority:              updated.priority,
               status:                'todo',
               due_date:              nextDate,
+              /* L'occurrence suivante hérite de l'heure et des rappels :
+                 sans ça, une tâche récurrente réglée « 14 h, prévenir
+                 30 min avant » perd sa précision dès la 2e occurrence. */
+              due_time:              updated.due_time,
+              reminder_offsets:      updated.reminder_offsets,
               category:              updated.category,
               is_request:            false,
               recurrence:            updated.recurrence,

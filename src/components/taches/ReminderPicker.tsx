@@ -17,6 +17,15 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
+/**
+ * Nombre maximal de rappels par tâche. Même valeur que `MAX_OFFSETS`
+ * dans server/routes/taskReminders.ts et que la contrainte SQL
+ * `task_reminder_prefs_offsets_ck` : proposer une 6e case ferait
+ * échouer l'enregistrement en laissant l'écran afficher un réglage qui
+ * n'est pas en base.
+ */
+export const MAX_OFFSETS = 5
+
 /** Les offsets proposés — au-delà, la liste devient un formulaire. */
 export const OFFSET_CHOICES: { min: number; label: string }[] = [
   { min: 5,    label: '5 minutes avant' },
@@ -42,12 +51,14 @@ export function describeOffsets(offsets: number[] | null | undefined): string {
 }
 
 export function ReminderPicker({
-  value, defaults, onChange, className, compact,
+  value, defaults, defaultsReady = true, onChange, className, compact,
 }: {
   /** null = suivre les réglages par défaut. */
   value: number[] | null
   /** Réglages par défaut de la personne, affichés en repère. */
   defaults?: number[]
+  /** false tant que les réglages ne sont pas chargés (évite de figer un repli). */
+  defaultsReady?: boolean
   onChange: (next: number[] | null) => void
   className?: string
   compact?: boolean
@@ -58,10 +69,19 @@ export function ReminderPicker({
   const toggle = (min: number) => {
     /* Premier clic sur une tâche « par défaut » : on part des valeurs
        par défaut plutôt que d'une liste vide — sinon cocher « 5 min »
-       supprimerait silencieusement le rappel de la veille. */
-    const base = value ?? defaults ?? []
-    const next = base.includes(min) ? base.filter(m => m !== min) : [...base, min]
-    onChange(next.sort((a, b) => b - a))
+       supprimerait silencieusement le rappel de la veille.
+
+       `defaults` n'est repris que s'il est RÉELLEMENT chargé : sinon on
+       matérialiserait le repli du hook ([1440, 30]) dans la tâche, en le
+       faisant passer pour un choix de la personne. */
+    const base = value ?? (defaultsReady ? defaults ?? [] : [])
+    if (base.includes(min)) {
+      onChange(base.filter(m => m !== min).sort((a, b) => b - a))
+      return
+    }
+    /* Plafond aligné sur le serveur : au-delà, l'enregistrement échouerait. */
+    if (base.length >= MAX_OFFSETS) return
+    onChange([...base, min].sort((a, b) => b - a))
   }
 
   return (
@@ -91,6 +111,9 @@ export function ReminderPicker({
           <DropdownMenuCheckboxItem
             key={o.min}
             checked={!none && active.includes(o.min)}
+            /* Plein et non coché : la case est inerte plutôt que de
+               produire un enregistrement refusé par le serveur. */
+            disabled={!none && active.length >= MAX_OFFSETS && !active.includes(o.min)}
             onCheckedChange={() => toggle(o.min)}
             onSelect={e => e.preventDefault()}   // garder le menu ouvert
           >

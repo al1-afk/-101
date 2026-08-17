@@ -60,7 +60,13 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
   const { userId } = useAuth()
   const { data: tasks = [] } = useTeamMemberTasks()
   const { data: projets = [] } = useProjets()
-  const { prefs } = useTaskReminderPrefs()
+  const { prefs, isLoading: prefsLoading } = useTaskReminderPrefs()
+
+  /* Le menu de rappels reste ouvert pour enchaîner plusieurs coches. Sans
+     cet état local, chaque coche repartirait de `t.reminder_offsets`
+     encore périmé (le refetch n'est pas revenu) et écraserait la
+     précédente. La valeur locale prime jusqu'au retour du serveur. */
+  const [draftOffsets, setDraftOffsets] = useState<Record<string, number[] | null>>({})
   const qc = useQueryClient()
 
   const update = useMutation({
@@ -258,6 +264,7 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
               compact
               value={draft.reminder_offsets}
               defaults={prefs.default_offsets}
+              defaultsReady={!prefsLoading}
               onChange={next => setDraft(d => ({ ...d, reminder_offsets: next }))}
               className="!h-7 !text-[11px] !px-2"
             />
@@ -343,9 +350,21 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
                 {t.due_date && (
                   <ReminderPicker
                     compact
-                    value={t.reminder_offsets ?? null}
+                    value={t.id in draftOffsets ? draftOffsets[t.id] : (t.reminder_offsets ?? null)}
                     defaults={prefs.default_offsets}
-                    onChange={next => update.mutate({ id: t.id, patch: { reminder_offsets: next } })}
+                    defaultsReady={!prefsLoading}
+                    onChange={next => {
+                      setDraftOffsets(d => ({ ...d, [t.id]: next }))
+                      update.mutate({ id: t.id, patch: { reminder_offsets: next } }, {
+                        /* Une fois le serveur revenu, la ligne redevient
+                           la source de vérité — y compris en cas d'échec,
+                           pour ne pas afficher un réglage jamais écrit. */
+                        onSettled: () => setDraftOffsets(d => {
+                          const { [t.id]: _drop, ...rest } = d
+                          return rest
+                        }),
+                      })
+                    }}
                     className="!h-7 !text-[11px] !px-2 hidden lg:inline-flex flex-shrink-0"
                   />
                 )}
