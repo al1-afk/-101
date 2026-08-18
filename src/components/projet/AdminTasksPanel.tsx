@@ -4,19 +4,19 @@
  * à travers tous les projets, avec quick-actions (timer + done) et un
  * ajout rapide où le projet est facultatif.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Shield, Play, Pause, Check, Square as SquareIcon, Calendar, AlertTriangle,
   Briefcase, Inbox, CircleDot, Plus, X, Loader2,
 } from 'lucide-react'
-import { useTeamMemberTasks, useCreateTeamMemberTask, type TaskPriority } from '@/hooks/useTeamMemberTasks'
+import {
+  useTeamMemberTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask, type TaskPriority,
+} from '@/hooks/useTeamMemberTasks'
 import { useProjets } from '@/hooks/useProjets'
 import { useTaskReminderPrefs } from '@/hooks/useTaskReminders'
 import { ReminderPicker } from '@/components/taches/ReminderPicker'
 import { useAuth } from '@/hooks/useAuth'
-import { teamMemberTasksApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -56,8 +56,20 @@ function dueLabel(due?: string | null): { text: string; tone: 'overdue' | 'today
   return { text: d.toLocaleDateString('fr-FR'), tone: 'later' }
 }
 
+/* La fiche complète est un écran à part entière (SOP, checklist, prompts,
+   commentaires) et pèse son propre chunk. La charger à l'ouverture d'une
+   tâche, et non au chargement de la page Projets, évite de faire payer ce
+   poids à tous ceux qui ne l'ouvrent jamais. */
+const TaskDetailDialog = lazy(() => import('@/components/projet/TaskDetailDialog'))
+
 export default function AdminTasksPanel({ basePath }: { basePath: string }) {
-  const { userId } = useAuth()
+  const { userId, name: userName, email: userEmail } = useAuth()
+
+  /* Fiche complète de la tâche : c'est là qu'on change l'échéance, la
+     priorité, les rappels, et qu'on ajoute notes, sous-tâches et
+     pièces jointes. On mémorise l'ID et non l'objet : la ligne doit
+     rester à jour pendant que la fiche est ouverte. */
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null)
   const { data: tasks = [] } = useTeamMemberTasks()
   const { data: projets = [] } = useProjets()
   const { prefs, isLoading: prefsLoading } = useTaskReminderPrefs()
@@ -67,13 +79,22 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
      encore périmé (le refetch n'est pas revenu) et écraserait la
      précédente. La valeur locale prime jusqu'au retour du serveur. */
   const [draftOffsets, setDraftOffsets] = useState<Record<string, number[] | null>>({})
-  const qc = useQueryClient()
 
-  const update = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: any }) => teamMemberTasksApi.update(id, patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['team_member_tasks'] }),
-    onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
-  })
+  /* Le hook partagé plutôt qu'une mutation locale : lui seul crée
+     l'occurrence suivante d'une tâche récurrente passée à « Terminée ».
+     Avec une mutation maison, terminer une tâche depuis ce panneau
+     l'aurait fait disparaître sans jamais la reprogrammer — alors que
+     le même geste depuis la fiche projet la reconduisait. */
+  const updateTask = useUpdateTeamMemberTask()
+  const update = {
+    isPending: updateTask.isPending,
+    mutate: (
+      { id, patch }: { id: string; patch: any },
+      opts?: { onSettled?: () => void },
+    ) => updateTask.mutate({ id, ...patch }, { onSettled: opts?.onSettled }),
+    mutateAsync: ({ id, patch }: { id: string; patch: any }) =>
+      updateTask.mutateAsync({ id, ...patch }),
+  }
 
   /* ── Ajout rapide ─────────────────────────────────────────────
      Le projet est facultatif : c'est tout l'intérêt du panneau, pouvoir
@@ -310,7 +331,14 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
                 </button>
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{t.title}</p>
+                  <button
+                    type="button"
+                    onClick={() => setOpenTaskId(t.id)}
+                    className="text-sm font-medium text-foreground truncate block text-left w-full hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                    title="Ouvrir la fiche — échéance, rappels, notes"
+                  >
+                    {t.title}
+                  </button>
                   <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
                     {projet ? (
                       <Link to={`${basePath}/projets/${projet.id}`} className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate">
@@ -405,6 +433,35 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
           )}
         </div>
       )}
+
+      {/* Fiche complète. La tâche est relue dans la liste à chaque rendu :
+          ce que l'on enregistre depuis la fiche se reflète aussitôt
+          derrière elle, sans copie figée à re-synchroniser. */}
+      {(() => {
+        const open = openTaskId ? tasks.find(t => t.id === openTaskId) : null
+        if (!open) return null
+        const projet = projets.find(p => p.id === open.project_id)
+        return (
+          <Suspense fallback={null}>
+          <TaskDetailDialog
+            open
+            onClose={() => setOpenTaskId(null)}
+            /* Ce panneau ne liste que MES tâches : afficher « Non assigné »
+               dans la fiche serait faux. */
+            task={{
+              ...open,
+              project_name: projet?.nom ?? null,
+              team_member_name: userName ?? userEmail ?? 'Moi (Admin)',
+            }}
+            currentUserName={userName ?? userEmail ?? 'Admin'}
+            isAdmin
+            onSave={async (patch) => {
+              await update.mutateAsync({ id: open.id, patch })
+            }}
+          />
+          </Suspense>
+        )
+      })()}
     </div>
   )
 }

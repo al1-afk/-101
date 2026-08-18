@@ -103,14 +103,29 @@ export function useUpdateTeamMemberTask() {
   return useMutation({
     mutationFn: ({ id, ...data }: Partial<TeamMemberTask> & { id: string }) =>
       teamMemberTasksApi.update(id, data) as Promise<TeamMemberTask>,
-    onSuccess: async (updated: TeamMemberTask) => {
+    /* Le statut AVANT écriture, lu dans le cache : c'est lui qui dit s'il
+       s'agit d'une vraie transition vers « terminée ». */
+    onMutate: (variables: Partial<TeamMemberTask> & { id: string }) => ({
+      previousStatus: qc.getQueryData<TeamMemberTask[]>(tk())
+        ?.find(t => t.id === variables.id)?.status,
+    }),
+    onSuccess: async (updated: TeamMemberTask, variables, context) => {
       qc.setQueryData<TeamMemberTask[]>(tk(), (prev) =>
         prev ? prev.map(t => t.id === updated.id ? { ...t, ...updated } : t) : prev
       )
 
-      /* Récurrence : si la tâche est passée en 'done' et porte un motif
-         de récurrence, on crée immédiatement la prochaine occurrence. */
-      if (updated.status === 'done' && updated.recurrence) {
+      /* Récurrence : la prochaine occurrence naît d'une TRANSITION vers
+         « terminée », jamais de l'état renvoyé.
+
+         La nuance est décisive depuis que la fiche reste ouverte sur une
+         tâche close : `updated.status` vaut 'done' à CHAQUE réponse du
+         serveur (RETURNING *), y compris quand on ne touche qu'à la
+         priorité ou qu'on tape un commentaire — l'auto-save aurait alors
+         recréé une occurrence toutes les 700 ms. On exige donc que le
+         patch porte le statut, et que la tâche ne fût pas déjà terminée. */
+      const passeATerminee = variables.status === 'done'
+        && context?.previousStatus !== 'done'
+      if (passeATerminee && updated.recurrence) {
         const base = updated.due_date ?? new Date().toISOString().slice(0, 10)
         const nextDate = nextDueDate(updated.recurrence, base)
         if (nextDate) {

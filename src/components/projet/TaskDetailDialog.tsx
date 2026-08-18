@@ -22,9 +22,10 @@ import {
 import { parseTaskDesc, serializeTaskDesc, newId,
   type SubTask, type TaskComment, type TaskAttachment,
 } from '@/lib/taskNotes'
-import { formatHMS } from '@/lib/taskTimer'
+import { formatHMS, getActiveTimer, setActiveTimer } from '@/lib/taskTimer'
 import BlockEditor from '@/components/BlockEditor'
 import TaskSopViewer from '@/components/projet/TaskSopViewer'
+import { TaskScheduleEditor } from '@/components/taches/TaskScheduleEditor'
 import type { SopBlock } from '@/hooks/useSops'
 import type { Projet } from '@/hooks/useProjets'
 import type { Client } from '@/hooks/useClients'
@@ -40,6 +41,8 @@ type TaskLike = {
   status:          string
   priority:        string
   due_date:        string | null
+  due_time?:       string | null
+  reminder_offsets?: number[] | null
   category:        string | null
   elapsed_seconds: number | null
   is_request:      boolean | null
@@ -47,6 +50,7 @@ type TaskLike = {
   project_id:      string | null
   project_name?:   string | null
   team_member_id?: string | null
+  assigned_stagiaire_id?: string | null
   team_member_name?:string | null
   attachments?:    string[] | null
   created_at?:     string
@@ -60,7 +64,16 @@ interface Props {
   task:        TaskLike
   currentUserName: string
   isAdmin:     boolean
-  onSave:      (patch: { description?: string; title?: string }) => Promise<void> | void
+  onSave:      (patch: {
+    description?: string
+    title?:       string
+    due_date?:    string | null
+    due_time?:    string | null
+    priority?:    string
+    status?:      string
+    reminder_offsets?: number[] | null
+    elapsed_seconds?:  number
+  }) => Promise<void> | void
   readOnlyMeta?: boolean
   projet?:     Projet
   client?:     Client
@@ -86,6 +99,22 @@ export default function TaskDetailDialog({
   open, onClose, task, currentUserName, isAdmin, onSave, readOnlyMeta = false, projet, client,
 }: Props) {
   const initial = useMemo(() => parseTaskDesc(task.description), [task.description])
+  /* Clore une tâche par la fiche doit valoir exactement ce que vaut le
+     bouton ✓ de la liste : arrêter le chronomètre en cours et créditer
+     le temps écoulé. Sans ça le minuteur restait actif sur une tâche
+     fermée, et son segment — potentiellement des jours — finissait
+     imputé à la tâche suivante lancée. */
+  const saveWithTimer: typeof onSave = async (patch) => {
+    const clot = patch.status === 'done' || patch.status === 'cancelled'
+    const actif = getActiveTimer()
+    if (clot && actif?.taskId === task.id) {
+      const ecoule = Math.floor((Date.now() - actif.startedAt) / 1000)
+      setActiveTimer(null)
+      return onSave({ ...patch, elapsed_seconds: (task.elapsed_seconds ?? 0) + ecoule })
+    }
+    return onSave(patch)
+  }
+
   const [title,       setTitle]       = useState(task.title)
   const [blocks,      setBlocks]      = useState<SopBlock[]>(initial.blocks)
   const [subtasks,    setSubtasks]    = useState<SubTask[]>(initial.subtasks)
@@ -346,6 +375,8 @@ export default function TaskDetailDialog({
               {activeTab === 'apercu' && (
                 <ApercuTab
                   task={task}
+                  readOnlyMeta={readOnlyMeta}
+                  onSave={saveWithTimer}
                   statusCfg={statusCfg}
                   priorityCfg={priorityCfg}
                   meta={meta}
@@ -454,7 +485,7 @@ export default function TaskDetailDialog({
 ═══════════════════════════════════════════════════════════════════ */
 function ApercuTab({
   task, statusCfg, priorityCfg, meta, subtasksTotal, subtasksDone, subPct,
-  commentsCount, resourcesCount, hasBlocks, onGoTo,
+  commentsCount, resourcesCount, hasBlocks, onGoTo, readOnlyMeta, onSave,
 }: any) {
   const globalProgress = subtasksTotal > 0 ? subPct : 0
   return (
@@ -490,11 +521,40 @@ function ApercuTab({
         )}
       </div>
 
+      {/* Échéance : modifiable pour l'admin, en lecture seule côté membre
+          (readOnlyMeta), qui n'a pas la main sur la planification. */}
+      {!readOnlyMeta && (
+        <TaskScheduleEditor
+          /* Le planificateur de rappels ne traite que les tâches d'un
+             compte de l'espace (server/lib/taskReminderScheduler.ts
+             exclut team_member_id et assigned_stagiaire_id). Le dire ici
+             plutôt que d'afficher « enregistré » sur un rappel qui ne
+             partira jamais. */
+          remindersEligible={!task.team_member_id && !task.assigned_stagiaire_id}
+          dueDate={task.due_date ?? null}
+          dueTime={task.due_time ?? null}
+          priority={task.priority ?? 'normal'}
+          status={task.status ?? 'todo'}
+          reminderOffsets={task.reminder_offsets ?? null}
+          onPatch={patch => onSave(patch)}
+        />
+      )}
+
       {/* Grille infos */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MetricCard icon={Target} label="Statut" value={statusCfg.label} accent={statusCfg.text} />
-        <MetricCard icon={Sparkles} label="Priorité" value={priorityCfg.label} accent={priorityCfg.color} />
-        <MetricCard icon={Clock} label="Échéance" value={task.due_date ? new Date(task.due_date).toLocaleDateString('fr-FR') : '—'} />
+        {readOnlyMeta && (
+          <>
+            <MetricCard icon={Target} label="Statut" value={statusCfg.label} accent={statusCfg.text} />
+            <MetricCard icon={Sparkles} label="Priorité" value={priorityCfg.label} accent={priorityCfg.color} />
+            <MetricCard
+              icon={Clock} label="Échéance"
+              value={task.due_date
+                ? new Date(task.due_date).toLocaleDateString('fr-FR')
+                  + (task.due_time ? ` à ${String(task.due_time).slice(0, 5)}` : '')
+                : '—'}
+            />
+          </>
+        )}
         <MetricCard icon={Clock} label="Temps passé" value={(task.elapsed_seconds ?? 0) > 0 ? formatHMS(task.elapsed_seconds ?? 0) : '—'} />
         <MetricCard icon={Clock} label="Temps estimé" value={meta.totalTime ?? '—'} />
         <MetricCard icon={Target} label="Responsable" value={task.team_member_name ?? 'Non assigné'} />
