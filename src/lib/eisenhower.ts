@@ -59,6 +59,18 @@ export const QUADRANTS: Record<Quadrant, QuadrantMeta> = {
 /** Ordre d'affichage : la ligne du haut est celle qui compte le plus. */
 export const QUADRANT_ORDER: Quadrant[] = ['do', 'plan', 'delegate', 'eliminate']
 
+/**
+ * La valeur lue en base est-elle un quadrant connu ?
+ *
+ * `'constructor' in QUADRANTS` vaut true — l'opérateur `in` remonte la
+ * chaîne de prototype. La contrainte SQL empêche aujourd'hui d'écrire
+ * une telle valeur, mais un test d'appartenance ne doit pas dépendre
+ * d'une garantie posée ailleurs.
+ */
+export function isQuadrant(v: unknown): v is Quadrant {
+  return typeof v === 'string' && (QUADRANT_ORDER as string[]).includes(v)
+}
+
 /** Une échéance à moins de 48 h rend une tâche urgente. */
 const URGENT_HOURS = 48
 
@@ -103,12 +115,11 @@ export function quadrantOf(
   task: Pick<TeamMemberTask, 'priority' | 'due_date' | 'due_time'> & { eisenhower?: string | null },
   now: Date = new Date(),
 ): Quadrant {
-  const chosen = task.eisenhower
-  if (chosen && chosen in QUADRANTS) return chosen as Quadrant
+  if (isQuadrant(task.eisenhower)) return task.eisenhower
   return suggestQuadrant(task, now)
 }
 
 /** La tâche est-elle seulement SUPPOSÉE ici, faute de classement ? */
 export function isSuggested(task: { eisenhower?: string | null }): boolean {
-  return !task.eisenhower || !(task.eisenhower in QUADRANTS)
+  return !isQuadrant(task.eisenhower)
 }

@@ -12,7 +12,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  suggestQuadrant, quadrantOf, isUrgent, isSuggested, QUADRANTS, QUADRANT_ORDER,
+  suggestQuadrant, quadrantOf, isUrgent, isSuggested, isQuadrant,
+  QUADRANTS, QUADRANT_ORDER,
 } from '../src/lib/eisenhower'
 
 const NOW = new Date(2026, 7, 19, 10, 0)          // mercredi 19 août, 10 h
@@ -100,4 +101,28 @@ test('les quatre quadrants sont décrits et ordonnés', () => {
   }
   /* La ligne du haut est celle qui compte : faire, puis planifier. */
   assert.deepEqual(QUADRANT_ORDER.slice(0, 2), ['do', 'plan'])
+})
+
+/* ── Appartenance : l'opérateur `in` remontait la chaîne de prototype ── */
+
+test('une clé héritée d\'Object n\'est pas un quadrant', () => {
+  /* `'constructor' in QUADRANTS` vaut true — d'où le test dédié. */
+  assert.equal(isQuadrant('constructor'), false)
+  assert.equal(isQuadrant('toString'), false)
+  assert.equal(isQuadrant('__proto__'), false)
+  assert.equal(isQuadrant('hasOwnProperty'), false)
+})
+
+test('seuls les quatre quadrants sont reconnus', () => {
+  for (const q of QUADRANT_ORDER) assert.equal(isQuadrant(q), true)
+  assert.equal(isQuadrant(''), false)
+  assert.equal(isQuadrant(null), false)
+  assert.equal(isQuadrant(undefined), false)
+  assert.equal(isQuadrant(42), false)
+})
+
+test('une clé héritée en base ne fait pas passer la tâche pour classée', () => {
+  const tache = { ...t({ priority: 'low' }), eisenhower: 'constructor' }
+  assert.equal(isSuggested(tache), true)          // toujours « supposé »
+  assert.equal(quadrantOf(tache, NOW), 'eliminate')
 })

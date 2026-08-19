@@ -65,6 +65,13 @@ function dueLabel(due?: string | null): { text: string; tone: 'overdue' | 'today
    poids à tous ceux qui ne l'ouvrent jamais. */
 const TaskDetailDialog = lazy(() => import('@/components/projet/TaskDetailDialog'))
 
+/* L'axe « important » de chaque case, traduit en priorité : une tâche
+   écrite dans PLANIFIER doit se lire comme importante dans la vue Liste
+   aussi, sinon les deux écrans racontent des choses différentes. */
+const PRIORITE_PAR_QUADRANT: Record<Quadrant, TaskPriority> = {
+  do: 'urgent', plan: 'high', delegate: 'normal', eliminate: 'low',
+}
+
 export default function AdminTasksPanel({ basePath }: { basePath: string }) {
   const { userId, name: userName, email: userEmail } = useAuth()
 
@@ -177,7 +184,11 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
         if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status]
         const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity
         const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity
-        return ad - bd
+        if (ad !== bd) return ad - bd
+        /* Deux tâches sans échéance : la plus récente d'abord. Sinon
+           celles qu'on vient d'écrire depuis la matrice — jamais datées —
+           tombaient en fond de liste, sous le plafond d'affichage. */
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       })
   }, [tasks, userId])
 
@@ -202,10 +213,36 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
     })
   }
 
-  /* Déplacer une carte dans la matrice, c'est trancher : le quadrant
-     devient un choix explicite et cesse d'être déduit. */
+  /* Déplacer une carte, c'est trancher : le quadrant devient un choix
+     explicite et cesse d'être déduit.
+
+     La priorité n'est délibérément PAS recalée sur la case d'arrivée.
+     À la création (addInQuadrant) il n'existe rien à préserver, donc la
+     case sert de valeur de départ ; ici la priorité a déjà été choisie,
+     et la réécrire en silence effacerait une décision au motif qu'on
+     range une carte. Classer et prioriser sont deux gestes distincts. */
   const moveQuadrant = (taskId: string, quadrant: Quadrant) => {
     update.mutate({ id: taskId, patch: { eisenhower: quadrant } })
+  }
+
+  /* Écrire une tâche DANS une case, c'est déjà l'arbitrer : le quadrant
+     est posé explicitement, et la priorité suit l'axe « important » de
+     la case pour que la vue Liste raconte la même chose.
+     Aucune échéance n'est inventée : une date déclencherait des rappels
+     que personne n'a demandés. */
+  const addInQuadrant = (quadrant: Quadrant, title: string) => {
+    /* mutateAsync : la case attend la confirmation avant de vider son
+       champ, sinon un échec ferait disparaître le texte saisi. */
+    return createTask.mutateAsync({
+      title,
+      assigned_user_id:      userId ?? null,
+      team_member_id:        null,
+      assigned_stagiaire_id: null,
+      project_id: null,
+      priority:   PRIORITE_PAR_QUADRANT[quadrant],
+      status:     'todo',
+      eisenhower: quadrant,
+    } as any)
   }
 
   const startTimer = (task: any) => {
@@ -376,19 +413,17 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
       )}
 
       {view === 'matrice' ? (
-        mine.length === 0 ? (
-          <div className="py-6 text-center">
-            <Inbox className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />
-            <p className="text-xs text-muted-foreground">Aucune tâche à arbitrer.</p>
-          </div>
-        ) : (
-          <EisenhowerMatrix
-            tasks={mine}
-            projets={projets}
-            onMove={moveQuadrant}
-            onOpen={setOpenTaskId}
-          />
-        )
+        /* Rendue même sans aucune tâche : chaque case porte son bouton
+           « Ajouter », et c'est précisément sur une matrice vide qu'il
+           faut pouvoir écrire. Un écran « aucune tâche » sans bouton
+           laissait sans issue. */
+        <EisenhowerMatrix
+          tasks={mine}
+          projets={projets}
+          onMove={moveQuadrant}
+          onOpen={setOpenTaskId}
+          onAdd={addInQuadrant}
+        />
       ) : view === 'archive' ? (
         archived.length === 0 ? (
           <div className="py-6 text-center">

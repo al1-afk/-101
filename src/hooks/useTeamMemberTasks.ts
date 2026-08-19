@@ -144,12 +144,22 @@ export function useUpdateTeamMemberTask() {
   return useMutation({
     mutationFn: ({ id, ...data }: Partial<TeamMemberTask> & { id: string }) =>
       teamMemberTasksApi.update(id, data) as Promise<TeamMemberTask>,
-    /* Le statut AVANT écriture, lu dans le cache : c'est lui qui dit s'il
-       s'agit d'une vraie transition vers « terminée ». */
-    onMutate: (variables: Partial<TeamMemberTask> & { id: string }) => ({
-      previousStatus: qc.getQueryData<TeamMemberTask[]>(tk())
-        ?.find(t => t.id === variables.id)?.status,
-    }),
+    /* Écriture OPTIMISTE, et statut d'avant conservé.
+       Sans elle, déplacer une carte dans la matrice la faisait revenir
+       dans sa case d'origine jusqu'à la réponse du serveur : le geste
+       semblait refusé alors qu'il partait bien. On écrit donc tout de
+       suite, et on remet l'état d'avant si l'écriture échoue. */
+    onMutate: async (variables: Partial<TeamMemberTask> & { id: string }) => {
+      await qc.cancelQueries({ queryKey: tk() })
+      const previous = qc.getQueryData<TeamMemberTask[]>(tk())
+      qc.setQueryData<TeamMemberTask[]>(tk(), (old) =>
+        old ? old.map(t => t.id === variables.id ? { ...t, ...variables } : t) : old
+      )
+      return {
+        previous,
+        previousStatus: previous?.find(t => t.id === variables.id)?.status,
+      }
+    },
     onSuccess: async (updated: TeamMemberTask, variables, context) => {
       qc.setQueryData<TeamMemberTask[]>(tk(), (prev) =>
         prev ? prev.map(t => t.id === updated.id ? { ...t, ...updated } : t) : prev
@@ -206,6 +216,10 @@ export function useUpdateTeamMemberTask() {
                  30 min avant » perd sa précision dès la 2e occurrence. */
               due_time:              updated.due_time,
               reminder_offsets:      updated.reminder_offsets,
+              /* Sans ça, une récurrente classée dans PLANIFIER revenait
+                 le mois suivant non classée — et la déduction la posait
+                 dans SUPPRIMER, la case qui invite à la jeter. */
+              eisenhower:            updated.eisenhower,
               category:              updated.category,
               is_request:            false,
               recurrence:            updated.recurrence,
@@ -220,7 +234,12 @@ export function useUpdateTeamMemberTask() {
 
       await qc.invalidateQueries({ queryKey: [KEY] })
     },
-    onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
+    onError: (e: any, _variables, context) => {
+      /* Retour à l'état d'avant : laisser l'écriture optimiste en place
+         ferait croire à une modification enregistrée. */
+      if (context?.previous) qc.setQueryData(tk(), context.previous)
+      toast.error(e?.message ?? 'Erreur')
+    },
   })
 }
 
