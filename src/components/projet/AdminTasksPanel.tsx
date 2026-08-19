@@ -11,7 +11,8 @@ import {
   Briefcase, Inbox, CircleDot, Plus, X, Loader2, Archive, RotateCcw, LayoutGrid,
 } from 'lucide-react'
 import {
-  useTeamMemberTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask, type TaskPriority,
+  useTeamMemberTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask,
+  useArchivedTasks, type TaskPriority,
 } from '@/hooks/useTeamMemberTasks'
 import { useProjets } from '@/hooks/useProjets'
 import { useTaskReminderPrefs } from '@/hooks/useTaskReminders'
@@ -98,8 +99,11 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
     isPending: updateTask.isPending,
     mutate: (
       { id, patch }: { id: string; patch: any },
-      opts?: { onSettled?: () => void },
-    ) => updateTask.mutate({ id, ...patch }, { onSettled: opts?.onSettled }),
+      opts?: { onSettled?: () => void; onSuccess?: () => void },
+    ) => updateTask.mutate({ id, ...patch }, {
+      onSettled: opts?.onSettled,
+      onSuccess: opts?.onSuccess,
+    }),
     mutateAsync: ({ id, patch }: { id: string; patch: any }) =>
       updateTask.mutateAsync({ id, ...patch }),
   }
@@ -177,21 +181,9 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
       })
   }, [tasks, userId])
 
-  const archived = useMemo(() => {
-    if (!userId) return []
-    return tasks
-      .filter(t => t.assigned_user_id === userId && (t.status === 'done' || t.status === 'cancelled'))
-      /* Du plus récemment clos au plus ancien : c'est ce qu'on vient de
-         terminer qu'on veut revoir, pas ce qui date de trois mois.
-         `completed_at` est posé par trigger (migration 086) quel que soit
-         le chemin de clôture ; `updated_at` sert de repli pour les lignes
-         antérieures et pour les tâches annulées. */
-      .sort((a, b) => {
-        const da = new Date(a.completed_at ?? a.updated_at).getTime()
-        const db = new Date(b.completed_at ?? b.updated_at).getTime()
-        return db - da
-      })
-  }, [tasks, userId])
+  /* Requête dédiée : filtrer le cache général aurait donné une archive
+     tronquée et trompeuse (cf. useArchivedTasks). */
+  const { data: archived = [] } = useArchivedTasks(userId)
 
   const overdueCount = mine.filter(t => t.due_date && new Date(t.due_date + 'T23:59:59').getTime() < Date.now()).length
 
@@ -200,9 +192,14 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
      « done » — inutile de le forcer d'ici, et surtout de risquer de le
      contredire. */
   const reopen = (task: any) => {
-    update.mutate({ id: task.id, patch: { status: 'todo' } })
-    toast.success('Tâche rouverte')
-    setView('actives')
+    update.mutate({ id: task.id, patch: { status: 'todo' } }, {
+      /* Annoncer le succès avant la réponse laissait, en cas d'échec,
+         un « Tâche rouverte » suivi d'une liste où elle ne figure pas. */
+      onSuccess: () => {
+        toast.success('Tâche rouverte')
+        setView('actives')
+      },
+    })
   }
 
   /* Déplacer une carte dans la matrice, c'est trancher : le quadrant
@@ -282,7 +279,7 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
             >
               <LayoutGrid className="w-3 h-3" /> Matrice
             </button>
-            {archived.length > 0 && (
+            {(archived.length > 0 || view === 'archive') && (
               <button
                 type="button"
                 onClick={() => { setView('archive'); setShowAll(false) }}
@@ -291,7 +288,7 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
                     ? 'bg-slate-700 text-white'
                     : 'bg-[var(--surface-input)] text-muted-foreground hover:text-foreground')}
               >
-                <Archive className="w-3 h-3" /> Archive {archived.length}
+                <Archive className="w-3 h-3" /> Terminées {archived.length}
               </button>
             )}
           </div>
@@ -393,6 +390,16 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
           />
         )
       ) : view === 'archive' ? (
+        archived.length === 0 ? (
+          <div className="py-6 text-center">
+            <Archive className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />
+            <p className="text-xs text-muted-foreground mb-2">Aucune tâche terminée pour l'instant.</p>
+            <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                    onClick={() => { setView('actives'); setShowAll(false) }}>
+              Revenir aux tâches en cours
+            </Button>
+          </div>
+        ) : (
         <div className="space-y-1.5">
           {archived.slice(0, showAll ? archived.length : VISIBLE).map(t => {
             const projet = projets.find(p => p.id === t.project_id)
@@ -444,10 +451,11 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
               onClick={() => setShowAll(v => !v)}
               className="w-full text-[11px] text-muted-foreground italic text-center pt-1 hover:text-blue-600 dark:hover:text-blue-400"
             >
-              {showAll ? 'Réduire la liste' : `Voir les ${archived.length - VISIBLE} autres tâches archivées`}
+              {showAll ? 'Réduire la liste' : `Voir les ${archived.length - VISIBLE} autres tâches terminées`}
             </button>
           )}
         </div>
+        )
       ) : mine.length === 0 ? (
         <div className="py-6 text-center">
           <Inbox className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />

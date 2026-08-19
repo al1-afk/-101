@@ -78,6 +78,44 @@ export function useProjectTasks(projetId: string | undefined) {
     })
 }
 
+/**
+ * Tâches CLOSES d'une personne — l'archive.
+ *
+ * Requête dédiée, et non un filtre sur `useTeamMemberTasks()` : ce
+ * dernier ramène les 500 tâches les plus récemment CRÉÉES de tout
+ * l'espace (limite du CRUD générique). Sur un espace actif, une tâche
+ * créée il y a trois mois et terminée hier en sort — l'archive
+ * affichait donc un décompte faux et pouvait taire précisément ce qu'on
+ * venait de clore, alors que c'est ce qu'on cherche en premier.
+ *
+ * Deux appels parce que le CRUD générique ne filtre que par égalité :
+ * « done » et « cancelled » ne peuvent pas être demandés ensemble. Le
+ * tri se fait sur `completed_at`, soit exactement la colonne affichée —
+ * trier sur un axe et tronquer sur un autre revenait à perdre des
+ * lignes au hasard.
+ */
+export function useArchivedTasks(userId: string | null | undefined, limit = 100) {
+  return useQuery<TeamMemberTask[]>({
+    queryKey: [KEY, 'archive', currentTenantIdForCache(), userId, limit],
+    enabled:  Boolean(userId),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const params = { orderBy: 'completed_at', order: 'desc' as const, limit }
+      const [done, cancelled] = await Promise.all([
+        teamMemberTasksApi.list({ ...params, status: 'done',      assigned_user_id: userId }) as Promise<TeamMemberTask[]>,
+        teamMemberTasksApi.list({ ...params, status: 'cancelled', assigned_user_id: userId }) as Promise<TeamMemberTask[]>,
+      ])
+      return [...done, ...cancelled]
+        .sort((a, b) => {
+          const da = a.completed_at ? new Date(a.completed_at).getTime() : 0
+          const db = b.completed_at ? new Date(b.completed_at).getTime() : 0
+          return db - da
+        })
+        .slice(0, limit)
+    },
+  })
+}
+
 /** Tasks assigned to a specific team member. */
 export function useTasksOfMember(teamMemberId: string | undefined) {
   const { data = [] } = useTeamMemberTasks()
@@ -131,7 +169,27 @@ export function useUpdateTeamMemberTask() {
       if (passeATerminee && updated.recurrence) {
         const base = updated.due_date ?? new Date().toISOString().slice(0, 10)
         const nextDate = nextDueDate(updated.recurrence, base)
-        if (nextDate) {
+
+        /* L'occurrence suivante a-t-elle DÉJÀ été créée ?
+           Depuis que l'archive permet de rouvrir une tâche close, le
+           cycle « terminer → rouvrir → re-terminer » repartait de la
+           même `due_date` et refabriquait la même occurrence : un
+           doublon permanent à chaque aller-retour. La série n'a besoin
+           que d'une occurrence par échéance. */
+        const dejaCreee = nextDate
+          ? (qc.getQueryData<TeamMemberTask[]>(tk()) ?? []).some(t =>
+              t.id !== updated.id
+              && t.title === updated.title
+              && t.recurrence != null
+              && t.assigned_user_id === updated.assigned_user_id
+              && t.team_member_id === updated.team_member_id
+              && String(t.due_date ?? '').slice(0, 10) === nextDate
+              && t.status !== 'cancelled')
+          : false
+
+        if (nextDate && dejaCreee) {
+          toast.message(`🔁 L'occurrence du ${nextDate} existe déjà`)
+        } else if (nextDate) {
           try {
             const next = await teamMemberTasksApi.create({
               team_member_id:        updated.team_member_id,

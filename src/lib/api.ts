@@ -642,7 +642,13 @@ export const mySpaceApi = {
 /* ── Generic table API ───────────────────────────────────────── */
 export function tableApi<T>(table: string) {
   return {
-    list:   (params?: { orderBy?: string; order?: 'asc'|'desc'; limit?: number; offset?: number }) => {
+    /* Toute clé hors orderBy/order/limit/offset est traitée par le
+       serveur comme un filtre d'égalité `colonne = valeur`
+       (server/routes/crud.ts) — d'où la signature ouverte. */
+    list:   (params?: {
+      orderBy?: string; order?: 'asc'|'desc'; limit?: number; offset?: number
+      [filtre: string]: string | number | null | undefined
+    }) => {
       const qs = params ? '?' + new URLSearchParams(params as any).toString() : ''
       return api.get<T[]>(`/api/${table}${qs}`)
     },
