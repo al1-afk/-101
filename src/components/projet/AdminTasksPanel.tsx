@@ -8,7 +8,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Shield, Play, Pause, Check, Square as SquareIcon, Calendar, AlertTriangle,
-  Briefcase, Inbox, CircleDot, Plus, X, Loader2,
+  Briefcase, Inbox, CircleDot, Plus, X, Loader2, Archive, RotateCcw, LayoutGrid,
 } from 'lucide-react'
 import {
   useTeamMemberTasks, useCreateTeamMemberTask, useUpdateTeamMemberTask, type TaskPriority,
@@ -16,6 +16,8 @@ import {
 import { useProjets } from '@/hooks/useProjets'
 import { useTaskReminderPrefs } from '@/hooks/useTaskReminders'
 import { ReminderPicker } from '@/components/taches/ReminderPicker'
+import { EisenhowerMatrix } from '@/components/taches/EisenhowerMatrix'
+import type { Quadrant } from '@/lib/eisenhower'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -70,6 +72,12 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
      pièces jointes. On mémorise l'ID et non l'objet : la ligne doit
      rester à jour pendant que la fiche est ouverte. */
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+
+  /* Une tâche terminée ne disparaît plus : elle bascule dans l'archive,
+     consultable et réversible. Sans elle, la seule trace de ce qui a été
+     fait était l'absence de la ligne — impossible de vérifier, de rouvrir
+     une clôture par erreur, ou de retrouver le temps passé. */
+  const [view, setView] = useState<'actives' | 'matrice' | 'archive'>('actives')
   const { data: tasks = [] } = useTeamMemberTasks()
   const { data: projets = [] } = useProjets()
   const { prefs, isLoading: prefsLoading } = useTaskReminderPrefs()
@@ -169,7 +177,39 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
       })
   }, [tasks, userId])
 
+  const archived = useMemo(() => {
+    if (!userId) return []
+    return tasks
+      .filter(t => t.assigned_user_id === userId && (t.status === 'done' || t.status === 'cancelled'))
+      /* Du plus récemment clos au plus ancien : c'est ce qu'on vient de
+         terminer qu'on veut revoir, pas ce qui date de trois mois.
+         `completed_at` est posé par trigger (migration 086) quel que soit
+         le chemin de clôture ; `updated_at` sert de repli pour les lignes
+         antérieures et pour les tâches annulées. */
+      .sort((a, b) => {
+        const da = new Date(a.completed_at ?? a.updated_at).getTime()
+        const db = new Date(b.completed_at ?? b.updated_at).getTime()
+        return db - da
+      })
+  }, [tasks, userId])
+
   const overdueCount = mine.filter(t => t.due_date && new Date(t.due_date + 'T23:59:59').getTime() < Date.now()).length
+
+  /* Rouvrir : la tâche repart « à faire ». `completed_at` est remis à
+     NULL par le trigger de la migration 086 quand le statut quitte
+     « done » — inutile de le forcer d'ici, et surtout de risquer de le
+     contredire. */
+  const reopen = (task: any) => {
+    update.mutate({ id: task.id, patch: { status: 'todo' } })
+    toast.success('Tâche rouverte')
+    setView('actives')
+  }
+
+  /* Déplacer une carte dans la matrice, c'est trancher : le quadrant
+     devient un choix explicite et cesse d'être déduit. */
+  const moveQuadrant = (taskId: string, quadrant: Quadrant) => {
+    update.mutate({ id: taskId, patch: { eisenhower: quadrant } })
+  }
 
   const startTimer = (task: any) => {
     const cur = getActiveTimer()
@@ -216,15 +256,56 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
           )}
         </h2>
 
-        {!adding && (
-          <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={openAdd}>
-            <Plus className="w-3 h-3" /> Ajouter une tâche
-          </Button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {/* Bascule : ce qui reste à faire ⇄ ce qui est fait. L'archive
+              n'apparaît que s'il y a quelque chose dedans, pour ne pas
+              proposer un écran vide dès le premier jour. */}
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => { setView('actives'); setShowAll(false) }}
+              className={cn('px-2.5 h-7 text-[11px] font-medium transition-colors',
+                view === 'actives'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-[var(--surface-input)] text-muted-foreground hover:text-foreground')}
+            >
+              Liste
+            </button>
+            <button
+              type="button"
+              onClick={() => { setView('matrice'); setShowAll(false) }}
+              className={cn('px-2.5 h-7 text-[11px] font-medium transition-colors inline-flex items-center gap-1 border-l border-border',
+                view === 'matrice'
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-[var(--surface-input)] text-muted-foreground hover:text-foreground')}
+              title="Urgent / Important — décider quoi faire de chaque tâche"
+            >
+              <LayoutGrid className="w-3 h-3" /> Matrice
+            </button>
+            {archived.length > 0 && (
+              <button
+                type="button"
+                onClick={() => { setView('archive'); setShowAll(false) }}
+                className={cn('px-2.5 h-7 text-[11px] font-medium transition-colors inline-flex items-center gap-1 border-l border-border',
+                  view === 'archive'
+                    ? 'bg-slate-700 text-white'
+                    : 'bg-[var(--surface-input)] text-muted-foreground hover:text-foreground')}
+              >
+                <Archive className="w-3 h-3" /> Archive {archived.length}
+              </button>
+            )}
+          </div>
+
+          {!adding && view === 'actives' && (
+            <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={openAdd}>
+              <Plus className="w-3 h-3" /> Ajouter une tâche
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Ajout rapide — sans projet par défaut. */}
-      {adding && (
+      {adding && view === 'actives' && (
         <form onSubmit={submitDraft} className="mb-3 p-2.5 rounded-lg border border-blue-200 dark:border-blue-900/50 bg-card space-y-2">
           <div className="flex items-center gap-2">
             <Input
@@ -297,7 +378,77 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
         </form>
       )}
 
-      {mine.length === 0 ? (
+      {view === 'matrice' ? (
+        mine.length === 0 ? (
+          <div className="py-6 text-center">
+            <Inbox className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />
+            <p className="text-xs text-muted-foreground">Aucune tâche à arbitrer.</p>
+          </div>
+        ) : (
+          <EisenhowerMatrix
+            tasks={mine}
+            projets={projets}
+            onMove={moveQuadrant}
+            onOpen={setOpenTaskId}
+          />
+        )
+      ) : view === 'archive' ? (
+        <div className="space-y-1.5">
+          {archived.slice(0, showAll ? archived.length : VISIBLE).map(t => {
+            const projet = projets.find(p => p.id === t.project_id)
+            const clos = t.completed_at ?? t.updated_at
+            const annulee = t.status === 'cancelled'
+            return (
+              <div key={t.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border bg-card/60">
+                <span className={cn('w-4 h-4 shrink-0 flex items-center justify-center rounded',
+                  annulee ? 'text-slate-400' : 'text-emerald-600')}>
+                  {annulee ? <X className="w-3.5 h-3.5" /> : <Check className="w-4 h-4" />}
+                </span>
+
+                <div className="flex-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setOpenTaskId(t.id)}
+                    className="text-sm font-medium text-muted-foreground line-through truncate block text-left w-full hover:text-foreground"
+                    title="Ouvrir la fiche"
+                  >
+                    {t.title}
+                  </button>
+                  <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <Briefcase className="w-2.5 h-2.5" /> {projet ? projet.nom : 'Sans projet'}
+                    </span>
+                    <span>
+                      {annulee ? 'Annulée' : 'Terminée'} le{' '}
+                      {new Date(clos).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                    </span>
+                    {(t.elapsed_seconds ?? 0) > 0 && (
+                      <span className="font-mono">⏱ {formatHMS(t.elapsed_seconds ?? 0)}</span>
+                    )}
+                  </div>
+                </div>
+
+                <Button
+                  size="sm" variant="outline" className="h-7 text-[11px] flex-shrink-0"
+                  onClick={() => reopen(t)}
+                  title="Remettre dans les tâches en cours"
+                >
+                  <RotateCcw className="w-3 h-3" /> Rouvrir
+                </Button>
+              </div>
+            )
+          })}
+          {archived.length > VISIBLE && (
+            <button
+              type="button"
+              onClick={() => setShowAll(v => !v)}
+              className="w-full text-[11px] text-muted-foreground italic text-center pt-1 hover:text-blue-600 dark:hover:text-blue-400"
+            >
+              {showAll ? 'Réduire la liste' : `Voir les ${archived.length - VISIBLE} autres tâches archivées`}
+            </button>
+          )}
+        </div>
+      ) : mine.length === 0 ? (
         <div className="py-6 text-center">
           <Inbox className="w-7 h-7 text-muted-foreground/40 mx-auto mb-2" />
           <p className="text-xs text-muted-foreground">
@@ -388,7 +539,8 @@ export default function AdminTasksPanel({ basePath }: { basePath: string }) {
                            la source de vérité — y compris en cas d'échec,
                            pour ne pas afficher un réglage jamais écrit. */
                         onSettled: () => setDraftOffsets(d => {
-                          const { [t.id]: _drop, ...rest } = d
+                          const rest = { ...d }
+                          delete rest[t.id]
                           return rest
                         }),
                       })

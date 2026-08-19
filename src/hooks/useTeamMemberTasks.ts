@@ -28,6 +28,9 @@ export interface TeamMemberTask {
   /** Minutes avant l'échéance pour être prévenu.
    *  null = réglages par défaut, [] = aucun rappel sur cette tâche. */
   reminder_offsets:  number[] | null
+  /** Quadrant d'Eisenhower décidé à la main (do/plan/delegate/eliminate).
+   *  null = non classée, l'écran déduit le quadrant. */
+  eisenhower:        string | null
   category:          string | null     // Analyse, Design, Développement, SEO, etc.
   elapsed_seconds:   number            // total time tracked
   is_request:        boolean           // change request from client
