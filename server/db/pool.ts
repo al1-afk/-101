@@ -105,6 +105,12 @@ export async function tenantQuery<T = any>(
   tenantId: string,
   sql: string,
   params?: any[],
+  /** Utilisateur à l'origine de l'écriture. Posé en variable de session
+   *  pour que le déclencheur d'audit (`log_mutation`) sache QUI a agi :
+   *  sans lui, le journal disait ce qui avait changé mais jamais par qui
+   *  — 403 lignes sur 403 sans responsable. Facultatif : les lectures et
+   *  les traitements internes n'ont personne à déclarer. */
+  actingUserId?: string,
 ): Promise<T[]> {
   if (!UUID_RE.test(tenantId)) throw new Error('Invalid tenantId')
 
@@ -117,6 +123,10 @@ export async function tenantQuery<T = any>(
     if (useRlsRole) await client.query(`SET LOCAL ROLE ${quoteIdent(RLS_ROLE)}`)
     /* SET LOCAL does not accept $1 — UUID is validated above */
     await client.query(`SET LOCAL "app.current_tenant" = '${tenantId}'`)
+    /* Validé comme UUID avant interpolation — SET LOCAL n'accepte pas $1. */
+    if (actingUserId && UUID_RE.test(actingUserId)) {
+      await client.query(`SET LOCAL "app.current_user_id" = '${actingUserId}'`)
+    }
     const { rows } = await client.query(sql, params)
     await client.query('COMMIT')
     return rows
@@ -132,8 +142,9 @@ export async function tenantQueryOne<T = any>(
   tenantId: string,
   sql: string,
   params?: any[],
+  actingUserId?: string,
 ): Promise<T | null> {
-  const rows = await tenantQuery<T>(tenantId, sql, params)
+  const rows = await tenantQuery<T>(tenantId, sql, params, actingUserId)
   return rows[0] ?? null
 }
 
@@ -150,6 +161,8 @@ export async function tenantQueryOne<T = any>(
 export async function tenantTransaction<T>(
   tenantId: string,
   fn: (client: PoolClient) => Promise<T>,
+  /** Cf. tenantQuery : l'utilisateur agissant, pour le journal d'audit. */
+  actingUserId?: string,
 ): Promise<T> {
   if (!UUID_RE.test(tenantId)) throw new Error('Invalid tenantId')
 
@@ -159,6 +172,9 @@ export async function tenantTransaction<T>(
     await client.query('BEGIN')
     if (useRlsRole) await client.query(`SET LOCAL ROLE ${quoteIdent(RLS_ROLE)}`)
     await client.query(`SET LOCAL "app.current_tenant" = '${tenantId}'`)
+    if (actingUserId && UUID_RE.test(actingUserId)) {
+      await client.query(`SET LOCAL "app.current_user_id" = '${actingUserId}'`)
+    }
     const result = await fn(client)
     await client.query('COMMIT')
     return result

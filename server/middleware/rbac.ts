@@ -15,7 +15,7 @@ import { getEffectiveRole } from '../lib/effectiveRole'
    Value = set of roles allowed to perform the HTTP method.
 ───────────────────────────────────────────────────────────────── */
 
-type Action = 'view' | 'create' | 'edit' | 'delete'
+export type Action = 'view' | 'create' | 'edit' | 'delete'
 
 const METHOD_TO_ACTION: Record<string, Action> = {
   GET:    'view',
@@ -53,7 +53,11 @@ function matrix(
 }
 
 /* Canonical permission map. Undefined table → admin-only. */
-const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
+/* Exportée en LECTURE pour que le Centre de sécurité affiche les règles
+   RÉELLEMENT appliquées, et non une copie tenue à part dans le front —
+   une matrice affichée qui diverge de la matrice appliquée est pire que
+   pas de matrice du tout : elle rassure à tort. */
+export const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   clients:              matrix(ALL_TECH,                             ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
   prospects:            matrix(ALL,                             ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
   /* Journal d'activité prospect (notes, appels, emails, changements de statut) —

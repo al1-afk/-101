@@ -163,8 +163,17 @@ async function request<T>(
   if (res.status === 401 && source === 'admin' && _retry) {
     const data = await res.json().catch(() => ({}))
 
-    /* Codes explicites d'auth invalide → purge légitime, pas de retry. */
-    if (data.code === 'TOKEN_REUSE' || data.code === 'NO_REFRESH' || data.code === 'INVALID_REFRESH') {
+    /* Codes explicites d'auth invalide → purge légitime, pas de retry.
+
+       SESSION_REVOKED en fait partie : un administrateur vient de couper
+       cette session depuis le Centre de sécurité. Sans ce code ici, le
+       client tombait dans la branche « refresh + retry » ci-dessous ;
+       le serveur ne trouvait alors aucune ligne non révoquée, en
+       concluait à un REJEU de jeton, révoquait TOUTES les sessions de la
+       personne et levait une alerte critique de session compromise.
+       Couper un appareil déconnectait donc les autres, en criant au vol. */
+    if (data.code === 'TOKEN_REUSE' || data.code === 'NO_REFRESH'
+     || data.code === 'INVALID_REFRESH' || data.code === 'SESSION_REVOKED') {
       const { purgeClientSession } = await import('./session')
       await purgeClientSession()
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
@@ -439,6 +448,47 @@ function qs(params: Record<string, unknown>): string {
   return s ? `?${s}` : ''
 }
 
+export interface SessionRow {
+  id: string; user_id: string; user_name: string; user_email: string
+  ip_address: string | null; user_agent: string | null
+  created_at: string; expires_at: string; revoked: boolean
+  statut: 'active' | 'expiree' | 'revoquee'
+  appareils_confiance: number
+}
+
+export interface DeviceRow {
+  id: string; user_id: string; user_name: string; user_email: string
+  label: string | null; user_agent: string | null; ip_address: string | null
+  last_used_at: string | null; created_at: string
+  expires_at: string; revoked_at: string | null
+  statut: 'actif' | 'expire' | 'revoque'
+}
+
+export interface AuditRow {
+  id: string; user_id: string | null; user_name: string | null
+  action: string; table_name: string; record_id: string | null
+  ip_address: string | null; user_agent: string | null; created_at: string
+  old_data: Record<string, unknown> | null
+  new_data: Record<string, unknown> | null
+}
+
+export interface AuditFilters {
+  q?: string; user_id?: string; table?: string; action?: string
+  ip?: string; period?: SecurityPeriod; limit?: number; offset?: number
+}
+
+export interface SecuritySettings {
+  tenant_id: string
+  session_max_days: number; idle_timeout_minutes: number
+  max_login_attempts: number; lockout_minutes: number
+  require_2fa_admins: boolean; require_2fa_all: boolean
+  trusted_devices_enabled: boolean; trusted_device_days: number
+  password_min_length: number
+  password_require_upper: boolean
+  password_require_digit: boolean
+  password_require_symbol: boolean
+}
+
 export const securityApi = {
   /* Présence — appelé par tout utilisateur connecté, pas seulement l'admin */
   heartbeat:    (sessionKey: string) =>
@@ -469,6 +519,44 @@ export const securityApi = {
     api.get<{ rows: SecurityAlertRow[]; limit: number; offset: number; hasMore: boolean }>(
       `/api/security/alerts${qs(f as Record<string, unknown>)}`
     ),
+  /* ── Sessions & appareils ───────────────────────────────────────
+     Révoquer coupe RÉELLEMENT : le jeton d'accès porte l'identifiant de
+     sa session et chaque requête le vérifie (server/lib/sessionRevocation). */
+  sessions: (f: { user_id?: string; all?: '1'; limit?: number; offset?: number } = {}) =>
+    api.get<{ rows: SessionRow[]; limit: number; offset: number; hasMore: boolean }>(
+      `/api/security/sessions${qs(f as Record<string, unknown>)}`),
+  revokeSession: (id: string) =>
+    api.post<{ ok: true }>(`/api/security/sessions/${id}/revoke`, {}),
+  revokeAllSessions: (userId: string) =>
+    api.post<{ ok: true; revoked: number }>(`/api/security/users/${userId}/sessions/revoke-all`, {}),
+
+  devices: (f: { limit?: number; offset?: number } = {}) =>
+    api.get<{ rows: DeviceRow[]; limit: number; offset: number; hasMore: boolean }>(
+      `/api/security/devices${qs(f as Record<string, unknown>)}`),
+  revokeDevice: (id: string) =>
+    api.post<{ ok: true }>(`/api/security/devices/${id}/revoke`, {}),
+
+  /* ── Journal d'audit ────────────────────────────────────────────
+     Paginé et filtré CÔTÉ SERVEUR : la table grossit sans fin. */
+  audit: (f: AuditFilters = {}) =>
+    api.get<{ rows: AuditRow[]; limit: number; offset: number; hasMore: boolean }>(
+      `/api/security/audit${qs(f as Record<string, unknown>)}`),
+  auditFacets: () =>
+    api.get<{ tables: string[]; actions: string[]
+              utilisateurs: { id: string; nom: string }[] }>('/api/security/audit/facets'),
+
+  /* ── Rôles : la matrice RÉELLEMENT appliquée par le serveur ─────── */
+  roles: () =>
+    api.get<{ effectifs: { role: string; n: number }[]
+              matrice: Record<string, Record<'view'|'create'|'edit'|'delete', string[]>> }>(
+      '/api/security/roles'),
+
+  /* ── Réglages : appliqués côté serveur, l'écran ne fait que régler ── */
+  settings: () =>
+    api.get<{ settings: SecuritySettings; defini: boolean }>('/api/security/settings'),
+  saveSettings: (patch: Partial<SecuritySettings>) =>
+    api.patch<{ settings: SecuritySettings; defini: boolean }>('/api/security/settings', patch),
+
   acknowledgeAlert: (id: string) =>
     api.post<{ ok: true }>(`/api/security/alerts/${id}/acknowledge`, {}),
 }

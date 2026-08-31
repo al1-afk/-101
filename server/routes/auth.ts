@@ -142,19 +142,28 @@ async function issueTokenPair(
   ip: string,
   ua: string,
 ) {
-  const accessToken  = signAccessToken({
-    userId: user.id, email: user.email, tenantId: user.tenant_id, role: user.role,
-  })
   const refreshToken = signRefreshToken({ userId: user.id, tenantId: user.tenant_id })
   const tokenHash    = hashToken(refreshToken)
 
   /* Store hashed refresh token — raw token NEVER written to DB.
-     Durée alignée sur signRefreshToken() = 90 jours (session persistante). */
-  await query(
+     Durée alignée sur signRefreshToken() = 90 jours (session persistante).
+
+     La ligne est créée AVANT de signer le jeton d'accès, car celui-ci
+     doit porter son identifiant (`sid`) : c'est ce lien qui permet à
+     « Déconnecter cette session » de couper immédiatement, au lieu de
+     laisser l'appareil travailler jusqu'à l'expiration du jeton.
+     Cf. lib/sessionRevocation. */
+  const session = await queryOne<{ id: string }>(
     `INSERT INTO refresh_tokens (user_id, tenant_id, token_hash, ip_address, user_agent, expires_at)
-     VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '90 days')`,
+     VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '90 days')
+     RETURNING id`,
     [user.id, user.tenant_id, tokenHash, ip, ua]
   )
+
+  const accessToken = signAccessToken({
+    userId: user.id, email: user.email, tenantId: user.tenant_id, role: user.role,
+    sid: session?.id,
+  })
 
   /* httpOnly cookie — pas lisible par JS. maxAge doit être aligné avec
      l'expiration en DB pour éviter que le cookie disparaisse alors que
@@ -843,6 +852,27 @@ router.post('/refresh', authLimiter, async (req: Request, res: Response) => {
     )
 
     if (!stored) {
+      /* Rien mis à jour : soit le jeton est rejoué, soit la session a été
+         COUPÉE volontairement par un administrateur. Les confondre était
+         grave : une révocation d'appareil déclenchait la riposte anti-vol,
+         révoquait toutes les autres sessions de la personne et levait une
+         alerte critique mensongère. On distingue donc les deux cas. */
+      const dejaRevoquee = await queryOne<{ revoked: boolean }>(
+        `SELECT revoked FROM refresh_tokens WHERE token_hash = $1`, [tokenHash])
+
+      if (dejaRevoquee?.revoked === true) {
+        markSecurityLogged(req)
+        trackSecurityEvent({
+          type: 'logout', req,
+          userId: payload.userId, tenantId: payload.tenantId,
+          httpStatus: 401, reason: 'session_revoked_by_admin',
+        })
+        res.clearCookie('gestiq_refresh', { path: '/api/auth' })
+        return res.status(401).json({
+          error: 'Session révoquée par un administrateur', code: 'SESSION_REVOKED',
+        })
+      }
+
       /* Token reuse detected — revoke ALL tokens for this user (session hijack attempt) */
       await query(
         `UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`,

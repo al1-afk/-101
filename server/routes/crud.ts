@@ -304,7 +304,9 @@ router.post('/:table', async (req: Request, res: Response) => {
     const row = await tenantQueryOne<any>(
       req.user!.tenantId,
       `INSERT INTO ${table} (${cols}) VALUES (${ph}) RETURNING *`,
-      vals
+      vals,
+      /* Qui écrit : lu par le déclencheur d'audit (log_mutation). */
+      req.user!.userId,
     )
     res.status(201).json(row)
 
@@ -353,7 +355,8 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
     const row = await tenantQueryOne<any>(
       req.user!.tenantId,
       `UPDATE ${table} SET ${sets} WHERE id = $${keys.length + 1}${scope} RETURNING *`,
-      vals
+      vals,
+      req.user!.userId,
     )
     if (!row) {
       noteNotFound(req, table)
@@ -385,7 +388,8 @@ router.delete('/:table/:id', async (req: Request, res: Response) => {
     const row = await tenantQueryOne(
       req.user!.tenantId,
       `DELETE FROM ${table} WHERE id = $1${scoped ? ' AND tenant_id = $2' : ''} RETURNING id`,
-      scoped ? [id, req.user!.tenantId] : [id]
+      scoped ? [id, req.user!.tenantId] : [id],
+      req.user!.userId,
     )
     if (!row) {
       noteNotFound(req, table)

@@ -20,6 +20,10 @@ export interface JwtPayload {
   email:    string
   tenantId: string
   role:     string
+  /** Identifiant de la session (ligne refresh_tokens) d'où vient ce
+   *  jeton. Permet de le révoquer sans attendre son expiration.
+   *  Absent des jetons émis avant l'introduction du mécanisme. */
+  sid?:     string
 }
 
 declare global {
@@ -66,6 +70,24 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       }
       req.user = { ...payload, role: effective }
     }
+
+    /* ── Session encore vivante ? ─────────────────────────────────
+       Le rôle effectif ci-dessus ferme la porte à un COMPTE désactivé.
+       Il ne dit rien d'une SESSION révoquée une par une : « Déconnecter
+       cet appareil » retirait la ligne de l'écran pendant que
+       l'appareil continuait de travailler jusqu'à une heure durant.
+       On vérifie donc que la session existe toujours.
+
+       Les jetons émis avant ce changement n'ont pas de `sid` : ils
+       passent, le temps d'expirer. Les refuser aurait déconnecté tout
+       le monde au déploiement. */
+    if (payload.sid) {
+      const { isSessionActive } = await import('../lib/sessionRevocation')
+      if (!(await isSessionActive(payload.sid))) {
+        return res.status(401).json({ error: 'Session révoquée', code: 'SESSION_REVOKED' })
+      }
+    }
+
     next()
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {

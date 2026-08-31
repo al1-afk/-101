@@ -11,11 +11,21 @@
 import { Router, Request, Response } from 'express'
 import { tenantQuery } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
+import { requireSecurityMonitoring } from '../middleware/securityMonitor'
 import { logger } from '../lib/logger'
 
 const router = Router()
 
-router.get('/', requireAuth, async (req: Request, res: Response) => {
+/* Journal réservé aux administrateurs (ou aux comptes portant
+   SECURITY_MONITORING_READ), comme le reste du Centre de sécurité.
+
+   Il n'était protégé que par `requireAuth` : n'importe quel compte
+   authentifié de l'espace — un viewer, un commercial — pouvait lire
+   l'activité de tous les autres, les IP des administrateurs et les
+   préfixes de jetons d'invitation et de réinitialisation émis
+   (security_audit_log.token_prefix). Un journal d'audit lisible par
+   ceux qu'il surveille ne remplit pas son office. */
+router.get('/', requireAuth, requireSecurityMonitoring, async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId
   const limit = Math.min(Number(req.query.limit ?? 500), 2000)
   try {

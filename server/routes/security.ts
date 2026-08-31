@@ -572,4 +572,405 @@ router.post('/alerts/:id/acknowledge', async (req: Request, res: Response) => {
   }
 })
 
+/* ═════════════════════════════════════════════════════════════════
+   7. SESSIONS & APPAREILS
+
+   Les sessions sont les lignes de `refresh_tokens` : une par connexion,
+   avec son IP et son navigateur. Révoquer une ligne coupe réellement la
+   session — le jeton d'accès porte son identifiant et chaque requête le
+   vérifie (cf. lib/sessionRevocation). Sans ce lien, « déconnecter »
+   n'aurait retiré qu'une ligne d'un tableau.
+
+   NB : `refresh_tokens.token_hash` n'est JAMAIS renvoyé. Les SELECT sont
+   explicites, précisément pour que l'ajout d'une colonne sensible ne
+   fuite pas par mégarde.
+   ═════════════════════════════════════════════════════════════════ */
+
+const UUID_RE = /^[0-9a-f-]{36}$/i
+
+router.get('/sessions', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const limit  = clampLimit(req.query.limit, 50)
+  const offset = clampOffset(req.query.offset)
+  const userId = UUID_RE.test(String(req.query.user_id ?? '')) ? String(req.query.user_id) : null
+  /* Par défaut on ne montre que le vivant : l'écran sert à décider qui
+     déconnecter, pas à contempler des sessions déjà mortes. */
+  const inclureMortes = String(req.query.all ?? '') === '1'
+
+  try {
+    const rows = await query(
+      `SELECT rt.id,
+              rt.user_id,
+              COALESCE(u.name, u.email) AS user_name,
+              u.email                   AS user_email,
+              rt.ip_address::text       AS ip_address,
+              rt.user_agent,
+              rt.created_at,
+              rt.expires_at,
+              rt.revoked,
+              CASE WHEN rt.revoked            THEN 'revoquee'
+                   WHEN rt.expires_at <= NOW() THEN 'expiree'
+                   ELSE 'active' END    AS statut,
+              (SELECT COUNT(*)::int FROM trusted_devices td
+                WHERE td.user_id = rt.user_id
+                  AND td.revoked_at IS NULL
+                  AND td.expires_at > NOW()) AS appareils_confiance
+         FROM refresh_tokens rt
+         JOIN users u ON u.id = rt.user_id
+        WHERE rt.tenant_id = $1
+          AND ($2::uuid IS NULL OR rt.user_id = $2)
+          AND ($3::boolean OR (rt.revoked = false AND rt.expires_at > NOW()))
+        ORDER BY rt.created_at DESC
+        LIMIT $4 OFFSET $5`,
+      [tenantId, userId, inclureMortes, limit, offset]
+    )
+    res.json({ rows, limit, offset, hasMore: rows.length === limit })
+  } catch (err: unknown) {
+    logger.error('[security/sessions]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.post('/sessions/:id/revoke', async (req: Request, res: Response) => {
+  const { tenantId } = req.user!
+  const id = String(req.params.id)
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Identifiant invalide' })
+
+  try {
+    /* Le filtre tenant est DANS le UPDATE : sans lui, un admin pourrait
+       couper la session d'un autre espace en devinant un UUID. */
+    const row = await queryOne<{ id: string; user_id: string }>(
+      `UPDATE refresh_tokens
+          SET revoked = true
+        WHERE id = $1 AND tenant_id = $2 AND revoked = false
+        RETURNING id, user_id`,
+      [id, tenantId]
+    )
+    if (!row) return res.status(404).json({ error: 'Session introuvable ou déjà révoquée' })
+
+    /* Coupure immédiate : sans cette invalidation, le cache laisserait
+       la session vivre jusqu'à 30 secondes de plus. */
+    const { invalidateSession } = await import('../lib/sessionRevocation')
+    invalidateSession(row.id)
+
+    trackSecurityEvent({
+      type: 'admin_sensitive_action', req,
+      reason: 'session_revoked',
+      metadata: { session_id: row.id, target_user_id: row.user_id },
+    })
+    res.json({ ok: true })
+  } catch (err: unknown) {
+    logger.error('[security/sessions/revoke]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.post('/users/:userId/sessions/revoke-all', async (req: Request, res: Response) => {
+  const { tenantId } = req.user!
+  const userId = String(req.params.userId)
+  if (!UUID_RE.test(userId)) return res.status(400).json({ error: 'Identifiant invalide' })
+
+  try {
+    const rows = await query<{ id: string }>(
+      `UPDATE refresh_tokens
+          SET revoked = true
+        WHERE user_id = $1 AND tenant_id = $2 AND revoked = false
+        RETURNING id`,
+      [userId, tenantId]
+    )
+
+    const { invalidateAllSessions } = await import('../lib/sessionRevocation')
+    invalidateAllSessions()
+
+    trackSecurityEvent({
+      type: 'admin_sensitive_action', req,
+      reason: 'all_sessions_revoked',
+      metadata: { target_user_id: userId, revoked: rows.length },
+    })
+    res.json({ ok: true, revoked: rows.length })
+  } catch (err: unknown) {
+    logger.error('[security/sessions/revoke-all]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.get('/devices', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const limit  = clampLimit(req.query.limit, 50)
+  const offset = clampOffset(req.query.offset)
+
+  try {
+    /* `device_hash` n'est pas renvoyé : c'est le secret qui identifie
+       l'appareil, il n'a rien à faire dans une réponse d'API. */
+    const rows = await query(
+      `SELECT td.id, td.user_id,
+              COALESCE(u.name, u.email) AS user_name,
+              u.email                   AS user_email,
+              td.label, td.user_agent,
+              td.ip_address::text       AS ip_address,
+              td.last_used_at, td.created_at, td.expires_at, td.revoked_at,
+              CASE WHEN td.revoked_at IS NOT NULL THEN 'revoque'
+                   WHEN td.expires_at <= NOW()     THEN 'expire'
+                   ELSE 'actif' END     AS statut
+         FROM trusted_devices td
+         JOIN users u ON u.id = td.user_id
+        WHERE td.tenant_id = $1
+        ORDER BY (td.revoked_at IS NULL) DESC, td.last_used_at DESC NULLS LAST
+        LIMIT $2 OFFSET $3`,
+      [tenantId, limit, offset]
+    )
+    res.json({ rows, limit, offset, hasMore: rows.length === limit })
+  } catch (err: unknown) {
+    logger.error('[security/devices]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.post('/devices/:id/revoke', async (req: Request, res: Response) => {
+  const { tenantId } = req.user!
+  const id = String(req.params.id)
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Identifiant invalide' })
+
+  try {
+    const row = await queryOne<{ id: string; user_id: string }>(
+      `UPDATE trusted_devices
+          SET revoked_at = NOW()
+        WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+        RETURNING id, user_id`,
+      [id, tenantId]
+    )
+    if (!row) return res.status(404).json({ error: 'Appareil introuvable ou déjà révoqué' })
+
+    trackSecurityEvent({
+      type: 'admin_sensitive_action', req,
+      reason: 'trusted_device_revoked',
+      metadata: { device_id: row.id, target_user_id: row.user_id },
+    })
+    res.json({ ok: true })
+  } catch (err: unknown) {
+    logger.error('[security/devices/revoke]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ═════════════════════════════════════════════════════════════════
+   8. JOURNAL D'AUDIT
+
+   `audit_logs` enregistre les changements de données (action, table,
+   enregistrement, ancienne et nouvelle valeur). Il est PAGINÉ et FILTRÉ
+   côté serveur : la table grossit sans fin, la charger entière dans le
+   navigateur serait intenable et exposerait tout l'historique d'un coup.
+   ═════════════════════════════════════════════════════════════════ */
+router.get('/audit', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const limit  = clampLimit(req.query.limit, 50)
+  const offset = clampOffset(req.query.offset)
+  const userId = UUID_RE.test(String(req.query.user_id ?? '')) ? String(req.query.user_id) : null
+  const table  = String(req.query.table ?? '').trim().slice(0, 64) || null
+  const action = String(req.query.action ?? '').trim().slice(0, 64) || null
+  const ip     = normalizeIp(req.query.ip)
+  const heures = periodToHours(req.query.period)
+  /* Recherche libre : bornée, et appliquée à des colonnes non sensibles
+     seulement. On ne cherche PAS dans old_data/new_data, qui peuvent
+     contenir des valeurs confidentielles. */
+  const recherche = String(req.query.q ?? '').trim().slice(0, 100) || null
+
+  try {
+    const rows = await query(
+      `SELECT a.id, a.user_id,
+              COALESCE(u.name, u.email) AS user_name,
+              a.action, a.table_name, a.record_id,
+              a.ip_address::text AS ip_address,
+              a.user_agent, a.created_at,
+              a.old_data, a.new_data
+         FROM audit_logs a
+         LEFT JOIN users u ON u.id = a.user_id
+        WHERE a.tenant_id = $1
+          AND ($2::uuid IS NULL OR a.user_id    = $2)
+          AND ($3::text IS NULL OR a.table_name = $3)
+          AND ($4::text IS NULL OR a.action     = $4)
+          AND ($5::text IS NULL OR host(a.ip_address) = $5)
+          AND ($6::int  IS NULL OR a.created_at >= NOW() - ($6 || ' hours')::interval)
+          AND ($7::text IS NULL OR a.action ILIKE '%' || $7 || '%'
+                                OR a.table_name ILIKE '%' || $7 || '%'
+                                OR COALESCE(u.name, u.email) ILIKE '%' || $7 || '%')
+        ORDER BY a.created_at DESC
+        LIMIT $8 OFFSET $9`,
+      [tenantId, userId, table, action, ip, heures, recherche, limit, offset]
+    )
+    res.json({ rows, limit, offset, hasMore: rows.length === limit })
+  } catch (err: unknown) {
+    logger.error('[security/audit]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/** Valeurs disponibles pour alimenter les filtres, sans les deviner. */
+router.get('/audit/facets', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  try {
+    const [tables, actions, utilisateurs] = await Promise.all([
+      query<{ v: string }>(
+        `SELECT DISTINCT table_name AS v FROM audit_logs
+          WHERE tenant_id = $1 AND table_name IS NOT NULL ORDER BY 1 LIMIT 100`, [tenantId]),
+      query<{ v: string }>(
+        `SELECT DISTINCT action AS v FROM audit_logs
+          WHERE tenant_id = $1 AND action IS NOT NULL ORDER BY 1 LIMIT 100`, [tenantId]),
+      query<{ id: string; nom: string }>(
+        `SELECT DISTINCT a.user_id AS id, COALESCE(u.name, u.email) AS nom
+           FROM audit_logs a JOIN users u ON u.id = a.user_id
+          WHERE a.tenant_id = $1 ORDER BY 2 LIMIT 100`, [tenantId]),
+    ])
+    res.json({
+      tables:       tables.map(r => r.v),
+      actions:      actions.map(r => r.v),
+      utilisateurs,
+    })
+  } catch (err: unknown) {
+    logger.error('[security/audit/facets]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ═════════════════════════════════════════════════════════════════
+   9. RÔLES & PERMISSIONS
+
+   La matrice renvoyée ici est celle que le serveur APPLIQUE réellement
+   (middleware/rbac.ts). Elle n'est pas recopiée dans le front : une
+   matrice affichée qui diverge de la matrice appliquée rassure à tort,
+   ce qui est pire que de ne rien afficher.
+   ═════════════════════════════════════════════════════════════════ */
+router.get('/roles', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  try {
+    const { TABLE_ACL } = await import('../middleware/rbac')
+
+    const effectifs = await query<{ role: string; n: number }>(
+      `SELECT tu.role, COUNT(*)::int AS n
+         FROM tenant_users tu
+         JOIN users u ON u.id = tu.user_id
+        WHERE tu.tenant_id = $1 AND tu.status = 'active' AND u.is_active = true
+        GROUP BY tu.role`,
+      [tenantId]
+    )
+
+    res.json({
+      effectifs,
+      /* Une entrée par table exposée, avec les rôles autorisés pour
+         chaque action. Le regroupement par module est un travail
+         d'affichage, fait côté écran. */
+      matrice: TABLE_ACL,
+    })
+  } catch (err: unknown) {
+    logger.error('[security/roles]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ═════════════════════════════════════════════════════════════════
+   10. PARAMÈTRES DE SÉCURITÉ
+
+   Ces réglages sont APPLIQUÉS CÔTÉ SERVEUR. L'écran ne fait que les
+   lire et les écrire ; il ne décide de rien. Les bornes sont vérifiées
+   ici ET par une contrainte de la base (migration 092) — un appel
+   direct à l'API ne peut donc pas désarmer la sécurité en envoyant
+   « 0 tentative maximum ».
+   ═════════════════════════════════════════════════════════════════ */
+
+const CHAMPS_REGLAGES = {
+  session_max_days:        { min: 1, max: 365 },
+  idle_timeout_minutes:    { min: 0, max: 1440 },
+  max_login_attempts:      { min: 3, max: 20 },
+  lockout_minutes:         { min: 1, max: 1440 },
+  trusted_device_days:     { min: 1, max: 365 },
+  password_min_length:     { min: 8, max: 64 },
+} as const
+
+const CHAMPS_BOOLEENS = [
+  'require_2fa_admins', 'require_2fa_all', 'trusted_devices_enabled',
+  'password_require_upper', 'password_require_digit', 'password_require_symbol',
+] as const
+
+router.get('/settings', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  try {
+    const row = await queryOne(
+      `SELECT * FROM security_settings WHERE tenant_id = $1`, [tenantId])
+    /* Aucune ligne : l'espace n'a jamais rien réglé. On renvoie les
+       valeurs par défaut de la base plutôt que d'inventer une ligne à
+       la lecture — écrire lors d'un GET est un effet de bord. */
+    if (row) return res.json({ settings: row, defini: true })
+    res.json({
+      settings: {
+        tenant_id: tenantId,
+        session_max_days: 90, idle_timeout_minutes: 0,
+        max_login_attempts: 5, lockout_minutes: 15,
+        require_2fa_admins: false, require_2fa_all: false,
+        trusted_devices_enabled: true, trusted_device_days: 30,
+        password_min_length: 8, password_require_upper: false,
+        password_require_digit: false, password_require_symbol: false,
+      },
+      defini: false,
+    })
+  } catch (err: unknown) {
+    logger.error('[security/settings]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+router.patch('/settings', async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId
+  const body = (req.body ?? {}) as Record<string, unknown>
+
+  const colonnes: string[] = []
+  const valeurs: unknown[] = []
+  const modifs: Record<string, unknown> = {}
+
+  for (const [champ, bornes] of Object.entries(CHAMPS_REGLAGES)) {
+    if (!(champ in body)) continue
+    const n = Number(body[champ])
+    if (!Number.isInteger(n) || n < bornes.min || n > bornes.max) {
+      return res.status(400).json({
+        error: `« ${champ} » doit être un entier entre ${bornes.min} et ${bornes.max}.`,
+      })
+    }
+    colonnes.push(champ); valeurs.push(n); modifs[champ] = n
+  }
+  for (const champ of CHAMPS_BOOLEENS) {
+    if (!(champ in body)) continue
+    if (typeof body[champ] !== 'boolean') {
+      return res.status(400).json({ error: `« ${champ} » doit être vrai ou faux.` })
+    }
+    colonnes.push(champ); valeurs.push(body[champ]); modifs[champ] = body[champ]
+  }
+
+  if (colonnes.length === 0) return res.status(400).json({ error: 'Aucun réglage fourni.' })
+
+  try {
+    /* UPSERT : la ligne n'existe qu'à partir de la première écriture. */
+    const set = colonnes.map((c, i) => `${c} = $${i + 2}`).join(', ')
+    const cols = colonnes.join(', ')
+    const params = colonnes.map((_, i) => `$${i + 2}`).join(', ')
+    const row = await queryOne(
+      `INSERT INTO security_settings (tenant_id, ${cols})
+       VALUES ($1, ${params})
+       ON CONFLICT (tenant_id) DO UPDATE SET ${set}, updated_at = NOW()
+       RETURNING *`,
+      [tenantId, ...valeurs]
+    )
+
+    /* Journalisé : changer la politique de sécurité est exactement le
+       genre d'action qu'un audit doit pouvoir retrouver. */
+    trackSecurityEvent({
+      type: 'admin_sensitive_action', req,
+      reason: 'security_settings_updated',
+      metadata: { champs: Object.keys(modifs), valeurs: modifs },
+    })
+    res.json({ settings: row, defini: true })
+  } catch (err: unknown) {
+    logger.error('[security/settings/patch]', (err as Error)?.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
 export default router

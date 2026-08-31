@@ -9,6 +9,8 @@ import { admin2faApi, type AdminUser, type Pending2FA, type LoginHistoryRow } fr
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import SessionsTab from '@/components/securite/SessionsTab'
+import AuditTab from '@/components/securite/AuditTab'
 
 /* ── Formatage utilitaires ────────────────────────────────────── */
 const fmtDate = (s: string) => {
@@ -45,7 +47,9 @@ const modeShort: Record<string, string> = {
 }
 
 export default function AdminSecurity() {
-  const [tab, setTab] = useState<'pending' | 'users' | 'history'>('pending')
+  const [tab, setTab] = useState<
+    'pending' | 'users' | 'sessions' | 'history' | 'audit'
+  >('pending')
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -57,17 +61,19 @@ export default function AdminSecurity() {
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-foreground">Sécurité &amp; connexions</h1>
           <p className="text-sm text-muted-foreground">
-            Approuvez les demandes en attente, configurez le mode 2FA par utilisateur, consultez l'historique.
+            Approuvez les demandes en attente, gérez le 2FA et les sessions, consultez l'historique et le journal d'audit.
           </p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-border">
+      <div className="flex gap-2 border-b border-border overflow-x-auto">
         {([
           { key: 'pending',  label: 'Demandes en attente', icon: Clock },
           { key: 'users',    label: 'Utilisateurs',        icon: Users },
+          { key: 'sessions', label: 'Sessions & appareils', icon: Monitor },
           { key: 'history',  label: 'Historique',          icon: ShieldCheck },
+          { key: 'audit',    label: "Journal d'audit",     icon: KeyRound },
         ] as const).map(t => {
           const Icon = t.icon
           const active = tab === t.key
@@ -87,9 +93,11 @@ export default function AdminSecurity() {
         })}
       </div>
 
-      {tab === 'pending' && <PendingTab />}
-      {tab === 'users'   && <UsersTab />}
-      {tab === 'history' && <HistoryTab />}
+      {tab === 'pending'  && <PendingTab />}
+      {tab === 'users'    && <UsersTab />}
+      {tab === 'sessions' && <SessionsTab />}
+      {tab === 'history'  && <HistoryTab />}
+      {tab === 'audit'    && <AuditTab />}
     </div>
   )
 }
