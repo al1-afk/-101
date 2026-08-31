@@ -18,6 +18,7 @@ import {
 } from '@/hooks/useProjets'
 import { useClients, useCreateClient } from '@/hooks/useClients'
 import { PROJET_TEMPLATES, type ProjetTemplate } from '@/lib/projetTemplates'
+import { buildTasksFromTemplates, countTemplate } from '@/lib/templateTasks'
 import { teamMemberTasksApi, projetAssigneesApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -549,24 +550,23 @@ export default function Projets() {
       .map(k => allTemplates.find(t => t.key === k))
       .filter(Boolean) as ProjetTemplate[]
     if (templates.length === 0) return
+    /* Une catégorie = une tâche, ses étapes en checklist.
+       Même fonction que l'application depuis la fiche projet : les deux
+       chemins doivent produire exactement les mêmes tâches. Au passage,
+       la création de projet hérite des descriptions (SOP, prompts,
+       checklists) qu'elle n'avait jamais posées. */
     let count = 0
-    for (const tpl of templates) {
-      for (const group of tpl.groups) {
-        for (const task of group.tasks) {
-          try {
-            await teamMemberTasksApi.create({
-              project_id:     projetId,
-              team_member_id: null,                 // unassigned at creation
-              title:          task.title,
-              category:       group.category,
-              priority:       task.priority ?? 'normal',
-              status:         'todo',
-            } as any)
-            count++
-          } catch (e: any) {
-            console.error('[seedTasks]', e?.message ?? e)
-          }
-        }
+    for (const t of buildTasksFromTemplates(templates)) {
+      try {
+        await teamMemberTasksApi.create({
+          project_id:     projetId,
+          team_member_id: null,                 // non assignée à la création
+          status:         'todo',
+          ...t,
+        } as any)
+        count++
+      } catch (e: any) {
+        console.error('[seedTasks]', e?.message ?? e)
       }
     }
     await qc.refetchQueries({ queryKey: ['team_member_tasks'] })
@@ -901,7 +901,7 @@ export default function Projets() {
                         <span className="text-[11px] font-bold px-2 py-1 rounded bg-blue-600 text-white">
                           {selectedTemplates.reduce((s, k) => {
                             const t = allTemplates.find(x => x.key === k)
-                            return s + (t ? t.groups.reduce((n, g) => n + g.tasks.length, 0) : 0)
+                            return s + (t ? countTemplate(t).taches : 0)
                           }, 0)} tâches
                         </span>
                       )}
@@ -910,7 +910,7 @@ export default function Projets() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {allTemplates.map(tpl => {
                       const selected = selectedTemplates.includes(tpl.key)
-                      const taskCount = tpl.groups.reduce((n, g) => n + g.tasks.length, 0)
+                      const taskCount = countTemplate(tpl).taches
                       const isCustom = tpl.key.startsWith('custom:')
                       return (
                         <label key={tpl.key}

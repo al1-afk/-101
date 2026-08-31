@@ -3,6 +3,7 @@ import { teamMemberTasksApi } from '@/lib/api'
 import { currentTenantIdForCache } from '@/lib/authToken'
 import { toast } from 'sonner'
 import { nextDueDate, type TaskRecurrence } from '@/lib/taskRecurrence'
+import { resetChecklist } from '@/lib/taskNotes'
 
 export type TaskStatus   = 'todo' | 'in_progress' | 'validation' | 'done' | 'cancelled'
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -207,7 +208,9 @@ export function useUpdateTeamMemberTask() {
               assigned_stagiaire_id: updated.assigned_stagiaire_id,
               project_id:            updated.project_id,
               title:                 updated.title,
-              description:           updated.description,
+              /* Checklist décochée : la nouvelle occurrence est à faire,
+                 pas à contempler. */
+              description:           resetChecklist(updated.description),
               priority:              updated.priority,
               status:                'todo',
               due_date:              nextDate,

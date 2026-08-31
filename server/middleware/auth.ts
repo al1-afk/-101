@@ -105,13 +105,17 @@ export function verifyRefreshToken(token: string): (Pick<JwtPayload, 'userId' | 
 export const signToken = signAccessToken
 
 /* ── RBAC role hierarchy — aligned with frontend `Role` type ───── */
-export type Role = 'admin' | 'manager' | 'commercial' | 'comptable' | 'viewer'
+export type Role = 'admin' | 'manager' | 'commercial' | 'comptable' | 'developpeur' | 'viewer'
 
 const ROLE_RANK: Record<Role, number> = {
   admin:      4,
   manager:    3,
   commercial: 2,
   comptable:  2,
+  /* Même échelon que commercial et comptable : un profil métier, ni
+     encadrant ni simple lecteur. Le rang ne sert qu'aux gardes
+     requireRole ; le détail des droits vit dans TABLE_ACL. */
+  developpeur: 2,
   viewer:     1,
 }
 

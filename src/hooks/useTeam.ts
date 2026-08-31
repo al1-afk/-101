@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { teamApi } from '@/lib/api'
 import { currentTenantIdForCache } from '@/lib/authToken'
 import { toast } from 'sonner'
+import type { Role } from '@/lib/permissions'
 
 export interface TeamMember {
   id:            string
@@ -12,10 +13,17 @@ export interface TeamMember {
   telephone:     string | null
   poste:         string | null
   departement:   string | null
-  role:          'admin' | 'manager' | 'commercial' | 'comptable' | 'viewer' | null
+  /* Référence la source unique du vocabulaire des rôles : le redéclarer
+     ici avait créé une quatrième liste à maintenir, et un rôle ajouté
+     ailleurs ne compilait plus. */
+  role:          Role | null
   salaire_base:  number
   date_embauche: string | null
   statut:        'actif' | 'inactif' | 'conge'
+  /** Type de collaboration. La colonne existe en base (CHECK employee /
+   *  trainer / freelance) mais le formulaire « Ajouter un salarié » ne la
+   *  renseigne pas : une fiche sans type est traitée comme un salarié. */
+  member_type?:  'employee' | 'trainer' | 'freelance' | null
 }
 
 const KEY = 'team_members'

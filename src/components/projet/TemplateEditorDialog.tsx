@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import type { ProjetTemplate } from '@/lib/projetTemplates'
 import { PROJET_TEMPLATES } from '@/lib/projetTemplates'
+import { countTemplate } from '@/lib/templateTasks'
 import {
   useCustomTemplates, useCreateCustomTemplate, useUpdateCustomTemplate, useDeleteCustomTemplate,
   rowToTemplate, type CustomProjetTemplate,
@@ -229,7 +230,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                Crée tes propres templates pour générer des tâches en un clic.
+                Crée tes propres templates. Chaque catégorie devient une tâche, ses étapes sa checklist.
               </p>
               <Button size="sm" onClick={openCreate}>
                 <Plus className="w-3.5 h-3.5" /> Nouveau template
@@ -249,14 +250,14 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Mes templates</p>
                 {customs.map(row => {
                   const t = rowToTemplate(row)
-                  const taskCount = t.groups.reduce((n, g) => n + g.tasks.length, 0)
+                  const { taches, etapes } = countTemplate(t)
                   return (
                     <div key={row.id} className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card hover:border-blue-300 dark:hover:border-blue-700 transition-colors">
                       <span className="text-lg">{t.emoji}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-foreground truncate">
                           {t.label}
-                          <span className="text-[10px] font-mono text-muted-foreground ml-2">({taskCount} tâches)</span>
+                          <span className="text-[10px] font-mono text-muted-foreground ml-2">({taches} tâches · {etapes} étapes)</span>
                         </p>
                         {t.description && <p className="text-[11px] text-muted-foreground truncate">{t.description}</p>}
                       </div>
@@ -327,7 +328,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
             {/* Groups */}
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Catégories & tâches</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Catégories & étapes</p>
                 <Button size="sm" variant="secondary" onClick={addGroup}>
                   <FolderPlus className="w-3.5 h-3.5" /> Catégorie
                 </Button>
@@ -370,7 +371,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                               className="flex-1 h-8 text-xs"
                               value={t.title}
                               onChange={e => updateTask(gIdx, tIdx, { title: e.target.value })}
-                              placeholder="Titre de la tâche…"
+                              placeholder="Titre de l'étape…"
                             />
                             <Select value={t.priority ?? 'normal'} onValueChange={v => updateTask(gIdx, tIdx, { priority: v as Priority })}>
                               <SelectTrigger className="h-8 w-24 text-xs"><SelectValue /></SelectTrigger>
@@ -392,7 +393,7 @@ export default function TemplateEditorDialog({ open, onClose }: { open: boolean;
                               🖊️ Éditer
                               {hasAny && <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-blue-500" />}
                             </button>
-                            <Button size="icon" variant="ghost" className="w-7 h-7 text-red-400 hover:text-red-600" onClick={() => removeTask(gIdx, tIdx)} title="Supprimer la tâche">
+                            <Button size="icon" variant="ghost" className="w-7 h-7 text-red-400 hover:text-red-600" onClick={() => removeTask(gIdx, tIdx)} title="Supprimer l'étape">
                               <X className="w-3.5 h-3.5" />
                             </Button>
                           </div>

@@ -82,6 +82,26 @@ export function serializeTaskDesc(e: Partial<TaskEnvelope>): string {
   return JSON.stringify({ sentinel: SENTINEL, ...full })
 }
 
+/**
+ * Description destinée à la PROCHAINE occurrence d'une tâche récurrente :
+ * même contenu, checklist décochée.
+ *
+ * Sans ça, la tâche « 📝 Publications (hebdo) » réapparaissait la semaine
+ * suivante avec ses cinq points déjà cochés — elle se serait annoncée
+ * faite avant d'avoir commencé. Les commentaires et pièces jointes, eux,
+ * restent : ils documentent la tâche, pas la semaine écoulée.
+ *
+ * Une description en texte brut (ancien format) est rendue telle quelle,
+ * pour ne pas la convertir en JSON au passage.
+ */
+export function resetChecklist(desc: string | null | undefined): string | null {
+  if (!desc) return desc ?? null
+  const e = parseTaskDesc(desc)
+  if (e.subtasks.length === 0) return desc
+  if (e.subtasks.every(s => !s.done)) return desc
+  return serializeTaskDesc({ ...e, subtasks: e.subtasks.map(s => ({ ...s, done: false })) })
+}
+
 export function newId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 }

@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'manager' | 'commercial' | 'comptable' | 'viewer'
+export type Role = 'admin' | 'manager' | 'commercial' | 'comptable' | 'developpeur' | 'viewer'
 export type Module =
   | 'clients' | 'prospects' | 'factures' | 'devis' | 'contrats'
   | 'paiements' | 'depenses' | 'finances' | 'equipe' | 'fournisseurs'
@@ -43,6 +43,17 @@ export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
     depenses: FULL, finances: FULL, statistiques: READ_ONLY,
     activite: READ_ONLY,
   },
+  /* Profil Production / Tech : il livre les projets, tient l'infrastructure
+     (domaines, hébergements) et consulte les clients pour lesquels il
+     travaille. Aucun accès à la finance, à la paie ni aux paramètres —
+     ce n'est pas de la défiance, c'est le moindre privilège : ce qu'on
+     ne peut pas atteindre ne peut pas être divulgué par erreur. */
+  developpeur: {
+    clients: { view: true },
+    produits: READ_ONLY,
+    domaines: READ_WRITE, hebergements: READ_WRITE,
+    statistiques: { view: true },
+  },
   viewer: {
     clients: READ_ONLY, prospects: READ_ONLY, factures: READ_ONLY,
     devis: READ_ONLY, statistiques: READ_ONLY,
@@ -54,6 +65,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   manager:    'Manager',
   commercial: 'Commercial',
   comptable:  'Comptable',
+  developpeur:'Développeur',
   viewer:     'Lecteur',
 }
 
@@ -62,6 +74,7 @@ export const ROLE_COLORS: Record<Role, string> = {
   manager:    'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   commercial: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   comptable:  'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
+  developpeur:'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400',
   viewer:     'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
 }
 

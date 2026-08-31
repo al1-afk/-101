@@ -33,6 +33,8 @@ import {
 } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
+import EmployesTab from '@/components/equipe/EmployesTab'
+import TeamMemberForm from '@/components/equipe/TeamMemberForm'
 import { equipeSchema } from '@/lib/importExportSchemas'
 
 /* ─── Config ─────────────────────────────────────────────────────── */
@@ -121,98 +123,6 @@ function saveWorkspaceMembers(m: WorkspaceMember[]) {
 /* ═══════════════════════════════════════════════════════════════════
    MEMBER FORM
 ═══════════════════════════════════════════════════════════════════ */
-function TeamMemberForm({ member, onClose }: { member?: TeamMember; onClose: () => void }) {
-  const create = useCreateTeamMember()
-  const update = useUpdateTeamMember()
-  const [form, setForm] = useState({
-    nom:          member?.nom           || '',
-    prenom:       member?.prenom        || '',
-    email:        member?.email         || '',
-    telephone:    member?.telephone     || '',
-    poste:        member?.poste         || '',
-    departement:  member?.departement   || '',
-    role:         (member?.role         || 'commercial') as Role,
-    salaire_base: member?.salaire_base  || 0,
-    date_embauche:member?.date_embauche || '',
-    statut:       (member?.statut       || 'actif') as TeamMember['statut'],
-  })
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (member) await update.mutateAsync({ id: member.id, ...form })
-    else        await create.mutateAsync(form as any)
-    onClose()
-  }
-
-  return (
-    <form id="team-member-form" onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <label className="form-label">Prénom *</label>
-          <AutocorrectInput value={form.prenom} onChange={e => setForm(p => ({ ...p, prenom: e.target.value }))} required />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Nom *</label>
-          <AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} required />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Email</label>
-          <Input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Téléphone</label>
-          <Input value={form.telephone} onChange={e => setForm(p => ({ ...p, telephone: e.target.value }))} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Poste</label>
-          <AutocorrectInput value={form.poste} onChange={e => setForm(p => ({ ...p, poste: e.target.value }))} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Département</label>
-          <AutocorrectInput value={form.departement} onChange={e => setForm(p => ({ ...p, departement: e.target.value }))} placeholder="Tech, Ventes, Admin…" />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Rôle d'accès</label>
-          <Select value={form.role} onValueChange={v => setForm(p => ({ ...p, role: v as Role }))}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(ROLE_LABELS) as [Role, string][]).map(([k, v]) => (
-                <SelectItem key={k} value={k}>
-                  <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-bold mr-2', ROLE_COLORS[k])}>{v}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Salaire de base (MAD)</label>
-          <Input type="number" value={form.salaire_base || ''} onChange={e => setForm(p => ({ ...p, salaire_base: +e.target.value }))} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Date d'embauche</label>
-          <Input type="date" value={form.date_embauche} onChange={e => setForm(p => ({ ...p, date_embauche: e.target.value }))} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="form-label">Statut</label>
-          <Select value={form.statut} onValueChange={v => setForm(p => ({ ...p, statut: v as TeamMember['statut'] }))}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Object.entries(STATUT_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-3 pt-2">
-        <Button type="button" variant="secondary" onClick={onClose}>Annuler</Button>
-        <Button type="submit" disabled={create.isPending || update.isPending}>
-          {(create.isPending || update.isPending) && <Loader2 className="w-4 h-4 animate-spin" />}
-          {member ? 'Mettre à jour' : 'Ajouter'}
-        </Button>
-      </div>
-    </form>
-  )
-}
-
 /* ═══════════════════════════════════════════════════════════════════
    CONGES TAB
 ═══════════════════════════════════════════════════════════════════ */
@@ -1770,8 +1680,11 @@ export default function Equipe() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="salaires">
+      <Tabs defaultValue="employes">
         <TabsList className="flex-wrap h-auto gap-1">
+          <TabsTrigger value="employes">
+            <Users className="w-4 h-4 mr-1.5" /> Employés
+          </TabsTrigger>
           <TabsTrigger value="conges">
             <CalendarDays className="w-4 h-4 mr-1.5" /> Congés
           </TabsTrigger>
@@ -1794,6 +1707,15 @@ export default function Equipe() {
             <TrendingUp className="w-4 h-4 mr-1.5" /> Stats
           </TabsTrigger>
         </TabsList>
+
+        {/* ── Employés — fiche RH des salariés (hors formateurs, freelances
+             et stagiaires, qui ont chacun leur onglet). ── */}
+        <TabsContent value="employes" className="mt-4">
+          {/* `setEditing(undefined)` est indispensable : sans lui, ouvrir
+              « Ajouter » après avoir modifié quelqu'un rouvrirait sa fiche
+              en édition au lieu d'un formulaire vierge. */}
+          <EmployesTab onAdd={() => { setEditing(undefined); setShowForm(true) }} />
+        </TabsContent>
 
         {/* ── Congés ── */}
         <TabsContent value="conges" className="mt-4">
@@ -1837,7 +1759,12 @@ export default function Equipe() {
       </Tabs>
 
       {/* Member form dialog */}
-      <Dialog open={showForm} onOpenChange={setShowForm}>
+      {/* La fermeture purge `editing` quel que soit le geste — Échap, croix
+          ou clic hors du dialogue. Sans ça, la fiche ouverte en modification
+          restait en mémoire et le clic suivant sur « Ajouter un salarié »
+          rouvrait cette fiche en édition : valider écrasait quelqu'un au
+          lieu de créer. */}
+      <Dialog open={showForm} onOpenChange={o => { setShowForm(o); if (!o) setEditing(undefined) }}>
         <DialogContent className="max-w-lg">
           <DialogHeader className="relative">
             <DialogTitle>{editing ? 'Modifier le membre' : 'Ajouter un membre'}</DialogTitle>

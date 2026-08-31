@@ -19,7 +19,7 @@
     "test:aiquote": "tsx --test server/lib/aiQuoteCore.test.ts",
     "test:gcontacts": "tsx --test server/lib/googleContacts.test.ts",
     "test:finance": "tsx --test tests/finance-compute.test.ts",
-    "test:time": "tsx --test tests/time-analytics.test.ts tests/time-reminder.test.ts tests/task-reminders.test.ts tests/eisenhower.test.ts",
+    "test:time": "tsx --test tests/time-analytics.test.ts tests/time-reminder.test.ts tests/task-reminders.test.ts tests/eisenhower.test.ts tests/template-tasks.test.ts",
     "test:phone": "tsx --test tests/phone.test.ts",
     "test:finance:api": "tsx --test tests/finance-api.test.ts",
     "test:visual": "playwright test --config=playwright.config.ts",

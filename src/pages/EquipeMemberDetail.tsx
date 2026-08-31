@@ -1,15 +1,18 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Mail, Phone, Briefcase, Calendar, Loader2,
   CircleDollarSign, Wallet, TrendingUp, TrendingDown, FileDown,
   FolderKanban, ShieldCheck, Activity, CalendarDays, User,
   CheckCircle2, XCircle, Clock, MapPin, Building2, IdCard,
-  Timer, BadgeCheck, Award, Zap,
+  Timer, BadgeCheck, Award, Zap, Pencil,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import TeamMemberForm from '@/components/equipe/TeamMemberForm'
+import type { TeamMember } from '@/hooks/useTeam'
 import { teamMgmtApi } from '@/lib/api'
 import { sopCategoryLabel } from '@/lib/sopCategories'
 import { cn } from '@/lib/utils'
@@ -35,6 +38,9 @@ export default function EquipeMemberDetail() {
   const { id, tenantSlug } = useParams<{ id: string; tenantSlug: string }>()
   const navigate = useNavigate()
   const base = tenantSlug ? `/${tenantSlug}` : ''
+
+  const qc = useQueryClient()
+  const [editOpen, setEditOpen] = useState(false)
 
   const memberQ = useQuery({
     queryKey: ['team-member', id],
@@ -125,7 +131,55 @@ export default function EquipeMemberDetail() {
             )}
           </div>
         </div>
+
+        <Button
+          variant="secondary"
+          className="flex-shrink-0 self-start"
+          onClick={() => setEditOpen(true)}
+        >
+          <Pencil className="w-4 h-4" /> Modifier
+        </Button>
       </div>
+
+      {/* Édition de la fiche — même formulaire que « Ajouter un salarié »
+          côté page Équipe, pour qu'un champ corrigé le soit partout.
+
+          Le mappage est explicite parce que les deux APIs de cette table
+          ne parlent pas le même vocabulaire : /api/team renvoie
+          first_name/last_name, le CRUD qui enregistre attend nom/prenom.
+          Le confondre écrirait le prénom dans le nom. */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Modifier la fiche de {fullName}</DialogTitle>
+          </DialogHeader>
+          <TeamMemberForm
+            member={{
+              id:            m.id,
+              created_at:    m.created_at,
+              nom:           m.last_name  ?? '',
+              prenom:        m.first_name ?? '',
+              email:         m.email      ?? null,
+              telephone:     m.telephone  ?? null,
+              poste:         m.poste      ?? null,
+              departement:   m.departement ?? null,
+              role:          m.role       ?? null,
+              salaire_base:  Number(m.salaire_base) || 0,
+              date_embauche: m.date_embauche ? String(m.date_embauche).slice(0, 10) : null,
+              statut:        m.statut,
+              member_type:   m.member_type,
+            } as TeamMember}
+            onClose={() => setEditOpen(false)}
+            /* La fiche est lue par une requête distincte de la liste :
+               sans cette invalidation, l'écran garderait les anciennes
+               valeurs juste après l'enregistrement. */
+            onSaved={() => {
+              qc.invalidateQueries({ queryKey: ['team-member', id] })
+              qc.invalidateQueries({ queryKey: ['team-mgmt'] })
+            }}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-4">

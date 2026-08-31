@@ -44,8 +44,7 @@ import RecurrenceDialog from '@/components/projet/RecurrenceDialog'
 import { describeRecurrence, type TaskRecurrence } from '@/lib/taskRecurrence'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { serializeTaskDesc } from '@/lib/taskNotes'
-import { generateSopPromptForTask } from '@/lib/promptLibrary'
-import { findSopForTask, autoGenerateSopBlocks } from '@/lib/sopContent'
+import { buildTasksFromTemplates, countTemplate } from '@/lib/templateTasks'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
 import ProjetChat, { type ProjetMessage } from '@/components/projet/ProjetChat'
@@ -1173,73 +1172,20 @@ function TasksTab({
       const templates = templateKeys
         .map(k => customsAsTemplates.find(t => t.key === k) ?? PROJET_TEMPLATES.find(t => t.key === k))
         .filter(Boolean) as ProjetTemplate[]
-      /* Construit la description structurée de la tâche à partir du template.
-         Blocs riches (BlockEditor) + prompt IA en bloc code final.
-         Sous-tâches et attachments sont mis dans l'enveloppe.
-         Si le template ne définit pas de prompt, un SOP Master est généré
-         automatiquement avec le titre de la tâche injecté. */
-      const buildTaskDescription = (
-        task:     import('@/lib/projetTemplates').TaskTemplate,
-        category: string,
-      ): string | null => {
-        const blocks: any[] = []
-        // 1. Blocs riches définis dans le template (priorité max)
-        if (Array.isArray((task as any).blocks) && (task as any).blocks.length > 0) {
-          blocks.push(...(task as any).blocks)
-        } else {
-          // 2. Sinon, tenter un SOP pré-rédigé de la bibliothèque interne
-          const preWritten = findSopForTask(task.title)
-          if (preWritten) {
-            blocks.push(...preWritten)
-          } else {
-            // 3. Sinon, générer une trame SOP automatique (format Dokploy Premium)
-            blocks.push(...autoGenerateSopBlocks(task.title, category))
-          }
-        }
-        // Prompt IA : celui du template, sinon SOP Master auto-généré
-        const finalPrompt = (task.prompt && task.prompt.trim())
-          ? task.prompt.trim()
-          : generateSopPromptForTask(task.title, category)
-        if (finalPrompt) {
-          blocks.push({
-            type:    'callout',
-            variant: 'tip',
-            title:   'Prompt IA — copier/coller',
-            text:    'Guide clé-en-main. Adapte les [placeholders] au contexte du projet.',
-          })
-          blocks.push({ type: 'code', text: finalPrompt })
-        }
-        const subtasks = (task.subtasks ?? [])
-          .map(t => t.trim())
-          .filter(Boolean)
-          .map(title => ({ id: Math.random().toString(36).slice(2, 10), title, done: false }))
-
-        const attachments = (((task as any).attachments as { label: string; url: string }[]) ?? [])
-          .filter(a => a && a.label && a.url)
-          .map(a => ({ id: Math.random().toString(36).slice(2, 10), label: a.label, url: a.url }))
-
-        if (blocks.length === 0 && subtasks.length === 0 && attachments.length === 0) return null
-        return serializeTaskDesc({ blocks, subtasks, attachments })
-      }
-
-      for (const tpl of templates) {
-        for (const group of tpl.groups) {
-          for (const task of group.tasks) {
-            try {
-              await teamMemberTasksApi.create({
-                project_id:     projet.id,
-                team_member_id: null,
-                title:          task.title,
-                category:       group.category,
-                priority:       task.priority ?? 'normal',
-                status:         'todo',
-                recurrence:     task.recurrence ?? null,
-                description:    buildTaskDescription(task, group.category),
-              } as any)
-              count++
-            } catch (e: any) { console.error('[applyTemplate]', e?.message ?? e) }
-          }
-        }
+      /* Une catégorie = une tâche, ses étapes en checklist.
+         La règle et son pourquoi vivent dans templateTasks.ts, partagé
+         avec la création de projet pour que les deux chemins produisent
+         exactement les mêmes tâches. */
+      for (const t of buildTasksFromTemplates(templates)) {
+        try {
+          await teamMemberTasksApi.create({
+            project_id:     projet.id,
+            team_member_id: null,
+            status:         'todo',
+            ...t,
+          } as any)
+          count++
+        } catch (e: any) { console.error('[applyTemplate]', e?.message ?? e) }
       }
       /* Force refetch so the UI updates immediately without manual reload. */
       await qc.refetchQueries({ queryKey: ['team_member_tasks'] })
@@ -1711,10 +1657,15 @@ function TemplatePickerDialog({
     () => [...customs.map(rowToTemplate), ...PROJET_TEMPLATES],
     [customs]
   )
-  const totalTasks = selected.reduce((s, k) => {
+  /* Ce qui sera réellement créé : une tâche par catégorie, les étapes
+     devenant sa checklist. Annoncer les deux évite de promettre 44
+     tâches pour en poser 9. */
+  const total = selected.reduce((acc, k) => {
     const t = allTemplates.find(x => x.key === k)
-    return s + (t ? t.groups.reduce((n, g) => n + g.tasks.length, 0) : 0)
-  }, 0)
+    if (!t) return acc
+    const c = countTemplate(t)
+    return { taches: acc.taches + c.taches, etapes: acc.etapes + c.etapes }
+  }, { taches: 0, etapes: 0 })
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -1726,7 +1677,7 @@ function TemplatePickerDialog({
         </DialogHeader>
         <div className="flex items-center justify-between -mt-2">
           <p className="text-xs text-muted-foreground">
-            Coche les templates à appliquer. Toutes leurs tâches seront créées (non assignées) dans ce projet.
+            Coche les templates à appliquer. Chaque catégorie devient une tâche (non assignée), ses étapes sa checklist.
           </p>
           <Button size="sm" variant="outline" onClick={() => setEditorOpen(true)} className="flex-shrink-0">
             <Settings className="w-3.5 h-3.5" /> Gérer
@@ -1735,7 +1686,7 @@ function TemplatePickerDialog({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
           {allTemplates.map(tpl => {
             const isSel = selected.includes(tpl.key)
-            const taskCount = tpl.groups.reduce((n, g) => n + g.tasks.length, 0)
+            const { taches, etapes } = countTemplate(tpl)
             const isCustom = tpl.key.startsWith('custom:')
             return (
               <label key={tpl.key}
@@ -1748,7 +1699,7 @@ function TemplatePickerDialog({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                     <span>{tpl.emoji}</span> {tpl.label}
-                    <span className="text-[10px] font-mono text-muted-foreground">({taskCount} tâches)</span>
+                    <span className="text-[10px] font-mono text-muted-foreground">({taches} tâches · {etapes} étapes)</span>
                     {isCustom && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">PERSO</span>}
                   </p>
                   {tpl.description && <p className="text-[11px] text-muted-foreground mt-0.5">{tpl.description}</p>}
@@ -1758,8 +1709,10 @@ function TemplatePickerDialog({
           })}
         </div>
         <div className="flex items-center justify-between pt-3 border-t border-border">
-          {totalTasks > 0
-            ? <span className="text-xs font-bold px-2 py-1 rounded bg-blue-600 text-white">{totalTasks} tâches seront créées</span>
+          {total.taches > 0
+            ? <span className="text-xs font-bold px-2 py-1 rounded bg-blue-600 text-white">
+                {total.taches} tâche{total.taches > 1 ? 's' : ''} · {total.etapes} étape{total.etapes > 1 ? 's' : ''} à cocher
+              </span>
             : <span className="text-xs text-muted-foreground">Aucun template sélectionné</span>}
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" onClick={onClose}>Annuler</Button>
