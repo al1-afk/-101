@@ -75,6 +75,10 @@ interface Props {
     elapsed_seconds?:  number
   }) => Promise<void> | void
   readOnlyMeta?: boolean
+  /** Affiche la barre d'actions de statut (Commencer / Pause / Terminer).
+      Réservé aux appelants dont `onSave` sait persister `status` — sinon les
+      boutons seraient des no-op silencieux. */
+  statusActions?: boolean
   projet?:     Projet
   client?:     Client
 }
@@ -96,18 +100,24 @@ const PRIORITY_STYLES: Record<string, { color: string; label: string }> = {
 }
 
 export default function TaskDetailDialog({
-  open, onClose, task, currentUserName, isAdmin, onSave, readOnlyMeta = false, projet, client,
+  open, onClose, task, currentUserName, isAdmin, onSave, readOnlyMeta = false,
+  statusActions = false, projet, client,
 }: Props) {
   const initial = useMemo(() => parseTaskDesc(task.description), [task.description])
-  /* Clore une tâche par la fiche doit valoir exactement ce que vaut le
-     bouton ✓ de la liste : arrêter le chronomètre en cours et créditer
-     le temps écoulé. Sans ça le minuteur restait actif sur une tâche
-     fermée, et son segment — potentiellement des jours — finissait
-     imputé à la tâche suivante lancée. */
+  /* Sortir une tâche de l'état « en cours » depuis la fiche doit valoir
+     exactement ce que vaut le bouton correspondant de la liste : arrêter le
+     chronomètre et créditer le temps écoulé. Sans ça le minuteur restait
+     actif sur une tâche qu'on venait de clore ou de mettre en pause, et son
+     segment — potentiellement des jours — finissait imputé à la tâche
+     suivante lancée (cf. pauseTimer/finishTimer dans MySpace/MyTasks.tsx).
+     'validation' et 'todo' comptent donc autant que 'done' : le travail
+     s'arrête dans les quatre cas. Le crédit n'a lieu que si le chronomètre
+     porte bien SUR cette tâche — sinon on ne touche à rien. */
   const saveWithTimer: typeof onSave = async (patch) => {
-    const clot = patch.status === 'done' || patch.status === 'cancelled'
+    const arret = patch.status === 'done' || patch.status === 'cancelled'
+               || patch.status === 'validation' || patch.status === 'todo'
     const actif = getActiveTimer()
-    if (clot && actif?.taskId === task.id) {
+    if (arret && actif?.taskId === task.id) {
       const ecoule = Math.floor((Date.now() - actif.startedAt) / 1000)
       setActiveTimer(null)
       return onSave({ ...patch, elapsed_seconds: (task.elapsed_seconds ?? 0) + ecoule })
@@ -376,6 +386,7 @@ export default function TaskDetailDialog({
                 <ApercuTab
                   task={task}
                   readOnlyMeta={readOnlyMeta}
+                  statusActions={statusActions}
                   onSave={saveWithTimer}
                   statusCfg={statusCfg}
                   priorityCfg={priorityCfg}
@@ -481,15 +492,84 @@ export default function TaskDetailDialog({
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   Barre d'actions de statut — mêmes transitions que la liste de tâches
+   de l'espace membre : Commencer → in_progress, Pause → todo,
+   Terminer → validation (c'est le manager qui clôt).
+
+   `onSave` est ici `saveWithTimer` : Pause et Terminer arrêtent le
+   chronomètre s'il tournait sur cette tâche et créditent le temps dans le
+   même PATCH. Commencer ne DÉMARRE pas de chronomètre — le bouton homonyme
+   de la liste projet ne le fait pas non plus ; seule la page « Mes tâches »
+   est un poste de pointage, et démarrer ici sans son contexte obligerait à
+   solder à l'aveugle un minuteur laissé sur une autre tâche.
+═══════════════════════════════════════════════════════════════════ */
+function StatusActions({ task, onSave }: {
+  task:   TaskLike
+  onSave: (patch: { status?: string }) => Promise<void> | void
+}) {
+  const [busy, setBusy] = useState(false)
+  const go = async (status: string) => {
+    if (busy) return
+    setBusy(true)
+    try { await onSave({ status }) }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Erreur') }
+    finally { setBusy(false) }
+  }
+
+  const isDone       = task.status === 'done'
+  const isValidation = task.status === 'validation'
+  const isInProgress = task.status === 'in_progress'
+
+  return (
+    <div className="rounded-2xl border border-border bg-muted/30 p-3 flex items-center gap-2 flex-wrap">
+      <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold mr-1">
+        Actions
+      </span>
+      {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />}
+
+      {isValidation ? (
+        <span className="text-[12px] text-violet-700 dark:text-violet-400 italic flex items-center gap-1">
+          <Check className="w-3.5 h-3.5" /> Terminée — en attente de validation du manager
+        </span>
+      ) : isDone ? (
+        <Button size="sm" variant="outline" className="h-8 text-xs" disabled={busy}
+          onClick={() => go('todo')}>
+          <Square className="w-3.5 h-3.5" /> Rouvrir la tâche
+        </Button>
+      ) : (
+        <>
+          {!isInProgress ? (
+            <Button size="sm" variant="outline" className="h-8 text-xs" disabled={busy}
+              onClick={() => go('in_progress')}>
+              ▶ Commencer
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" className="h-8 text-xs" disabled={busy}
+              onClick={() => go('todo')}>
+              ⏸ Mettre en pause
+            </Button>
+          )}
+          <Button size="sm" className="h-8 text-xs bg-violet-600 hover:bg-violet-700 text-white"
+            disabled={busy} onClick={() => go('validation')}>
+            <CheckSquare className="w-3.5 h-3.5" /> Terminer
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    TAB : APERÇU
 ═══════════════════════════════════════════════════════════════════ */
 function ApercuTab({
   task, statusCfg, priorityCfg, meta, subtasksTotal, subtasksDone, subPct,
-  commentsCount, resourcesCount, hasBlocks, onGoTo, readOnlyMeta, onSave,
+  commentsCount, resourcesCount, hasBlocks, onGoTo, readOnlyMeta, statusActions, onSave,
 }: any) {
   const globalProgress = subtasksTotal > 0 ? subPct : 0
   return (
     <div className="space-y-4">
+      {statusActions && <StatusActions task={task} onSave={onSave} />}
       {/* Progression globale */}
       <div className="rounded-2xl bg-gradient-to-br from-blue-500/5 via-violet-500/5 to-cyan-500/5 border border-blue-200/50 dark:border-blue-900/40 p-5">
         <div className="flex items-center justify-between mb-2">

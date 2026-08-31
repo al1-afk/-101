@@ -17,6 +17,7 @@ import PasswordField from '@/components/PasswordField'
 import ProjetChat from '@/components/projet/ProjetChat'
 import { useMember } from '@/hooks/useMember'
 import { parseProjet, CREDENTIAL_PRESETS } from '@/lib/projetNotes'
+import { getActiveTimer, setActiveTimer } from '@/lib/taskTimer'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
 import { cn } from '@/lib/utils'
@@ -76,14 +77,39 @@ export default function MyProjetDetail() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
 
   const updateTask = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      mySpaceApi.updateTaskStatus(id, status),
+    mutationFn: ({ id, status, elapsed_seconds }: {
+      id: string; status: string; elapsed_seconds?: number
+    }) => elapsed_seconds !== undefined
+      ? mySpaceApi.updateTaskElapsed(id, elapsed_seconds, status)
+      : mySpaceApi.updateTaskStatus(id, status),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['my-space', 'projet', id] })
       qc.invalidateQueries({ queryKey: ['my-space', 'tasks'] })
+      qc.invalidateQueries({ queryKey: ['my-space', 'dashboard'] })
     },
     onError: (e: any) => toast.error(e?.message ?? 'Erreur'),
   })
+
+  /* Arrêter le travail depuis une ligne doit valoir exactement ce que vaut la
+     fiche : solder le chronomètre s'il tournait sur cette tâche, dans le même
+     PATCH que le statut. Le chrono se démarre depuis « Mes tâches » mais sa
+     clé localStorage est globale — sans ça le segment restait actif sur une
+     tâche mise en pause ou terminée ici, et son temps mort — potentiellement
+     des jours — finissait imputé à la tâche suivante lancée. */
+  const changeStatus = (task: MemberProjectTask, status: string) => {
+    const arret = status === 'todo' || status === 'validation' || status === 'done'
+    const actif = getActiveTimer()
+    if (arret && actif?.taskId === task.id) {
+      const ecoule = Math.floor((Date.now() - actif.startedAt) / 1000)
+      setActiveTimer(null)
+      updateTask.mutate({
+        id: task.id, status,
+        elapsed_seconds: (task.elapsed_seconds ?? 0) + ecoule,
+      })
+      return
+    }
+    updateTask.mutate({ id: task.id, status })
+  }
 
   if (isLoading) {
     return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
@@ -193,7 +219,7 @@ export default function MyProjetDetail() {
               tone="open"
               tasks={openTasks}
               emptyLabel="Rien à faire ici 🎉"
-              onUpdate={(taskId, status) => updateTask.mutate({ id: taskId, status })}
+              onUpdate={changeStatus}
               onOpen={setOpenTaskId}
             />
             <TaskColumn
@@ -201,7 +227,7 @@ export default function MyProjetDetail() {
               tone="done"
               tasks={doneTasks}
               emptyLabel="Aucune tâche terminée pour l’instant."
-              onUpdate={(taskId, status) => updateTask.mutate({ id: taskId, status })}
+              onUpdate={changeStatus}
               onOpen={setOpenTaskId}
             />
           </div>
@@ -344,15 +370,25 @@ export default function MyProjetDetail() {
             currentUserName={memberName}
             isAdmin={false}
             readOnlyMeta
+            statusActions
             onSave={async (patch) => {
               /* Ceinture et bretelles : la fiche ne s'ouvre déjà que sur ses
                  propres tâches, et le PATCH serveur refuse celles d'autrui. */
               if (!isMine) throw new Error("Tâche d'un autre membre — lecture seule")
+              /* Le PATCH accepte statut, temps et description ; on regroupe
+                 temps + statut en un seul appel — c'est ce que fait le
+                 chronomètre quand il clôt une tâche en cours. */
+              if (patch.elapsed_seconds !== undefined) {
+                await mySpaceApi.updateTaskElapsed(t.id, patch.elapsed_seconds, patch.status)
+              } else if (patch.status !== undefined) {
+                await mySpaceApi.updateTaskStatus(t.id, patch.status)
+              }
               if (patch.description !== undefined) {
                 await mySpaceApi.updateTaskDescription(t.id, patch.description)
-                qc.invalidateQueries({ queryKey: ['my-space', 'projet', id] })
-                qc.invalidateQueries({ queryKey: ['my-space', 'tasks'] })
               }
+              qc.invalidateQueries({ queryKey: ['my-space', 'projet', id] })
+              qc.invalidateQueries({ queryKey: ['my-space', 'tasks'] })
+              qc.invalidateQueries({ queryKey: ['my-space', 'dashboard'] })
             }}
           />
         )
@@ -398,7 +434,7 @@ function TaskColumn({ title, tone, tasks, emptyLabel, onUpdate, onOpen }: {
   tone:       'open' | 'done'
   tasks:      MemberProjectTask[]
   emptyLabel: string
-  onUpdate:   (taskId: string, status: string) => void
+  onUpdate:   (task: MemberProjectTask, status: string) => void
   onOpen:     (taskId: string) => void
 }) {
   const isDoneCol = tone === 'done'
@@ -465,7 +501,7 @@ function Content({ isMine, onOpen, children }: {
 /** Une ligne de tâche — cases à cocher et actions réservées à ses propres tâches. */
 function TaskRow({ task: t, onUpdate, onOpen }: {
   task:     MemberProjectTask
-  onUpdate: (taskId: string, status: string) => void
+  onUpdate: (task: MemberProjectTask, status: string) => void
   onOpen:   (taskId: string) => void
 }) {
   const isDone = t.status === 'done'
@@ -482,7 +518,7 @@ function TaskRow({ task: t, onUpdate, onOpen }: {
       isDone && 'opacity-60',
     )}>
       {isMine ? (
-        <button onClick={() => onUpdate(t.id, isDone ? 'todo' : 'done')}>
+        <button onClick={() => onUpdate(t, isDone ? 'todo' : 'done')}>
           {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600" /> :
            isInProgress ? <CircleDot className="w-4 h-4 text-blue-600" /> :
            <Square className="w-4 h-4 text-slate-300" />}
@@ -518,17 +554,17 @@ function TaskRow({ task: t, onUpdate, onOpen }: {
         <div className="flex gap-1 flex-shrink-0">
           {!isInProgress ? (
             <Button size="sm" variant="outline" className="h-7 text-xs"
-              onClick={() => onUpdate(t.id, 'in_progress')}>
+              onClick={() => onUpdate(t, 'in_progress')}>
               <Play className="w-3 h-3" /> Commencer
             </Button>
           ) : (
             <Button size="sm" variant="outline" className="h-7 text-xs"
-              onClick={() => onUpdate(t.id, 'todo')}>
+              onClick={() => onUpdate(t, 'todo')}>
               <Pause className="w-3 h-3" /> Pause
             </Button>
           )}
           <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white"
-            onClick={() => onUpdate(t.id, 'validation')}>
+            onClick={() => onUpdate(t, 'validation')}>
             <SquareIcon className="w-3 h-3" /> Terminer
           </Button>
         </div>
