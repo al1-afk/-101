@@ -687,8 +687,127 @@ export const calendrierApi       = tableApi('calendrier_events')
 export const bankAccountsApi     = tableApi('bank_accounts')
 export const creditsDettesApi    = tableApi('credits_dettes')
 export const bonsCommandeApi     = tableApi('bons_commande')
-export const congesApi           = tableApi('conges')
-export const salairesPaiementsApi = tableApi('salaires_paiements')
+/* ── Congés et salaires ───────────────────────────────────────────
+   L'écran Équipe a toujours parlé de `conges` et `salaires_paiements`.
+   Ces tables n'ont jamais existé : aucune migration ne les crée, et la
+   production répondait « relation "conges" does not exist » à chaque
+   ouverture de l'onglet — les deux onglets étaient morts depuis le
+   premier jour.
+
+   Les tables équivalentes, elles, existent bien et servent déjà la fiche
+   employé : `employee_leaves` et `employee_payroll`, avec RLS forcé et
+   leurs politiques. On les réutilise plutôt que d'en créer des doubles.
+
+   Seul le vocabulaire diffère. Plutôt que de renommer partout dans
+   l'écran, la traduction tient ici, en un seul endroit. */
+
+interface LigneConge {
+  id: string; employee_id: string; type_conge: string
+  date_debut: string; date_fin: string; nb_jours: number
+  statut: string; motif: string | null; created_at: string
+}
+
+/** Ce que l'écran Équipe manipule pour un congé. */
+export interface Conge {
+  id: string; member_id: string; type: string
+  date_debut: string; date_fin: string; jours: number
+  statut: string; notes: string; created_at: string
+}
+
+const versConge = (r: LigneConge): Conge => ({
+  id:         r.id,
+  member_id:  r.employee_id,
+  type:       r.type_conge,
+  date_debut: r.date_debut,
+  date_fin:   r.date_fin,
+  jours:      r.nb_jours,
+  statut:     r.statut,
+  notes:      r.motif ?? '',
+  created_at: r.created_at,
+})
+
+type EcritureConge = Partial<Omit<Conge, 'id' | 'created_at'>>
+
+const depuisConge = (d: EcritureConge): Partial<LigneConge> => {
+  const out: Partial<LigneConge> = {}
+  if (d.member_id  !== undefined) out.employee_id = d.member_id
+  if (d.type       !== undefined) out.type_conge  = d.type
+  if (d.date_debut !== undefined) out.date_debut  = d.date_debut
+  if (d.date_fin   !== undefined) out.date_fin    = d.date_fin
+  if (d.jours      !== undefined) out.nb_jours    = d.jours
+  if (d.statut     !== undefined) out.statut      = d.statut
+  if (d.notes      !== undefined) out.motif       = d.notes
+  return out
+}
+
+const congesTable = tableApi<LigneConge>('employee_leaves')
+
+export const congesApi = {
+  list: async (params?: Parameters<typeof congesTable.list>[0]): Promise<Conge[]> =>
+    (await congesTable.list(params)).map(versConge),
+  create: async (data: EcritureConge): Promise<Conge> =>
+    versConge(await congesTable.create(depuisConge(data) as Omit<LigneConge, 'id' | 'created_at'>)),
+  update: async (id: string, data: EcritureConge): Promise<Conge> =>
+    versConge(await congesTable.update(id, depuisConge(data))),
+  remove: (id: string) => congesTable.remove(id),
+}
+
+interface LignePaie {
+  id: string; employee_id: string; month: string
+  primes: number | null; avances: number | null
+  jours_absents: number | null; note: string | null
+}
+
+/** Ce que l'écran Équipe manipule pour une paie mensuelle. */
+export interface Paie {
+  id: string; member_id: string; year: number; month: number
+  prime: number; avance: number; absent_jours: number; note: string
+}
+
+/* `employee_payroll.month` est une DATE (premier jour du mois) ; l'écran
+   raisonne en année + mois. La conversion se fait sur la chaîne brute :
+   passer par `new Date()` ramènerait le mois précédent à l'ouest de
+   Greenwich. */
+const versPaie = (r: LignePaie): Paie => {
+  const [y, m] = String(r.month ?? '').split('-')
+  return {
+    id:           r.id,
+    member_id:    r.employee_id,
+    year:         Number(y) || 0,
+    month:        Number(m) || 0,
+    prime:        Number(r.primes ?? 0),
+    avance:       Number(r.avances ?? 0),
+    absent_jours: Number(r.jours_absents ?? 0),
+    note:         r.note ?? '',
+  }
+}
+
+type EcriturePaie = Partial<Omit<Paie, 'id'>>
+
+const depuisPaie = (d: EcriturePaie): Partial<LignePaie> => {
+  const out: Partial<LignePaie> = {}
+  if (d.member_id    !== undefined) out.employee_id   = d.member_id
+  if (d.prime        !== undefined) out.primes        = d.prime
+  if (d.avance       !== undefined) out.avances       = d.avance
+  if (d.absent_jours !== undefined) out.jours_absents = d.absent_jours
+  if (d.note         !== undefined) out.note          = d.note
+  if (d.year !== undefined && d.month !== undefined) {
+    out.month = `${d.year}-${String(d.month).padStart(2, '0')}-01`
+  }
+  return out
+}
+
+const paieTable = tableApi<LignePaie>('employee_payroll')
+
+export const salairesPaiementsApi = {
+  list: async (params?: Parameters<typeof paieTable.list>[0]): Promise<Paie[]> =>
+    (await paieTable.list(params)).map(versPaie),
+  create: async (data: EcriturePaie): Promise<Paie> =>
+    versPaie(await paieTable.create(depuisPaie(data) as Omit<LignePaie, 'id'>)),
+  update: async (id: string, data: EcriturePaie): Promise<Paie> =>
+    versPaie(await paieTable.update(id, depuisPaie(data))),
+  remove: (id: string) => paieTable.remove(id),
+}
 export const tacheActionsApi     = tableApi('tache_actions')
 
 /* ── Module Guides (playbook onboarding client) ──────────────── */

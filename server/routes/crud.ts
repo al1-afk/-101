@@ -24,7 +24,7 @@ export const EXPOSED_TABLES = new Set([
   'abonnements', 'client_subscriptions', 'taches',
   'automation_rules', 'automation_logs', 'alerts',
   'calendrier_events', 'bank_accounts', 'credits_dettes',
-  'bons_commande', 'conges', 'salaires_paiements', 'tache_actions',
+  'bons_commande', 'employee_leaves', 'employee_payroll', 'tache_actions',
   'personal_tasks',
   /* Module Guides (playbook onboarding client) */
   'guide_steps', 'guide_templates', 'guide_checklists',

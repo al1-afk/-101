@@ -93,8 +93,11 @@ export default function TeamMemberForm({
           <AutocorrectInput value={form.nom} onChange={e => setForm(p => ({ ...p, nom: e.target.value }))} required />
         </div>
         <div className="space-y-1.5">
-          <label className="form-label">Email</label>
-          <Input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
+          {/* Obligatoire en base (team_members.email NOT NULL) : sans le
+              marquer ici, l'enregistrement partait quand même et revenait
+              en erreur Postgres brute — « null value in column "email" ». */}
+          <label className="form-label">Email *</label>
+          <Input type="email" required value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
         </div>
         <div className="space-y-1.5">
           <label className="form-label">Téléphone</label>

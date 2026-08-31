@@ -82,8 +82,8 @@ const TABLE_ACL: Record<string, Record<Action, Role[]>> = {
   bank_accounts:        matrix(['admin','manager','comptable'], ['admin'],                                    ['admin','comptable'],            ['admin']),
   credits_dettes:       matrix(['admin','manager','comptable'], ['admin','manager','comptable'],              ['admin','manager','comptable'], ['admin','comptable']),
   bons_commande:        matrix(['admin','manager','commercial','comptable'], ['admin','manager','commercial'], ['admin','manager','commercial'], ['admin','manager']),
-  conges:               matrix(['admin','manager'],             ['admin','manager'],                          ['admin','manager'],              ['admin']),
-  salaires_paiements:   matrix(['admin','comptable'],           ['admin','comptable'],                        ['admin','comptable'],            ['admin']),
+  employee_leaves:      matrix(['admin','manager'],             ['admin','manager'],                          ['admin','manager'],              ['admin']),
+  employee_payroll:     matrix(['admin','comptable'],           ['admin','comptable'],                        ['admin','comptable'],            ['admin']),
   tache_actions:        rw(ALL_TECH),
   personal_tasks:       rw(ALL_TECH),
   /* Module Guides — playbook lecture pour tous, écriture admin/manager.

@@ -71,7 +71,6 @@ type CongeStatut = 'en_attente' | 'approuve' | 'refuse'
 interface CongeRequest {
   id:          string
   member_id:   string
-  member_nom:  string
   type:        CongeType
   date_debut:  string
   date_fin:    string
@@ -166,7 +165,6 @@ function CongesTab({ members }: { members: TeamMember[] }) {
     if (!member) return
     createMut.mutate({
       member_id:  form.member_id,
-      member_nom: `${member.prenom} ${member.nom}`,
       type:       form.type,
       date_debut: form.date_debut,
       date_fin:   form.date_fin,
@@ -232,7 +230,15 @@ function CongesTab({ members }: { members: TeamMember[] }) {
                   className="hover:bg-muted/20 transition-colors"
                 >
                   <td className="px-4 py-3">
-                    <p className="font-medium text-foreground">{c.member_nom}</p>
+                    {/* Nom résolu depuis l'équipe : la table des congés ne
+                        stocke qu'un identifiant, et une copie du nom se
+                        serait périmée au premier renommage. */}
+                    <p className="font-medium text-foreground">
+                      {(() => {
+                        const m = members.find(x => x.id === c.member_id)
+                        return m ? `${m.prenom} ${m.nom}`.trim() : 'Membre supprimé'
+                      })()}
+                    </p>
                     {c.notes && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{c.notes}</p>}
                   </td>
                   <td className="px-4 py-3">
