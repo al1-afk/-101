@@ -557,14 +557,23 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
        personne peut agir. L'écriture reste verrouillée par le PATCH
        /api/my-space/tasks/:id, qui exige team_member_id (ou stagiaire lié). */
     const taskCols = `t.id, t.title, t.status, t.priority, t.due_date, t.category,
-                      t.elapsed_seconds, t.is_request`
+                      t.elapsed_seconds, t.is_request, t.project_id,
+                      t.created_at, t.completed_at`
     const isMineExpr = `((t.team_member_id IS NOT NULL AND t.team_member_id = $2)
                          OR EXISTS (SELECT 1 FROM public.stagiaires s
                                      WHERE s.id = t.assigned_stagiaire_id AND s.member_id = $2))`
+    /* `description` porte l'enveloppe JSON de la tâche : checklist, pièces
+       jointes, blocs SOP et le fil de commentaires membre ↔ manager. La fiche
+       détaillée en a besoin — mais UNIQUEMENT pour les tâches du membre.
+       En mode 'all' la requête n'a pas de filtre is_mine : sortir ces colonnes
+       de la liste partagée publierait le fil privé et le prix facturé des
+       demandes de tous les coéquipiers. */
+    const privateCols = `CASE WHEN ${isMineExpr} THEN t.description END AS description,
+                         CASE WHEN ${isMineExpr} THEN t.request_price END AS request_price`
     const myTasks = seesAllTasks
       ? await tenantQuery(
           m.tenantId,
-          `SELECT ${taskCols},
+          `SELECT ${taskCols}, ${privateCols},
                   ${isMineExpr} AS is_mine,
                   COALESCE(
                     NULLIF(TRIM(CONCAT_WS(' ', tm.prenom, tm.nom)), ''),
@@ -580,7 +589,7 @@ router.get('/projets/:id', async (req: Request, res: Response) => {
         )
       : await tenantQuery(
           m.tenantId,
-          `SELECT ${taskCols}, TRUE AS is_mine, NULL::text AS assignee_name
+          `SELECT ${taskCols}, ${privateCols}, TRUE AS is_mine, NULL::text AS assignee_name
              FROM public.team_member_tasks t
             WHERE t.project_id = $1
               AND ${isMineExpr}

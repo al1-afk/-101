@@ -2,13 +2,14 @@
  * /my-space/projets/:id — fiche complète du projet pour le membre.
  * Infos client, identifiants (masqués + copy), liens utiles, ses tâches.
  */
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Briefcase, Calendar, Building2, Phone, Mail, MapPin,
   Loader2, KeyRound, Link2, Users, Crown, FileText,
   CheckSquare, Square, CircleDot, Play, Square as SquareIcon, Pause, Check,
-  Sparkles, ExternalLink, AlertCircle,
+  Sparkles, ExternalLink, AlertCircle, Inbox,
 } from 'lucide-react'
 import { mySpaceApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,7 @@ import ProjetChat from '@/components/projet/ProjetChat'
 import { useMember } from '@/hooks/useMember'
 import { parseProjet, CREDENTIAL_PRESETS } from '@/lib/projetNotes'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
+import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { MessageSquare, BookOpen } from 'lucide-react'
@@ -40,9 +42,17 @@ function fmtDate(s?: string | null) {
 interface MemberProjectTask {
   id:               string
   title:            string
+  description:      string | null
   status:           string
-  category?:        string | null
-  is_request?:      boolean | null
+  priority:         string
+  due_date:         string | null
+  category:         string | null
+  elapsed_seconds:  number | null
+  is_request:       boolean | null
+  request_price:    number | null
+  project_id:       string | null
+  created_at?:      string
+  completed_at?:    string | null
   is_mine?:         boolean
   assignee_name?:   string | null
 }
@@ -62,6 +72,8 @@ export default function MyProjetDetail() {
     enabled:  !!id,
     staleTime: 30_000,
   })
+
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null)
 
   const updateTask = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
@@ -95,6 +107,11 @@ export default function MyProjetDetail() {
   const allTasks: MemberProjectTask[] = projet.my_tasks ?? []
   const myCount     = allTasks.filter(t => t.is_mine !== false).length
   const othersCount = allTasks.length - myCount
+  /* Deux colonnes : tout ce qui n'est pas 'done' reste « à faire »
+     (y compris 'validation', qui attend le manager mais n'est pas close).
+     L'ordre du serveur est conservé — il porte l'enchaînement des étapes. */
+  const openTasks = allTasks.filter(t => t.status !== 'done')
+  const doneTasks = allTasks.filter(t => t.status === 'done')
 
   return (
     <div className="space-y-5">
@@ -145,6 +162,51 @@ export default function MyProjetDetail() {
           </p>
         </div>
       )}
+
+      {/* ── Tâches du projet — en tête de page, en deux colonnes :
+             à gauche ce qui reste à faire, à droite ce qui est terminé.
+             Le périmètre est décidé par projet_assignees.task_access
+             (migration 085) : en mode 'assigned' l'API n'envoie que les
+             tâches de la personne ; en mode 'all' elle envoie tout le
+             projet, avec is_mine pour distinguer ce sur quoi elle peut agir. ── */}
+      <Section
+        title={seesAllTasks
+          ? `Tâches du projet (${allTasks.length})`
+          : `Mes tâches (${allTasks.length})`}
+        icon={CheckSquare}
+        color="blue"
+      >
+        {seesAllTasks && (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-2">
+            Tu as accès à toutes les tâches de ce projet.
+            {othersCount > 0 && <> {myCount} à toi · {othersCount} suivie{othersCount > 1 ? 's' : ''} en lecture seule.</>}
+          </p>
+        )}
+        {allTasks.length === 0 ? (
+          <p className="text-sm text-slate-500 italic text-center py-4">
+            {seesAllTasks ? 'Ce projet n’a aucune tâche.' : 'Aucune tâche assignée pour ce projet.'}
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <TaskColumn
+              title="À faire"
+              tone="open"
+              tasks={openTasks}
+              emptyLabel="Rien à faire ici 🎉"
+              onUpdate={(taskId, status) => updateTask.mutate({ id: taskId, status })}
+              onOpen={setOpenTaskId}
+            />
+            <TaskColumn
+              title="Terminées"
+              tone="done"
+              tasks={doneTasks}
+              emptyLabel="Aucune tâche terminée pour l’instant."
+              onUpdate={(taskId, status) => updateTask.mutate({ id: taskId, status })}
+              onOpen={setOpenTaskId}
+            />
+          </div>
+        )}
+      </Section>
 
       {/* ── Contact client ── */}
       {shareInfos && (
@@ -249,6 +311,7 @@ export default function MyProjetDetail() {
       )}
 
       {/* ── 💬 Discussion projet ── */}
+      <div id="discussion-projet" className="scroll-mt-20 lg:scroll-mt-6">
       <Section title="Discussion" icon={MessageSquare} color="blue">
         <ProjetChat
           projetId={id!}
@@ -259,110 +322,231 @@ export default function MyProjetDetail() {
           postMessage={(text) => mySpaceApi.postProjetMessage(id!, text)}
         />
       </Section>
+      </div>
 
-      {/* ── Tâches du projet — périmètre décidé par projet_assignees.task_access.
-             En mode 'assigned' l'API n'envoie que les tâches de la personne ;
-             en mode 'all' elle envoie tout le projet, avec is_mine pour
-             distinguer ce sur quoi elle peut agir. ── */}
-      <Section
-        title={seesAllTasks
-          ? `Tâches du projet (${allTasks.length})`
-          : `Mes tâches (${allTasks.length})`}
-        icon={CheckSquare}
-        color="blue"
-      >
-        {seesAllTasks && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-2">
-            Tu as accès à toutes les tâches de ce projet.
-            {othersCount > 0 && <> {myCount} à toi · {othersCount} suivie{othersCount > 1 ? 's' : ''} en lecture seule.</>}
-          </p>
-        )}
-        {allTasks.length === 0 ? (
-          <p className="text-sm text-slate-500 italic text-center py-4">
-            {seesAllTasks ? 'Ce projet n’a aucune tâche.' : 'Aucune tâche assignée pour ce projet.'}
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {allTasks.map((t) => {
-              const isDone = t.status === 'done'
-              const isInProgress = t.status === 'in_progress'
-              const isValidation = t.status === 'validation'
-              /* Serveur antérieur à la migration 085 : pas de is_mine dans la
-                 réponse, et la liste ne contenait que les tâches du membre. */
-              const isMine = t.is_mine !== false
-              return (
-                <div key={t.id} className={cn(
-                  'flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800',
-                  isValidation && 'border-violet-300 dark:border-violet-800/60 bg-violet-50/30 dark:bg-violet-950/10',
-                  !isMine && 'bg-slate-50/60 dark:bg-slate-800/20 border-dashed',
-                  isDone && 'opacity-60',
-                )}>
-                  {isMine ? (
-                    <button onClick={() => updateTask.mutate({ id: t.id, status: isDone ? 'todo' : 'done' })}>
-                      {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600" /> :
-                       isInProgress ? <CircleDot className="w-4 h-4 text-blue-600" /> :
-                       <Square className="w-4 h-4 text-slate-300" />}
-                    </button>
-                  ) : (
-                    <span title="Tâche d'un autre membre — lecture seule">
-                      {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600/60" /> :
-                       isInProgress ? <CircleDot className="w-4 h-4 text-blue-600/60" /> :
-                       <Square className="w-4 h-4 text-slate-300" />}
-                    </span>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {t.category && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">{t.category}</span>}
-                      {t.is_request && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 flex items-center gap-1"><Sparkles className="w-2.5 h-2.5" /> Demande</span>}
-                      {isValidation && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-200 dark:bg-violet-800/60 text-violet-800 dark:text-violet-200">⚑ En validation</span>}
-                      {!isMine && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
-                          {t.assignee_name ? `👤 ${t.assignee_name}` : 'Non assignée'}
-                        </span>
-                      )}
-                    </div>
-                    <div className={cn('text-sm font-medium text-slate-900 dark:text-slate-100 mt-0.5', isDone && 'line-through')}>{t.title}</div>
-                  </div>
-                  {isMine && !isDone && !isValidation && (
-                    <div className="flex gap-1">
-                      {!isInProgress ? (
-                        <Button size="sm" variant="outline" className="h-7 text-xs"
-                          onClick={() => updateTask.mutate({ id: t.id, status: 'in_progress' })}>
-                          <Play className="w-3 h-3" /> Commencer
-                        </Button>
-                      ) : (
-                        <Button size="sm" variant="outline" className="h-7 text-xs"
-                          onClick={() => updateTask.mutate({ id: t.id, status: 'todo' })}>
-                          <Pause className="w-3 h-3" /> Pause
-                        </Button>
-                      )}
-                      <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white"
-                        onClick={() => updateTask.mutate({ id: t.id, status: 'validation' })}>
-                        <SquareIcon className="w-3 h-3" /> Terminer
-                      </Button>
-                    </div>
-                  )}
-                  {isMine && isValidation && (
-                    <span className="text-[11px] text-violet-700 dark:text-violet-400 italic flex items-center gap-1">
-                      <Check className="w-3 h-3" /> En attente du manager
-                    </span>
-                  )}
-                  {!isMine && (
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500 italic whitespace-nowrap">
-                      {isDone ? 'Terminée' : isValidation ? 'En validation' : isInProgress ? 'En cours' : 'À faire'}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </Section>
+      {/* Accès rapide à la discussion : les tâches occupent désormais le haut
+         de la page, le fil de discussion est donc plus bas. */}
+      <ChatShortcut />
+
+      {/* Fiche détaillée — ouverte au clic sur une tâche. */}
+      {openTaskId && (() => {
+        const t = allTasks.find(x => x.id === openTaskId)
+        if (!t) return null
+        const isMine     = t.is_mine !== false
+        const memberName = member
+          ? `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || 'Membre'
+          : 'Membre'
+        return (
+          <TaskDetailDialog
+            open
+            onClose={() => setOpenTaskId(null)}
+            task={{ ...t, project_name: projet.nom, team_member_name: t.assignee_name ?? null }}
+            currentUserName={memberName}
+            isAdmin={false}
+            readOnlyMeta
+            onSave={async (patch) => {
+              /* Ceinture et bretelles : la fiche ne s'ouvre déjà que sur ses
+                 propres tâches, et le PATCH serveur refuse celles d'autrui. */
+              if (!isMine) throw new Error("Tâche d'un autre membre — lecture seule")
+              if (patch.description !== undefined) {
+                await mySpaceApi.updateTaskDescription(t.id, patch.description)
+                qc.invalidateQueries({ queryKey: ['my-space', 'projet', id] })
+                qc.invalidateQueries({ queryKey: ['my-space', 'tasks'] })
+              }
+            }}
+          />
+        )
+      })()}
+
     </div>
   )
 }
 
 /* ─── Helpers ─────────────────────────────────────── */
+
+/** Bouton latéral fixe : ramène au fil de discussion du projet. */
+function ChatShortcut() {
+  const scrollToChat = () => {
+    document.getElementById('discussion-projet')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  return (
+    <div className="fixed right-3 bottom-6 sm:bottom-auto sm:right-4 sm:top-1/2 sm:-translate-y-1/2 z-40 flex flex-col gap-2">
+      <button
+        onClick={scrollToChat}
+        title="Discussion du projet"
+        aria-label="Aller à la discussion du projet"
+        className="group w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 flex items-center justify-center transition-all hover:scale-105"
+      >
+        <MessageSquare className="w-5 h-5" />
+      </button>
+      <Link
+        to="/my-space/messages"
+        title="Toute ma messagerie"
+        aria-label="Ouvrir ma messagerie"
+        className="w-12 h-12 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shadow-lg flex items-center justify-center transition-all hover:scale-105 hover:border-blue-400 hover:text-blue-600"
+      >
+        <Inbox className="w-5 h-5" />
+      </Link>
+    </div>
+  )
+}
+
+/** Une colonne du tableau de tâches (à faire / terminées). */
+function TaskColumn({ title, tone, tasks, emptyLabel, onUpdate, onOpen }: {
+  title:      string
+  tone:       'open' | 'done'
+  tasks:      MemberProjectTask[]
+  emptyLabel: string
+  onUpdate:   (taskId: string, status: string) => void
+  onOpen:     (taskId: string) => void
+}) {
+  const isDoneCol = tone === 'done'
+  return (
+    <div className={cn(
+      'rounded-xl border p-3 space-y-2',
+      isDoneCol
+        ? 'border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/30 dark:bg-emerald-950/10'
+        : 'border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20',
+    )}>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className={cn(
+          'text-[11px] font-bold uppercase tracking-widest flex items-center gap-1.5',
+          isDoneCol ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-200',
+        )}>
+          {isDoneCol ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+          {title}
+        </h3>
+        <span className={cn(
+          'text-[11px] font-bold px-2 py-0.5 rounded-full',
+          isDoneCol
+            ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+            : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200',
+        )}>{tasks.length}</span>
+      </div>
+      {tasks.length === 0 ? (
+        <p className="text-sm text-slate-500 italic text-center py-6">{emptyLabel}</p>
+      ) : (
+        <div className="space-y-1.5 max-h-[30rem] overflow-y-auto pr-1">
+          {tasks.map(t => <TaskRow key={t.id} task={t} onUpdate={onUpdate} onOpen={onOpen} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Zone de contenu d'une ligne : bouton si la tâche est à soi, sinon texte inerte.
+    Le serveur ne renvoie `description` que pour ses propres tâches — ouvrir la
+    fiche d'une tâche d'autrui n'afficherait qu'une coquille vide. */
+function Content({ isMine, onOpen, children }: {
+  isMine:   boolean
+  onOpen:   () => void
+  children: React.ReactNode
+}) {
+  if (!isMine) {
+    return (
+      <div className="flex-1 min-w-0" title="Tâche d'un autre membre — lecture seule">
+        {children}
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="Ouvrir la fiche de la tâche"
+      className="flex-1 min-w-0 text-left rounded -m-1 p-1 hover:bg-slate-100/70 dark:hover:bg-slate-800/50 transition-colors"
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Une ligne de tâche — cases à cocher et actions réservées à ses propres tâches. */
+function TaskRow({ task: t, onUpdate, onOpen }: {
+  task:     MemberProjectTask
+  onUpdate: (taskId: string, status: string) => void
+  onOpen:   (taskId: string) => void
+}) {
+  const isDone = t.status === 'done'
+  const isInProgress = t.status === 'in_progress'
+  const isValidation = t.status === 'validation'
+  /* Serveur antérieur à la migration 085 : pas de is_mine dans la
+     réponse, et la liste ne contenait que les tâches du membre. */
+  const isMine = t.is_mine !== false
+  return (
+    <div className={cn(
+      'flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900',
+      isValidation && 'border-violet-300 dark:border-violet-800/60 bg-violet-50/30 dark:bg-violet-950/10',
+      !isMine && 'bg-slate-50/60 dark:bg-slate-800/20 border-dashed',
+      isDone && 'opacity-60',
+    )}>
+      {isMine ? (
+        <button onClick={() => onUpdate(t.id, isDone ? 'todo' : 'done')}>
+          {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600" /> :
+           isInProgress ? <CircleDot className="w-4 h-4 text-blue-600" /> :
+           <Square className="w-4 h-4 text-slate-300" />}
+        </button>
+      ) : (
+        <span title="Tâche d'un autre membre — lecture seule">
+          {isDone ? <CheckSquare className="w-4 h-4 text-emerald-600/60" /> :
+           isInProgress ? <CircleDot className="w-4 h-4 text-blue-600/60" /> :
+           <Square className="w-4 h-4 text-slate-300" />}
+        </span>
+      )}
+      {/* Zone de contenu : cliquable — donc <button> — pour ses propres tâches,
+         simple <div> pour celles des autres. La case à cocher et les boutons
+         d'action restent des frères, jamais imbriqués ici : pas de bouton dans
+         un bouton, pas de propagation à intercepter. */}
+      <Content
+        isMine={isMine}
+        onOpen={() => onOpen(t.id)}
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          {t.category && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">{t.category}</span>}
+          {t.is_request && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 flex items-center gap-1"><Sparkles className="w-2.5 h-2.5" /> Demande</span>}
+          {isValidation && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-200 dark:bg-violet-800/60 text-violet-800 dark:text-violet-200">⚑ En validation</span>}
+          {!isMine && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
+              {t.assignee_name ? `👤 ${t.assignee_name}` : 'Non assignée'}
+            </span>
+          )}
+        </div>
+        <div className={cn('text-sm font-medium text-slate-900 dark:text-slate-100 mt-0.5', isDone && 'line-through')}>{t.title}</div>
+      </Content>
+      {isMine && !isDone && !isValidation && (
+        <div className="flex gap-1 flex-shrink-0">
+          {!isInProgress ? (
+            <Button size="sm" variant="outline" className="h-7 text-xs"
+              onClick={() => onUpdate(t.id, 'in_progress')}>
+              <Play className="w-3 h-3" /> Commencer
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" className="h-7 text-xs"
+              onClick={() => onUpdate(t.id, 'todo')}>
+              <Pause className="w-3 h-3" /> Pause
+            </Button>
+          )}
+          <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700 text-white"
+            onClick={() => onUpdate(t.id, 'validation')}>
+            <SquareIcon className="w-3 h-3" /> Terminer
+          </Button>
+        </div>
+      )}
+      {isMine && isValidation && (
+        <span className="text-[11px] text-violet-700 dark:text-violet-400 italic flex items-center gap-1 flex-shrink-0">
+          <Check className="w-3 h-3" /> En attente du manager
+        </span>
+      )}
+      {!isMine && (
+        <span className="text-[11px] text-slate-400 dark:text-slate-500 italic whitespace-nowrap flex-shrink-0">
+          {isDone ? 'Terminée' : isValidation ? 'En validation' : isInProgress ? 'En cours' : 'À faire'}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function Section({ title, icon: Icon, color, children }: {
   title:    string
   icon:     React.ElementType

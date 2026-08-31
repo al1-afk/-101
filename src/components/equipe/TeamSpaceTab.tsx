@@ -16,6 +16,8 @@ import { teamMgmtApi, type TeamMemberRow, type TeamMemberAccess } from '@/lib/ap
 import { SOP_CATEGORIES } from '@/lib/sopCategories'
 import { useStagiaires, type Stagiaire } from '@/hooks/useStagiaires'
 import { useTeam, type TeamMember } from '@/hooks/useTeam'
+import SopAccessEditor from './SopAccessEditor'
+import MemberPermissionsDialog from './MemberPermissionsDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
@@ -235,6 +237,7 @@ function MemberActions({ member, onOpen, onInvalidate }: {
   const [shareInfo, setShareInfo] = useState<{ kind: 'invite' | 'reset'; maskedToken: string; expiresAt: string } | null>(null)
   const [shareUrl, setShareUrl] = useState<{ url: string; expiresAt: string } | null>(null)
   const [sharing, setSharing] = useState(false)
+  const [permsOpen, setPermsOpen] = useState(false)
 
   const generateShareLink = async () => {
     setSharing(true)
@@ -290,6 +293,9 @@ function MemberActions({ member, onOpen, onInvalidate }: {
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem onClick={onOpen}>
           <ClipboardList className="w-4 h-4 mr-2" /> Voir le détail
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setPermsOpen(true)}>
+          <ShieldCheck className="w-4 h-4 mr-2" /> Modifier les permissions
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {member.account_status === 'invited' && (
@@ -351,6 +357,14 @@ function MemberActions({ member, onOpen, onInvalidate }: {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+
+    {permsOpen && (
+      <MemberPermissionsDialog
+        member={member}
+        onClose={() => setPermsOpen(false)}
+        onSaved={onInvalidate}
+      />
+    )}
 
     {shareInfo && (
       <ShareLinkDialog
@@ -638,17 +652,6 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
 
   const close = () => { reset(); onClose() }
 
-  const toggleAccess = (category: string) => {
-    setAccess(prev => {
-      const has = prev.find(a => a.category === category)
-      if (has) return prev.filter(a => a.category !== category)
-      return [...prev, { category, level: 'read' }]
-    })
-  }
-  const setLevel = (category: string, level: 'read' | 'complete' | 'edit') => {
-    setAccess(prev => prev.map(a => a.category === category ? { ...a, level } : a))
-  }
-
   const canSubmit = firstName.trim() && lastName.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !invite.isPending
 
   return (
@@ -905,55 +908,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
 
             {/* SECTION 3 — Accès SOPs */}
             <Section title="3. Accès aux SOPs" subtitle="Sélectionnez les catégories accessibles à ce membre.">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {SOP_CATEGORIES.slice(0, 8).map(c => {
-                  const a = access.find(x => x.category === c.key)
-                  const selected = !!a
-                  return (
-                    <div
-                      key={c.key}
-                      className={cn(
-                        'p-3 rounded-lg border transition-all',
-                        selected
-                          ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900',
-                      )}
-                    >
-                      <label className="flex items-start gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggleAccess(c.key)}
-                          className="mt-1"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg">{c.emoji}</span>
-                            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{c.label}</span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{c.desc}</p>
-                        </div>
-                      </label>
-                      {selected && (
-                        <div className="mt-2 pl-6">
-                          <select
-                            value={a!.level}
-                            onChange={e => setLevel(c.key, e.target.value as any)}
-                            className="text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-slate-700 dark:text-slate-300 w-full"
-                          >
-                            <option value="read">Lecture seule</option>
-                            <option value="complete">Lecture + checklists</option>
-                            <option value="edit">Édition (formateur)</option>
-                          </select>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-3">
-                {access.length} catégorie{access.length > 1 ? 's' : ''} sélectionnée{access.length > 1 ? 's' : ''}
-              </p>
+              <SopAccessEditor value={access} onChange={setAccess} />
             </Section>
 
             {/* SECTION 4 — Tâches initiales */}
@@ -1095,16 +1050,6 @@ function MemberDetailDialog({ id, onClose }: { id: string; onClose: () => void }
     setDraftAccess(data?.access?.map((a: any) => ({ category: a.sop_category, level: a.access_level })) ?? [])
     setEditingAccess(true)
   }
-  const toggleDraft = (category: string) => {
-    setDraftAccess(prev => {
-      const has = prev.find(a => a.category === category)
-      if (has) return prev.filter(a => a.category !== category)
-      return [...prev, { category, level: 'read' }]
-    })
-  }
-  const setDraftLevel = (category: string, level: 'read' | 'complete' | 'edit') => {
-    setDraftAccess(prev => prev.map(a => a.category === category ? { ...a, level } : a))
-  }
 
   return (
     <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
@@ -1148,33 +1093,7 @@ function MemberDetailDialog({ id, onClose }: { id: string; onClose: () => void }
             <TabsContent value="access" className="space-y-3 pt-3">
               {editingAccess ? (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {SOP_CATEGORIES.slice(0, 8).map(c => {
-                      const a = draftAccess.find(x => x.category === c.key)
-                      const selected = !!a
-                      return (
-                        <div key={c.key} className={cn('p-3 rounded-lg border', selected ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-slate-200 dark:border-slate-800')}>
-                          <label className="flex items-start gap-2 cursor-pointer">
-                            <input type="checkbox" checked={selected} onChange={() => toggleDraft(c.key)} className="mt-1" />
-                            <div className="flex-1">
-                              <div className="text-sm font-semibold">{c.emoji} {c.label}</div>
-                            </div>
-                          </label>
-                          {selected && (
-                            <select
-                              value={a!.level}
-                              onChange={e => setDraftLevel(c.key, e.target.value as any)}
-                              className="mt-2 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 w-full"
-                            >
-                              <option value="read">Lecture seule</option>
-                              <option value="complete">Lecture + checklists</option>
-                              <option value="edit">Édition (formateur)</option>
-                            </select>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                  <SopAccessEditor value={draftAccess} onChange={setDraftAccess} />
                   <div className="flex justify-end gap-2 pt-2">
                     <Button variant="outline" onClick={() => setEditingAccess(false)}>Annuler</Button>
                     <Button onClick={() => saveAccess.mutate()} disabled={saveAccess.isPending}>
