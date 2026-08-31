@@ -191,6 +191,16 @@ BEGIN
     auteur := NULL;   -- valeur illisible : on journalise quand même
   END;
 
+  /* audit_logs.user_id référence users(id). Un identifiant absent de
+     cette table — celui d'un membre d'équipe, dont le jeton ne vient pas
+     de `users` — ferait échouer l'INSERT, donc ÉCHOUER L'ÉCRITURE QUE
+     L'ON OBSERVE : modifier un client deviendrait impossible. Un journal
+     ne doit jamais bloquer ce qu'il enregistre. On préfère perdre le nom
+     de l'auteur que la modification elle-même. */
+  IF auteur IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users WHERE id = auteur) THEN
+    auteur := NULL;
+  END IF;
+
   IF TG_OP = 'DELETE' THEN
     INSERT INTO audit_logs (tenant_id, table_name, record_id, action, old_data, user_id)
     VALUES (OLD.tenant_id, TG_TABLE_NAME, OLD.id, 'DELETE', row_to_json(OLD)::jsonb, auteur);
