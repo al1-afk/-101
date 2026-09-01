@@ -725,6 +725,19 @@ export const mySpaceApi = {
   sop:      (id: string) => memberApi.get<any>(`/api/my-space/sops/${id}`),
   logSop:   (sop_id: string, action_type: string, details?: any) =>
     memberApi.post<{ success: true }>('/api/my-space/sops/activity', { sop_id, action_type, details }),
+
+  /* Édition par un membre — réservée aux catégories accordées au niveau
+     « Édition (formateur) » dans /equipe. Le serveur revérifie le droit
+     et estampille le nom de l'auteur : rien ici n'est décisif. */
+  editableSopCategories: () => memberApi.get<string[]>('/api/my-space/sops/editable-categories'),
+  createSop: (data: {
+    title: string; description?: string | null; category: string
+    tags?: string[]; read_min?: number; blocks: any[]
+  }) => memberApi.post<any>('/api/my-space/sops', data),
+  updateSop: (id: string, data: {
+    title: string; description?: string | null; category: string
+    tags?: string[]; read_min?: number; blocks: any[]
+  }) => memberApi.put<any>(`/api/my-space/sops/${id}`, data),
 }
 
 /* ── Generic table API ───────────────────────────────────────── */

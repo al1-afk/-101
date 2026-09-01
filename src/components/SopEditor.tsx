@@ -10,6 +10,7 @@ import {
 import { detectVideo } from '@/components/sop/videoEmbed'
 import type { Sop, SopBlock, SopBlockType } from '@/hooks/useSops'
 import { makeSopSlug, useCreateSop, useUpdateSop } from '@/hooks/useSops'
+import { SOP_CATEGORIES } from '@/lib/sopCategories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
@@ -21,24 +22,23 @@ interface Props {
   existing?:   Sop | null
   initialCategory?: string
   onClose:     () => void
+  /** Restreint le sélecteur de catégorie (espace membre : uniquement
+   *  celles accordées au niveau « Édition »). Absent = toutes. */
+  allowedCategories?: string[]
+  /** Remplace l'enregistrement par défaut (API admin) — l'espace membre
+   *  passe par /api/my-space/sops, qui revérifie le droit d'édition. */
+  onSubmit?:   (payload: {
+    title: string; description: string | null; category: string
+    tags: string[]; read_min: number; blocks: SopBlock[]
+  }) => Promise<void>
+  /** « Populaire » est une mise en avant éditoriale : réservée à l'admin. */
+  hidePopular?: boolean
 }
 
-const CATEGORY_OPTIONS = [
-  { key: 'whatsapp',    label: 'Scripts WhatsApp' },
-  { key: 'quick',       label: 'Réponses rapides' },
-  { key: 'sales',       label: 'Process Commercial' },
-  { key: 'onboarding',  label: 'Onboarding Client' },
-  { key: 'delivery',    label: 'Livraison Projet' },
-  { key: 'support',     label: 'Support Client' },
-  { key: 'marketing',   label: 'Marketing & Ads' },
-  { key: 'faq',         label: 'FAQ Interne' },
-  { key: 'ai',          label: 'IA & Automatisation' },
-  { key: 'projets',     label: 'Chef de projet' },
-  { key: 'dev',         label: 'Développeur' },
-  { key: 'media_buyer', label: 'Media Buyer' },
-  { key: 'prospection', label: 'Prospection' },
-  { key: 'designer',    label: 'Designer / Graphiste' },
-]
+/* Catalogue partagé — un SOP créé ici doit pouvoir tomber dans n'importe
+   quelle catégorie affichée ailleurs dans l'app. Une liste recopiée avait
+   fini par oublier « Commercial » et « Community Manager ». */
+const CATEGORY_OPTIONS = SOP_CATEGORIES.map(c => ({ key: c.key as string, label: c.label }))
 
 interface BlockTypeDef {
   type:     SopBlockType
@@ -76,7 +76,10 @@ const GROUP_LABELS: Record<BlockTypeDef['group'], string> = {
 
 const MAX_IMAGE_MB = 10
 
-export default function SopEditor({ open, existing, initialCategory, onClose }: Props) {
+export default function SopEditor({
+  open, existing, initialCategory, onClose,
+  allowedCategories, onSubmit, hidePopular,
+}: Props) {
   const [title,       setTitle]       = useState('')
   const [description, setDescription] = useState('')
   const [category,    setCategory]    = useState('whatsapp')
@@ -85,10 +88,24 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
   const [popular,     setPopular]     = useState(false)
   const [blocks,      setBlocks]      = useState<SopBlock[]>([])
   const [slashOpen,   setSlashOpen]   = useState(false)
+  /* Le mode membre passe par onSubmit, donc sans les flags isPending des
+     mutations : sans état local, le bouton resterait actif et un double
+     clic créerait deux SOPs. */
+  const [saving,      setSaving]      = useState(false)
   const [slashQuery,  setSlashQuery]  = useState('')
 
   const create = useCreateSop()
   const update = useUpdateSop()
+
+  /* Catégories proposées — restreintes côté membre. Si la restriction
+     vide la liste (droits retirés entre-temps), on retombe sur le
+     catalogue complet : le serveur refusera de toute façon. */
+  const categoryOptions = useMemo(() => {
+    if (!allowedCategories?.length) return CATEGORY_OPTIONS
+    const allowed = new Set(allowedCategories)
+    const filtered = CATEGORY_OPTIONS.filter(c => allowed.has(c.key))
+    return filtered.length ? filtered : CATEGORY_OPTIONS
+  }, [allowedCategories])
 
   /* Charger les données existantes en mode édition */
   useEffect(() => {
@@ -102,9 +119,11 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
       setPopular(existing.popular ?? false)
       setBlocks(existing.blocks ?? [])
     } else {
+      const fallback = categoryOptions[0]?.key ?? 'whatsapp'
+      const wanted   = initialCategory && initialCategory !== 'home' ? initialCategory : fallback
       setTitle('')
       setDescription('')
-      setCategory(initialCategory && initialCategory !== 'home' ? initialCategory : 'whatsapp')
+      setCategory(categoryOptions.some(c => c.key === wanted) ? wanted : fallback)
       setTagsInput('')
       setReadMin(2)
       setPopular(false)
@@ -112,7 +131,7 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
     }
     setSlashOpen(false)
     setSlashQuery('')
-  }, [open, existing, initialCategory])
+  }, [open, existing, initialCategory, categoryOptions])
 
   const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
 
@@ -167,36 +186,50 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
   }
 
   const save = async () => {
-    if (!title.trim()) return
-    const cleanBlocks = blocks
-      .map(blk =>
-        blk.items
-          ? { ...blk, items: blk.items.filter(it => it.trim() !== '') }
-          : blk
-      )
-      .filter(blk => {
-        if (blk.type === 'divider') return true
-        if (blk.type === 'image') return !!blk.image?.url
-        if (blk.type === 'video') return !!blk.video?.url?.trim()
-        if (blk.type === 'table') return !!blk.table && blk.table.rows.length > 0
-        if (blk.items) return blk.items.length > 0
-        return (blk.text ?? '').trim() !== ''
-      })
+    if (!title.trim() || saving) return
+    setSaving(true)
+    try {
+      const cleanBlocks = blocks
+        .map(blk =>
+          blk.items
+            ? { ...blk, items: blk.items.filter(it => it.trim() !== '') }
+            : blk
+        )
+        .filter(blk => {
+          if (blk.type === 'divider') return true
+          if (blk.type === 'image') return !!blk.image?.url
+          if (blk.type === 'video') return !!blk.video?.url?.trim()
+          if (blk.type === 'table') return !!blk.table && blk.table.rows.length > 0
+          if (blk.items) return blk.items.length > 0
+          return (blk.text ?? '').trim() !== ''
+        })
 
-    const payload = {
-      title:       title.trim(),
-      description: description.trim() || null,
-      category,
-      tags,
-      slug:        existing?.slug || makeSopSlug(title),
-      read_min:    Number(readMin) || 2,
-      popular,
-      blocks:      cleanBlocks,
+      const base = {
+        title:       title.trim(),
+        description: description.trim() || null,
+        category,
+        tags,
+        read_min:    Number(readMin) || 2,
+        blocks:      cleanBlocks,
+      }
+
+      /* Espace membre : l'appelant fournit son propre enregistrement
+         (endpoint /my-space, qui revérifie les droits et estampille
+         l'auteur). Le slug et « populaire » sont posés par le serveur. */
+      if (onSubmit) {
+        await onSubmit(base)
+      } else {
+        const payload = { ...base, slug: existing?.slug || makeSopSlug(title), popular }
+        if (existing) await update.mutateAsync({ id: existing.id, ...payload } as any)
+        else          await create.mutateAsync(payload as any)
+      }
+      onClose()
+    } catch {
+      /* L'erreur est déjà signalée (toast) par l'appelant ou la mutation.
+         On laisse la modale ouverte : le contenu saisi n'est pas perdu. */
+    } finally {
+      setSaving(false)
     }
-
-    if (existing) await update.mutateAsync({ id: existing.id, ...payload } as any)
-    else          await create.mutateAsync(payload as any)
-    onClose()
   }
 
   /* Esc / scroll lock */
@@ -282,22 +315,24 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
               <Field label="Description">
                 <AutocorrectInput value={description} onChange={e => setDescription(e.target.value)} placeholder="Une phrase qui résume quand utiliser ce SOP" />
               </Field>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className={cn('grid gap-3', hidePopular ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3')}>
                 <Field label="Catégorie">
                   <select value={category} onChange={e => setCategory(e.target.value)}
                     className="w-full h-10 rounded-lg border border-border bg-[var(--surface-input)] px-3 text-sm text-foreground focus:outline-none focus:border-[#378ADD]">
-                    {CATEGORY_OPTIONS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                    {categoryOptions.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                   </select>
                 </Field>
                 <Field label="Temps de lecture (min)">
                   <Input type="number" min={1} max={60} value={readMin} onChange={e => setReadMin(Number(e.target.value))} />
                 </Field>
-                <Field label="Populaire">
-                  <label className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-[var(--surface-input)] cursor-pointer">
-                    <input type="checkbox" checked={popular} onChange={e => setPopular(e.target.checked)} className="w-4 h-4 accent-blue-600" />
-                    <span className="text-sm text-foreground">Marquer comme populaire</span>
-                  </label>
-                </Field>
+                {!hidePopular && (
+                  <Field label="Populaire">
+                    <label className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-[var(--surface-input)] cursor-pointer">
+                      <input type="checkbox" checked={popular} onChange={e => setPopular(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                      <span className="text-sm text-foreground">Marquer comme populaire</span>
+                    </label>
+                  </Field>
+                )}
               </div>
               <Field label="Tags (séparés par des virgules)">
                 <AutocorrectInput value={tagsInput} onChange={e => setTagsInput(e.target.value)} placeholder="Ex. WhatsApp, Accueil, Prospect" />
@@ -382,9 +417,9 @@ export default function SopEditor({ open, existing, initialCategory, onClose }: 
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <Button variant="secondary" size="sm" onClick={onClose}>Annuler</Button>
-              <Button size="sm" onClick={save} disabled={!title.trim() || create.isPending || update.isPending} className="min-w-[120px]">
+              <Button size="sm" onClick={save} disabled={!title.trim() || saving || create.isPending || update.isPending} className="min-w-[120px]">
                 <Save className="w-3.5 h-3.5" />
-                {(create.isPending || update.isPending) ? 'Sauvegarde…' : existing ? 'Mettre à jour' : 'Créer le SOP'}
+                {(saving || create.isPending || update.isPending) ? 'Sauvegarde…' : existing ? 'Mettre à jour' : 'Créer le SOP'}
               </Button>
             </div>
           </div>

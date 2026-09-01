@@ -84,6 +84,42 @@ const READONLY_COLUMNS: Record<string, Set<string>> = {
   ]),
   revenus:  new Set(['prevision_id']),
   depenses: new Set(['prevision_id']),
+  /* « Qui a ajouté / modifié » n'a de valeur que si personne ne peut
+     l'écrire soi-même : le serveur seul les pose (stampAuthorship). */
+  sops:     new Set(['created_by_name', 'updated_by_name']),
+}
+
+/**
+ * Estampille « qui a fait quoi » sur les tables qui l'exposent.
+ *
+ * Côté membre (espace /my-space) c'est server/routes/mySpace.ts qui pose
+ * le nom ; ici on couvre le CRUD générique, donc les écritures faites
+ * depuis l'espace admin. Dans les deux cas la valeur vient du serveur,
+ * jamais du corps de la requête — sinon le nom affiché ne prouverait
+ * rien. Les colonnes sont d'ailleurs dans READONLY_COLUMNS.
+ */
+async function stampAuthorship(
+  table: string,
+  data: Record<string, unknown>,
+  req: Request,
+  mode: 'create' | 'update',
+): Promise<void> {
+  if (table !== 'sops') return
+  delete data.created_by_name
+  delete data.updated_by_name
+  try {
+    const u = await tenantQueryOne<{ name: string | null; email: string }>(
+      req.user!.tenantId,
+      `SELECT name, email FROM public.users WHERE id = $1`,
+      [req.user!.userId],
+    )
+    const who = (u?.name ?? '').trim() || u?.email || 'Administrateur'
+    data.updated_by_name = who
+    if (mode === 'create') data.created_by_name = who
+  } catch (e: any) {
+    /* Une estampille manquante ne doit pas faire échouer l'écriture. */
+    logger.error('[crud:stampAuthorship]', e.message)
+  }
 }
 
 function guardTable(table: string, res: Response, req?: Request): boolean {
@@ -295,6 +331,7 @@ router.post('/:table', async (req: Request, res: Response) => {
   detectForgedTenant(req, table)
   const raw  = { ...req.body, tenant_id: req.user!.tenantId }
   const data = normalizeValues(Object.fromEntries(Object.entries(raw).filter(([k]) => SAFE_COL.test(k))), table)
+  await stampAuthorship(table, data, req, 'create')
   const keys = Object.keys(data)
   const vals = Object.values(data)
   const ph   = keys.map((_, i) => `$${i + 1}`).join(', ')
@@ -337,8 +374,12 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
     Object.entries(req.body as object)
       .filter(([k]) => SAFE_COL.test(k) && k !== 'tenant_id' && !readonly?.has(k))
   ), table)
+  if (!Object.keys(data).length) return res.status(400).json({ error: 'Aucun champ à mettre à jour' })
+  /* Après le contrôle « au moins un champ » (l'estampille seule ne fait
+     pas une mise à jour), mais AVANT le calcul de keys/vals : les deux
+     doivent rester alignés sur les mêmes placeholders. */
+  await stampAuthorship(table, data, req, 'update')
   const keys = Object.keys(data)
-  if (!keys.length) return res.status(400).json({ error: 'Aucun champ à mettre à jour' })
 
   const sets = keys.map((k, i) => `${k} = $${i + 1}`).join(', ')
   const vals = [...Object.values(data), id]

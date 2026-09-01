@@ -4,31 +4,40 @@
  */
 import { useMemo, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
-  BookOpen, Search, ChevronLeft, Loader2, Eye, Clock, Star, FileText,
+  BookOpen, Search, ChevronLeft, Loader2, Eye, Clock, Star, FileText, Plus, Pencil,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { mySpaceApi } from '@/lib/api'
-import { SOP_CATEGORIES, SOP_CATEGORY_BY_KEY } from '@/lib/sopCategories'
+import { SOP_CATEGORY_BY_KEY } from '@/lib/sopCategories'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import type { SopBlock } from '@/hooks/useSops'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
+import { SopAuthorship } from '@/components/sop/SopAuthorship'
+import SopEditor from '@/components/SopEditor'
 
 interface SopRow {
   id: string; slug: string; title: string; description: string | null;
   category: string; tags: string[]; author: string | null; author_bg: string;
   read_min: number; views: number; popular: boolean; blocks: any[];
+  created_by_name: string | null; updated_by_name: string | null;
+  can_edit?: boolean;
   created_at: string; updated_at: string;
 }
 
 export default function MySops() {
   const [params, setParams] = useSearchParams()
+  const qc = useQueryClient()
   const initialCat = params.get('category') ?? null
   const [activeCat, setActiveCat] = useState<string | null>(initialCat)
   const [query, setQuery] = useState('')
   const [openSop, setOpenSop] = useState<SopRow | null>(null)
+  /* null = fermé · 'new' = création · SopRow = édition */
+  const [editing, setEditing] = useState<SopRow | 'new' | null>(null)
 
   useEffect(() => {
     setActiveCat(params.get('category'))
@@ -39,6 +48,34 @@ export default function MySops() {
     queryFn:  () => mySpaceApi.sops() as Promise<SopRow[]>,
     staleTime: 60_000,
   })
+
+  /* Catégories où le niveau « Édition (formateur) » m'a été accordé.
+     Vide = le membre reste en lecture seule, aucun bouton n'apparaît. */
+  const { data: editableCats = [] } = useQuery<string[]>({
+    queryKey: ['my-space', 'sops', 'editable'],
+    queryFn:  () => mySpaceApi.editableSopCategories(),
+    staleTime: 5 * 60_000,
+  })
+  const canContribute = editableCats.length > 0
+
+  const saveSop = async (payload: {
+    title: string; description: string | null; category: string
+    tags: string[]; read_min: number; blocks: SopBlock[]
+  }) => {
+    try {
+      const saved = editing && editing !== 'new'
+        ? await mySpaceApi.updateSop(editing.id, payload)
+        : await mySpaceApi.createSop(payload)
+      await qc.invalidateQueries({ queryKey: ['my-space', 'sops'] })
+      /* La fiche ouverte doit refléter la version enregistrée, y compris
+         le « Modifié par » que le serveur vient de poser. */
+      if (openSop && saved?.id === openSop.id) setOpenSop(saved as SopRow)
+      toast.success(editing === 'new' ? 'SOP ajoutée' : 'SOP mise à jour')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Impossible d'enregistrer la SOP")
+      throw e
+    }
+  }
 
   const accessibleCats = useMemo(() => {
     const set = new Set<string>()
@@ -60,19 +97,41 @@ export default function MySops() {
     return list
   }, [sops, activeCat, query])
 
+  /* L'éditeur est monté dans les deux vues (liste et fiche) : le membre
+     peut ouvrir une SOP puis cliquer « Modifier » sans revenir en arrière. */
+  const editor = (
+    <SopEditor
+      open={editing !== null}
+      existing={editing && editing !== 'new' ? (editing as any) : null}
+      initialCategory={editing === 'new' ? (activeCat ?? undefined) : undefined}
+      allowedCategories={editableCats}
+      hidePopular
+      onSubmit={saveSop}
+      onClose={() => setEditing(null)}
+    />
+  )
+
   /* Detail view */
   if (openSop) {
     /* Log view once */
     mySpaceApi.logSop(openSop.id, 'sop_viewed').catch(() => {})
     return (
       <div className="space-y-5">
-        <button
-          onClick={() => setOpenSop(null)}
-          className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
-        >
-          <ChevronLeft className="w-4 h-4" /> Retour à mes SOPs
-        </button>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <button
+            onClick={() => setOpenSop(null)}
+            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          >
+            <ChevronLeft className="w-4 h-4" /> Retour à mes SOPs
+          </button>
+          {openSop.can_edit && (
+            <Button size="sm" variant="outline" onClick={() => setEditing(openSop)}>
+              <Pencil className="w-3.5 h-3.5 mr-1.5" /> Modifier
+            </Button>
+          )}
+        </div>
         <SopDetail sop={openSop} />
+        {editor}
       </div>
     )
   }
@@ -83,11 +142,21 @@ export default function MySops() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          <BookOpen className="w-6 h-6 text-blue-600" /> Mes SOPs
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{sops.length} procédure{sops.length > 1 ? 's' : ''} accessible{sops.length > 1 ? 's' : ''}.</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-blue-600" /> Mes SOPs
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {sops.length} procédure{sops.length > 1 ? 's' : ''} accessible{sops.length > 1 ? 's' : ''}
+            {canContribute && ` · ${editableCats.length} modifiable${editableCats.length > 1 ? 's' : ''} par vous`}.
+          </p>
+        </div>
+        {canContribute && (
+          <Button size="sm" onClick={() => setEditing('new')}>
+            <Plus className="w-4 h-4 mr-1.5" /> Nouvelle SOP
+          </Button>
+        )}
       </div>
 
       {/* Search */}
@@ -158,12 +227,18 @@ export default function MySops() {
                     {s.description && (
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">{s.description}</p>
                     )}
-                    <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                    <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-400 dark:text-slate-500 flex-wrap">
                       <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {s.read_min} min</span>
                       <span className="inline-flex items-center gap-1"><Eye className="w-3 h-3" /> {s.views}</span>
                       <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold', meta?.bg, meta?.text)}>
                         {meta?.label ?? s.category}
                       </span>
+                      <SopAuthorship
+                        compact
+                        createdBy={s.created_by_name}
+                        updatedBy={s.updated_by_name}
+                        className="max-w-[10rem]"
+                      />
                     </div>
                   </div>
                 </div>
@@ -172,6 +247,7 @@ export default function MySops() {
           })}
         </div>
       )}
+      {editor}
     </div>
   )
 }
@@ -209,11 +285,16 @@ function SopDetail({ sop }: { sop: SopRow }) {
             {sop.description && (
               <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">{sop.description}</p>
             )}
-            <div className="flex items-center gap-3 mt-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-3 mt-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
               <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {sop.read_min} min de lecture</span>
               <span className="inline-flex items-center gap-1"><FileText className="w-3 h-3" /> {sop.blocks?.length ?? 0} sections</span>
               {sop.author && <span>• {sop.author}</span>}
             </div>
+            <SopAuthorship
+              createdBy={sop.created_by_name}
+              updatedBy={sop.updated_by_name}
+              className="mt-2 text-xs text-slate-500 dark:text-slate-400"
+            />
           </div>
         </div>
       </header>

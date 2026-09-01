@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
 import SopEditor from '@/components/SopEditor'
+import { SopAuthorship } from '@/components/sop/SopAuthorship'
 import { useSops, useDeleteSop, type Sop as DbSop } from '@/hooks/useSops'
 import { useAuth } from '@/hooks/useAuth'
 import { parseRichText } from '@/components/sop/parseRichText'
@@ -89,6 +90,9 @@ interface SOP {
   views:     number
   popular?:  boolean
   blocks:    SOPBlock[]
+  /* Qui a ajouté / modifié — posé par le serveur, affiché tel quel. */
+  createdByName?: string | null
+  updatedByName?: string | null
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -147,6 +151,8 @@ function dbSopToView(s: DbSop): SOP & { isUserCreated: true; dbId: string } {
     views:       s.views ?? 0,
     popular:     s.popular,
     blocks:      Array.isArray(s.blocks) ? (s.blocks as SOPBlock[]) : [],
+    createdByName: (s as any).created_by_name ?? null,
+    updatedByName: (s as any).updated_by_name ?? null,
     isUserCreated: true,
   }
 }
@@ -731,6 +737,7 @@ function SOPCard({ sop, isFav, onOpen, onToggleFav, delay = 0, onEdit, onDelete,
           <span className="truncate">{sop.author}</span>
         </div>
         <div className="flex items-center gap-2">
+          <SopAuthorship compact createdBy={sop.createdByName} updatedBy={sop.updatedByName} className="max-w-[8rem]" />
           <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {sop.readMin}m</span>
           <span className="flex items-center gap-1"><Eye className="w-3 h-3" /> {sop.views}</span>
         </div>
@@ -830,6 +837,7 @@ function SOPDetail({ sop, isFav, onClose, onToggleFav, onShare, onTrain, onEdit,
               <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {sop.readMin} min de lecture</span>
               <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> {sop.views} vues</span>
               <span>Mis à jour le {sop.updatedAt}</span>
+              <SopAuthorship createdBy={sop.createdByName} updatedBy={sop.updatedByName} />
             </div>
 
             <div className="flex items-center gap-1.5 mt-3 flex-wrap">

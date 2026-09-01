@@ -94,7 +94,7 @@ export default function SopAccessEditor({ value, onChange, className }: {
                 >
                   <option value="read">Lecture seule</option>
                   <option value="complete">Lecture + checklists</option>
-                  <option value="edit">Édition (formateur)</option>
+                  <option value="edit">Édition — peut ajouter et modifier</option>
                 </select>
               )}
             </div>

@@ -95,6 +95,11 @@ export interface Sop {
   views:       number
   popular:     boolean
   blocks:      SopBlock[]
+  /** Nom de la personne qui a ajouté la SOP — posé par le serveur.
+   *  NULL sur les SOPs seedées par migration. */
+  created_by_name?: string | null
+  /** Nom de la dernière personne à l'avoir modifiée — posé par le serveur. */
+  updated_by_name?: string | null
   created_at:  string
   updated_at:  string
 }
