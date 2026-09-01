@@ -346,8 +346,12 @@
   }
   .card-glass {
     background: var(--surface-glass);
-    backdrop-filter: blur(24px) saturate(1.4);
+    /* Préfixe AVANT le standard : le minifieur du build dédoublonne les
+       deux déclarations et ne garde que la dernière. Dans l'autre ordre,
+       le bundle ne contenait plus que -webkit-backdrop-filter, que Chrome
+       n'applique pas — le verre devenait un simple voile translucide. */
     -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    backdrop-filter: blur(24px) saturate(1.4);
     border: 1px solid var(--surface-glass-border);
     border-radius: 20px;
     box-shadow: var(--shadow-md);
@@ -486,8 +490,8 @@
     font-size: 13px; font-weight: 500;
     color: hsl(var(--foreground));
     background: var(--surface-glass);
-    backdrop-filter: blur(16px) saturate(1.4);
     -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
     border: 1px solid var(--surface-glass-border);
     cursor: pointer;
     transition: all 150ms ease;

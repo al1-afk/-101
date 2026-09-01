@@ -10,7 +10,7 @@
  *     Elles survivent à la déconnexion et suivent l'utilisateur de poste
  *     en poste, contrairement au store local.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bell, CheckCheck, X, Inbox } from 'lucide-react'
@@ -98,8 +98,27 @@ export default function NotificationBell({ scope, className, direction = 'down',
     if (scope === 'admin') center.clearAll()
   }
 
+  /* Fermeture au clic extérieur — écouteur document plutôt qu'un voile
+     `fixed inset-0` : dans le header admin, l'ancêtre porte backdrop-blur,
+     ce qui fait du header le bloc conteneur des descendants fixed. Le voile
+     ne couvrait alors que la bande du header et ne fermait rien. */
+  const boxRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   return (
-    <div className={cn('relative', className)}>
+    <div className={cn('relative', className)} ref={boxRef}>
       <button
         onClick={() => setOpen(o => !o)}
         className="relative p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
@@ -117,16 +136,24 @@ export default function NotificationBell({ scope, className, direction = 'down',
       <AnimatePresence>
         {open && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
             <motion.div
               initial={{ opacity: 0, y: -8, scale: 0.95 }}
               animate={{ opacity: 1, y: 0,  scale: 1    }}
               exit={{    opacity: 0, y: -8, scale: 0.95 }}
               transition={{ duration: 0.15 }}
               className={cn(
-                'absolute z-50 rounded-2xl shadow-xl border w-[calc(100vw-1rem)] max-w-[380px] sm:w-[380px] bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/80 overflow-hidden',
-                direction === 'up' ? 'bottom-11' : 'top-11',
-                align === 'left' ? 'left-0' : 'right-0',
+                'z-50 rounded-2xl shadow-xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/80 overflow-hidden',
+                /* Panneau ouvert vers le bas et aligné à droite (les deux
+                   en-têtes) : sur mobile on l'ancre au viewport. En absolute
+                   right-0, une largeur de 100vw part vers la gauche depuis la
+                   cloche et sort de l'écran — le panneau était rogné à gauche. */
+                direction !== 'up' && align !== 'left'
+                  ? 'fixed left-2 right-2 top-[calc(3.5rem+env(safe-area-inset-top))] sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[380px]'
+                  : cn(
+                      'absolute w-[calc(100vw-1rem)] max-w-[380px] sm:w-[380px]',
+                      direction === 'up' ? 'bottom-11' : 'top-11',
+                      align === 'left' ? 'left-0' : 'right-0',
+                    ),
               )}
             >
               {/* Header */}

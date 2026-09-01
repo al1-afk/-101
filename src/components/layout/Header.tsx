@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -153,6 +153,30 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
 
   const base = tenantSlug ? `/${tenantSlug}` : ''
 
+  /* Fermeture au clic extérieur.
+
+     On n'utilise PAS de voile `fixed inset-0` : le <header> porte
+     backdrop-blur-2xl, et un ancêtre avec backdrop-filter devient le bloc
+     conteneur de ses descendants position:fixed. Mesuré dans Chrome, un
+     `fixed inset-0` posé ici ne couvre que la bande du header (500×56 au
+     lieu de 500×713) — cliquer sur la page ne fermait donc rien. Un
+     écouteur au niveau du document ne dépend d'aucun bloc conteneur, et
+     ferme aussi quand on clique la barre latérale. */
+  const alertsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!alertsOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!alertsRef.current?.contains(e.target as Node)) setAlertsOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setAlertsOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [alertsOpen])
+
   return (
     <header
       className={cn(
@@ -275,7 +299,7 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
         <NotificationBell scope="admin" />
 
         {/* Alerts */}
-        <div className="relative">
+        <div className="relative" ref={alertsRef}>
           <button
             className={cn(iconBtn, 'relative', bellTone)}
             onClick={() => setAlertsOpen(v => !v)}
@@ -297,15 +321,30 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
           <AnimatePresence>
             {alertsOpen && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setAlertsOpen(false)} />
                 <motion.div
                   initial={{ opacity: 0, y: -8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0,  scale: 1    }}
                   exit={{    opacity: 0, y: -8, scale: 0.98 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-11 z-50 rounded-2xl overflow-hidden card-glass w-[calc(100vw-1rem)] max-w-[380px] sm:w-[380px]"
+                  /* Fond OPAQUE, pas `card-glass`.
+                     Ce panneau est un descendant du <header>, qui porte
+                     déjà backdrop-blur-2xl : un ancêtre avec backdrop-filter
+                     devient la racine de backdrop de ses descendants, donc
+                     le blur du panneau ne capte plus le contenu de la page.
+                     Il ne restait qu'un voile blanc à 55 % à travers lequel
+                     le texte de la page passait, net et illisible. */
+                  className={cn(
+                    'z-50 rounded-2xl overflow-hidden shadow-xl border',
+                    'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/80',
+                    /* Mobile : ancré au viewport, pas au bouton. En absolute
+                       + right-0, la largeur 100vw partait vers la gauche
+                       depuis la cloche et sortait de l'écran — le panneau
+                       était rogné au bord gauche. */
+                    'fixed left-2 right-2 top-[calc(3.5rem+env(safe-area-inset-top))]',
+                    'sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[380px]',
+                  )}
                 >
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-black/[0.05] dark:border-white/[0.05]">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex items-center gap-2">
                       <Bell className="w-4 h-4 text-slate-500" />
                       <span className="font-semibold text-sm text-foreground">Alertes</span>
@@ -335,7 +374,7 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
                         <p className="text-xs text-muted-foreground mt-0.5">Aucune alerte active</p>
                       </div>
                     ) : (
-                      <div className="divide-y divide-black/[0.05] dark:divide-white/[0.05]">
+                      <div className="divide-y divide-slate-100 dark:divide-slate-800">
                         {alerts.map(alert => (
                           <AlertItem key={alert.id} alert={alert} onDismiss={dismiss} onNavigate={handleAlertNav} />
                         ))}
@@ -344,7 +383,7 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
                   </div>
 
                   {alerts.length > 0 && (
-                    <div className="px-4 py-2.5 border-t border-black/[0.05] dark:border-white/[0.05] text-center">
+                    <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-800 text-center">
                       <button
                         className="text-xs text-electric-600 dark:text-cyan-400 hover:underline"
                         onClick={() => { navigate(`${base}/statistiques`); setAlertsOpen(false) }}
