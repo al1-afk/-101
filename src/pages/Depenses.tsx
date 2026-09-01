@@ -230,10 +230,23 @@ export default function Depenses() {
       month: p.month === 11 ? 0 : p.month + 1,
     }))
 
+  /* Même bouton à deux endroits : en-tête de page sur ordinateur,
+     au-dessus du tableau sur mobile (l'en-tête y est masqué). */
+  const importExport = (
+    <ImportExportButtons
+      schema={depensesSchema}
+      data={depenses}
+      onImport={async (row) => { await createDepense.mutateAsync(row as any) }}
+    />
+  )
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Page header */}
-      <div className="card-premium p-5 flex items-center gap-4">
+      {/* Page header — masqué sur mobile : sur un téléphone il poussait le
+           formulaire de saisie hors de l'écran pour un titre et une phrase
+           de description. Export/Import reste accessible plus bas, au-dessus
+           du tableau (cf. « Expense table »). */}
+      <div className="card-premium p-5 hidden md:flex items-center gap-4">
         <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center flex-shrink-0 text-2xl">
           💰
         </div>
@@ -244,22 +257,9 @@ export default function Depenses() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <ImportExportButtons
-            schema={depensesSchema}
-            data={depenses}
-            onImport={async (row) => { await createDepense.mutateAsync(row as any) }}
-          />
+          {importExport}
         </div>
       </div>
-
-      {/* Synthèse : ce que je possède vs ce que j'attends */}
-      <FinanceSummary
-        summary={summary}
-        moisLabel={today.toLocaleString('fr-FR', { month: 'long', year: 'numeric' })}
-      />
-
-      {/* Comptes bancaires — soldes temps réel */}
-      <BankAccountsBanner />
 
       {/* Form + Stats side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -608,6 +608,15 @@ export default function Depenses() {
         </div>
       </div>
 
+      {/* Synthèse : ce que je possède vs ce que j'attends */}
+      <FinanceSummary
+        summary={summary}
+        moisLabel={today.toLocaleString('fr-FR', { month: 'long', year: 'numeric' })}
+      />
+
+      {/* Comptes bancaires — soldes temps réel */}
+      <BankAccountsBanner />
+
       {/* Prévisions — revenus prévus & dépenses prévues (aucun impact solde) */}
       <PrevisionsSection
         previsions={(financeData.previsions ?? []) as any}
@@ -746,13 +755,18 @@ export default function Depenses() {
 
       {/* Expense table */}
       <div className="card-premium overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
+        <div className="p-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
           <h2 className="section-title capitalize">
             Dépenses{tableDeps === null ? ` — ${monthLabel}` : ''}
           </h2>
-          <span className="text-sm text-muted-foreground">
-            {(tableDeps ?? monthData.monthDeps).length} entrée(s)
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">
+              {(tableDeps ?? monthData.monthDeps).length} entrée(s)
+            </span>
+            {/* Sur mobile l'en-tête de page est masqué : on garde ici l'accès
+                à l'export / import, à côté des données concernées. */}
+            <div className="md:hidden">{importExport}</div>
+          </div>
         </div>
         <div className="table-scroll">
         <table className="w-full">
