@@ -5,6 +5,7 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Header  from './Header'
+import BottomNav from './BottomNav'
 import GlobalSearch from '@/components/GlobalSearch'
 import { useRealtime } from '@/hooks/useRealtime'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
@@ -117,11 +118,16 @@ export default function AppLayout() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.22, ease: 'easeOut' }}
-          className="p-4 sm:p-6 md:p-8 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          /* pb mobile : hauteur de la BottomNav (56px) + marge, sinon la
+             dernière carte passe sous la barre. */
+          className="p-4 sm:p-6 md:p-8 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-8"
         >
           <Outlet />
         </motion.div>
       </main>
+
+      {/* Barre de navigation mobile — 4 raccourcis, masquée dès md */}
+      <BottomNav />
     </div>
   )
 }

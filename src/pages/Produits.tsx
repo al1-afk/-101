@@ -441,7 +441,7 @@ export default function Produits() {
       {/* ── Floating action button (mobile) ── */}
       <button
         onClick={() => setShowForm(true)}
-        className="fixed bottom-6 right-6 md:hidden w-14 h-14 rounded-2xl bg-gradient-primary text-white shadow-glow-blue flex items-center justify-center z-30 active:scale-95 transition-transform"
+        className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-6 md:hidden w-14 h-14 rounded-2xl bg-gradient-primary text-white shadow-glow-blue flex items-center justify-center z-30 active:scale-95 transition-transform"
         aria-label="Nouvel article"
       >
         <Plus className="w-6 h-6" />

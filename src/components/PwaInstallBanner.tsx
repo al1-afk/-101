@@ -47,8 +47,9 @@ export default function PwaInstallBanner() {
           transition={{ type: 'spring', stiffness: 300, damping: 28 }}
           className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl
                      bg-white dark:bg-[#0d1829] border border-slate-200 dark:border-slate-700/80
-                     max-w-sm w-[calc(100vw-2rem)]"
-          style={{ bottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
+                     max-w-sm w-[calc(100vw-2rem)]
+                     bottom-[calc(1.25rem+3.5rem+env(safe-area-inset-bottom))]
+                     md:bottom-[calc(1.25rem+env(safe-area-inset-bottom))]"
         >
           <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
             style={{ background: 'linear-gradient(135deg, #2563EB 0%, #4F46E5 100%)' }}>
