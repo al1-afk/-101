@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════
---  GestiQ — Migration 046 : Seed des 50 SOPs « Claude Code / DevOps / IA »
+--  GestiQ — Migration 093 : Seed des 50 SOPs « Claude Code / DevOps / IA »
 --  Date : 2026-08-31
 --
 --  Source : bibliothèque de procédures internes Next Gital (export Notion).

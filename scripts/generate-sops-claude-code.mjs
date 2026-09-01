@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ════════════════════════════════════════════════════════════════════
-   Génère la migration 046_seed_sops_claude_code_devops.sql à partir
+   Génère la migration 093_seed_sops_claude_code_devops.sql à partir
    de la bibliothèque de SOP « Claude Code / DevOps / IA » de Next Gital
    (export Notion — septembre 2026).
 
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const OUT = resolve(__dirname, '..', 'supabase', 'migrations', '046_seed_sops_claude_code_devops.sql')
+const OUT = resolve(__dirname, '..', 'supabase', 'migrations', '093_seed_sops_claude_code_devops.sql')
 
 /* ── Helpers blocks ─────────────────────────────────────────────── */
 const H    = (text) => ({ type: 'heading',   text })
@@ -2837,7 +2837,7 @@ for (const s of SOPS) {
 
 const lines = []
 lines.push('-- ════════════════════════════════════════════════════════════════════')
-lines.push(`--  GestiQ — Migration 046 : Seed des ${SOPS.length} SOPs « Claude Code / DevOps / IA »`)
+lines.push(`--  GestiQ — Migration 093 : Seed des ${SOPS.length} SOPs « Claude Code / DevOps / IA »`)
 lines.push('--  Date : 2026-08-31')
 lines.push('--')
 lines.push('--  Source : bibliothèque de procédures internes Next Gital (export Notion).')

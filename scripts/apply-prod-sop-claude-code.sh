@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════
-#  GestiQ — Appliquer la migration 046 (50 SOPs Claude Code / DevOps / IA) en PROD
+#  GestiQ — Appliquer la migration 093 (50 SOPs Claude Code / DevOps / IA) en PROD
 #
-#  Lance la migration 046 (50 SOPs : dev, IA, designer, media buyer,
+#  Lance la migration 093 (50 SOPs : dev, IA, designer, media buyer,
 #  marketing, livraison) sur la base de production via SSH + docker exec.
 #
 #  Idempotent : safe à re-runner (WHERE NOT EXISTS sur chaque INSERT).
@@ -21,7 +21,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SQL_FILE="supabase/migrations/046_seed_sops_claude_code_devops.sql"
+SQL_FILE="supabase/migrations/093_seed_sops_claude_code_devops.sql"
 
 if [[ ! -f "$SQL_FILE" ]]; then
   echo "✗ Fichier introuvable : $SQL_FILE" >&2
@@ -79,7 +79,7 @@ BKP_NAME="pre-sop-claude-code-$(date +%Y%m%d-%H%M%S).sql"
 ssh "$SSH_TARGET" "docker exec '$PG_CONT' pg_dump -U '$PG_USER' -d '$PG_DB' --no-owner --no-acl" > "/tmp/$BKP_NAME"
 echo "  ✓ Backup local : /tmp/$BKP_NAME ($(du -h /tmp/$BKP_NAME | cut -f1))"
 
-echo "▶ Application de la migration 046…"
+echo "▶ Application de la migration 093…"
 cat "$SQL_FILE" | ssh "$SSH_TARGET" "docker exec -i '$PG_CONT' psql -U '$PG_USER' -d '$PG_DB' -v ON_ERROR_STOP=1"
 
 echo ""
