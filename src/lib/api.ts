@@ -709,6 +709,13 @@ export const mySpaceApi = {
     memberApi.put<{ success: true }>('/api/my-space/password', { current_password, new_password }),
 
   tasks:    () => memberApi.get<any[]>('/api/my-space/tasks'),
+  /* Le membre ajoute une tâche à SA liste : le serveur impose
+     team_member_id d'après la session, il n'est pas envoyé ici. */
+  createTask: (data: {
+    title: string; description?: string | null
+    priority?: 'low' | 'normal' | 'high' | 'urgent'
+    due_date?: string | null; project_id?: string | null
+  }) => memberApi.post<any>('/api/my-space/tasks', data),
   updateTaskStatus: (id: string, status: string) =>
     memberApi.patch<{ success: true }>(`/api/my-space/tasks/${id}`, { status }),
   updateTaskElapsed: (id: string, elapsed_seconds: number, status?: string) =>
@@ -932,6 +939,81 @@ export const stagiairesApi              = tableApi('stagiaires')
 export const projetsApi                 = tableApi('projets')
 export const projetAssigneesApi         = tableApi('projet_assignees')
 export const projetMessagesApi          = tableApi('projet_messages')
+
+/* ── Discussion projet ───────────────────────────────────────────
+   Une seule API pour les deux publics : `as` choisit le jeton (espace
+   admin ou espace membre). Le serveur applique les mêmes règles aux
+   deux, seul le périmètre des projets visibles diffère. */
+export interface ChatFile {
+  id: string; message_id?: string | null; filename: string; mime: string
+  size_bytes: number | string; uploader_name: string; created_at: string
+}
+export interface ChatMessage {
+  id: string; projet_id: string; author_name: string
+  author_user_id?: string | null; author_team_member_id?: string | null
+  is_admin: boolean; text: string; created_at: string; files: ChatFile[]
+}
+export interface ChatReader { name: string; last_read_at: string; is_me: boolean }
+export interface ChatThread {
+  messages: ChatMessage[]
+  readers:  ChatReader[]
+  me:       { name: string; is_admin: boolean }
+}
+
+const chatToken = (as: 'admin' | 'member') =>
+  as === 'member' ? memberTokenStore.get() : tokenStore.get()
+
+export const projetChatApi = {
+  thread: (projetId: string, as: 'admin' | 'member' = 'admin') =>
+    request<ChatThread>('GET', `/api/projet-chat/${projetId}/messages`, undefined, as),
+
+  post: (projetId: string, data: { text?: string; file_ids?: string[] }, as: 'admin' | 'member' = 'admin') =>
+    request<ChatMessage>('POST', `/api/projet-chat/${projetId}/messages`, data, as),
+
+  markRead: (projetId: string, as: 'admin' | 'member' = 'admin') =>
+    request<{ success: true }>('POST', `/api/projet-chat/${projetId}/read`, {}, as),
+
+  /** Téléverse un fichier : le corps de la requête EST le fichier.
+   *  Pas de FormData — inutile pour un fichier unique, et cela évite de
+   *  recopier le contenu en mémoire avant l'envoi. */
+  uploadFile: async (
+    projetId: string,
+    file: File,
+    as: 'admin' | 'member' = 'admin',
+  ): Promise<ChatFile> => {
+    const res = await fetch(`${BASE_URL}/api/projet-chat/${projetId}/files`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${chatToken(as)}`,
+        'Content-Type':  file.type || 'application/octet-stream',
+        'x-filename':    encodeURIComponent(file.name),
+      },
+      credentials: 'include',
+      body: file,
+    })
+    if (!res.ok) {
+      const msg = await res.json().catch(() => ({}))
+      throw new Error(msg?.error ?? `Échec du téléversement (${res.status})`)
+    }
+    return res.json()
+  },
+
+  /** Récupère le contenu d'un fichier sous forme d'URL blob locale.
+   *  Le téléchargement passe par l'API (contrôle d'accès), donc on ne
+   *  peut pas pointer une balise <img src> directement dessus. */
+  fileBlobUrl: async (
+    fileId: string,
+    as: 'admin' | 'member' = 'admin',
+    inline = true,
+  ): Promise<string> => {
+    const res = await fetch(
+      `${BASE_URL}/api/projet-chat/files/${fileId}${inline ? '?inline=1' : ''}`,
+      { headers: { 'Authorization': `Bearer ${chatToken(as)}` }, credentials: 'include' },
+    )
+    if (!res.ok) throw new Error(`Fichier indisponible (${res.status})`)
+    return URL.createObjectURL(await res.blob())
+  },
+}
 export const projetTemplatesApi         = tableApi('projet_templates')
 export const teamMemberTasksApi         = tableApi('team_member_tasks')
 
@@ -1025,6 +1107,8 @@ export interface NotificationSettings {
   recipients: string[]
   email_enabled: boolean
   inapp_enabled: boolean
+  /** Catégories d'e-mails transactionnels réellement envoyées. */
+  email_kinds:   string[]
   tasks_alert_enabled: boolean
   tasks_alert_hour:    number
   tasks_stale_days:    number

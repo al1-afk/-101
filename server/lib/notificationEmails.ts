@@ -28,23 +28,63 @@ const layout = (titleText: string, bodyHtml: string) => `<!doctype html>
   </table>
 </body></html>`
 
+/** Catégories d'e-mails transactionnels — miroir de
+ *  notification_settings.email_kinds (migration 096). */
+export type EmailKind =
+  | 'projet_message' | 'prospect_nouveau' | 'paiement_recu'
+  | 'devis_accepte'  | 'tache_validation' | 'tache_creee' | 'expiration'
+
 interface DispatchOpts {
   tenantId: string
+  kind:     EmailKind
   subject:  string
   title:    string
   bodyHtml: string
+  /** Ne pas écrire à cette personne : on ne s'envoie pas d'e-mail à
+   *  soi-même pour un message qu'on vient d'écrire. */
+  exceptUserId?: string
+}
+
+/**
+ * L'espace veut-il cet e-mail ?
+ *
+ * Silence prudent en cas d'absence de ligne de réglages : un espace qui
+ * n'a jamais ouvert l'écran de configuration n'en a pas, et couper ses
+ * e-mails pour autant serait une régression. On retombe donc sur « tout
+ * est autorisé », comme avant la migration 096.
+ */
+async function emailKindAllowed(tenantId: string, kind: EmailKind): Promise<boolean> {
+  try {
+    const rows = await tenantQuery<{ email_enabled: boolean; email_kinds: string[] | null }>(
+      tenantId,
+      `SELECT email_enabled, email_kinds FROM public.notification_settings WHERE tenant_id = $1`,
+      [tenantId],
+    )
+    if (!rows.length) return true
+    const s = rows[0]
+    if (s.email_enabled === false) return false
+    if (!Array.isArray(s.email_kinds)) return true
+    return s.email_kinds.includes(kind)
+  } catch {
+    return true
+  }
 }
 
 /** Récupère tous les admins du tenant et envoie l'email à chacun. */
-async function dispatchToAdmins({ tenantId, subject, title, bodyHtml }: DispatchOpts): Promise<void> {
+async function dispatchToAdmins({ tenantId, kind, subject, title, bodyHtml, exceptUserId }: DispatchOpts): Promise<void> {
   try {
+    if (!(await emailKindAllowed(tenantId, kind))) {
+      console.log(`[notifEmail] "${kind}" désactivé pour cet espace — e-mail non envoyé`)
+      return
+    }
     const admins = await tenantQuery<{ email: string }>(
       tenantId,
       `SELECT u.email
          FROM public.tenant_users tu
          JOIN public.users u ON u.id = tu.user_id
-        WHERE tu.tenant_id = $1 AND tu.role = 'admin' AND u.email IS NOT NULL`,
-      [tenantId],
+        WHERE tu.tenant_id = $1 AND tu.role = 'admin' AND u.email IS NOT NULL
+          AND ($2::uuid IS NULL OR u.id <> $2)`,
+      [tenantId, exceptUserId ?? null],
     )
     console.log(`[notifEmail] dispatching "${subject}" to ${admins.length} admin(s): ${admins.map(a => a.email).join(', ')}`)
     if (!admins.length) return
@@ -77,6 +117,7 @@ export async function notifyNewProspect(tenantId: string, prospect: { nom: strin
   ].filter(Boolean).join('')
   await dispatchToAdmins({
     tenantId,
+    kind: 'prospect_nouveau',
     subject: `101/ 🆕 Nouveau prospect : ${prospect.nom}`,
     title:   `🆕 Nouveau prospect`,
     bodyHtml: lines,
@@ -93,6 +134,7 @@ export async function notifyTaskValidation(tenantId: string, task: { title: stri
   `
   await dispatchToAdmins({
     tenantId,
+    kind: 'tache_validation',
     subject: `101/ ⚑ Tâche à valider : ${task.title}`,
     title:   `⚑ Tâche à valider`,
     bodyHtml: lines,
@@ -109,6 +151,7 @@ export async function notifyNewPaiement(tenantId: string, paiement: { montant: n
   `
   await dispatchToAdmins({
     tenantId,
+    kind: 'paiement_recu',
     subject: `101/ 💰 Paiement reçu : ${paiement.montant.toLocaleString('fr-FR')} MAD`,
     title:   `💰 Paiement reçu`,
     bodyHtml: lines,
@@ -125,6 +168,7 @@ export async function notifyDevisAccepte(tenantId: string, devis: { numero: stri
   `
   await dispatchToAdmins({
     tenantId,
+    kind: 'devis_accepte',
     subject: `101/ ✅ Devis accepté : ${devis.numero}`,
     title:   `✅ Devis accepté`,
     bodyHtml: lines,
@@ -185,8 +229,76 @@ export async function notifyExpiryReminder(
   `
   await dispatchToAdmins({
     tenantId,
+    kind: 'expiration',
     subject: `101/ ${icon} Rappel ${label.toLowerCase()} : ${item.nom} ${msg}`,
     title:   `${icon} Rappel d'expiration ${label.toLowerCase()}`,
     bodyHtml: lines,
+  })
+}
+
+
+/* ───── Discussion projet ─────────────────────────────────────────── */
+
+export async function notifyNewProjetMessage(
+  tenantId: string,
+  msg: {
+    projetNom:  string
+    projetId:   string
+    auteur:     string
+    apercu:     string
+    nbFichiers: number
+    /** L'auteur, s'il possède un compte admin : il ne se notifie pas. */
+    exceptUserId?: string
+  },
+): Promise<void> {
+  const pieces = msg.nbFichiers > 0
+    ? `<p style="font-size:13px;color:#64748b;">📎 ${msg.nbFichiers} pièce${msg.nbFichiers > 1 ? 's' : ''} jointe${msg.nbFichiers > 1 ? 's' : ''}.</p>`
+    : ''
+  await dispatchToAdmins({
+    tenantId,
+    kind: 'projet_message',
+    exceptUserId: msg.exceptUserId,
+    subject: `101/ 💬 ${msg.auteur} — ${msg.projetNom}`,
+    title:   `💬 Nouveau message sur ${escape(msg.projetNom)}`,
+    bodyHtml: `
+      <p><strong>${escape(msg.auteur)}</strong> a écrit sur le projet
+         <strong>${escape(msg.projetNom)}</strong> :</p>
+      <p style="padding:12px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;white-space:pre-wrap;">
+        ${escape(msg.apercu)}
+      </p>
+      ${pieces}
+    `,
+  })
+}
+
+/* ───── Tâche créée par un membre ─────────────────────────────────── */
+
+export async function notifyMemberTaskCreated(
+  tenantId: string,
+  task: {
+    titre:      string
+    membre:     string
+    priorite:   string
+    echeance?:  string | null
+    projetNom?: string | null
+  },
+): Promise<void> {
+  const details = [
+    task.projetNom ? `Projet : <strong>${escape(task.projetNom)}</strong>` : null,
+    `Priorité : <strong>${escape(task.priorite)}</strong>`,
+    task.echeance ? `Échéance : <strong>${escape(task.echeance)}</strong>` : null,
+  ].filter(Boolean).join('<br/>')
+
+  await dispatchToAdmins({
+    tenantId,
+    kind: 'tache_creee',
+    subject: `101/ ✅ ${task.membre} a ajouté une tâche`,
+    title:   '✅ Nouvelle tâche créée par un membre',
+    bodyHtml: `
+      <p><strong>${escape(task.membre)}</strong> vient d'ajouter une tâche à sa liste :</p>
+      <p style="padding:12px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;">
+        <strong>${escape(task.titre)}</strong><br/>${details}
+      </p>
+    `,
   })
 }

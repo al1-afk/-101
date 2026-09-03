@@ -250,6 +250,21 @@ router.put('/settings', requireRole('admin'), async (req: Request, res: Response
     sets.push(`timezone = $${vals.length}`)
   }
 
+  /* Catégories d'e-mails transactionnels (migration 096). Liste fermée :
+     une catégorie inconnue serait acceptée en base puis jamais consultée,
+     donnant l'illusion d'un réglage qui ne fait rien. */
+  if (Array.isArray(body.email_kinds)) {
+    const KNOWN = new Set([
+      'projet_message', 'prospect_nouveau', 'paiement_recu',
+      'devis_accepte', 'tache_validation', 'tache_creee', 'expiration',
+    ])
+    const list = (body.email_kinds as unknown[]).map(k => String(k).trim())
+    const bad = list.find(k => !KNOWN.has(k))
+    if (bad) return res.status(400).json({ error: `Catégorie d'e-mail inconnue : ${bad}` })
+    vals.push([...new Set(list)])
+    sets.push(`email_kinds = $${vals.length}`)
+  }
+
   if (Array.isArray(body.recipients)) {
     const list = (body.recipients as unknown[])
       .map(e => String(e).trim().toLowerCase())

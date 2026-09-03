@@ -43,6 +43,26 @@ interface Block {
   hourKey:   keyof NotificationSettings
 }
 
+/* Catégories d'e-mails déclenchés par un événement — miroir de
+   notification_settings.email_kinds (migration 096). Les rapports
+   planifiés gardent leurs propres interrupteurs, plus bas. */
+const EMAIL_KINDS: Array<{ key: string; icon: string; label: string; desc: string }> = [
+  { key: 'projet_message',   icon: '💬', label: 'Messages de discussion',
+    desc: "À chaque message publié sur le fil d'un projet." },
+  { key: 'tache_creee',      icon: '✅', label: 'Tâche ajoutée par un membre',
+    desc: "Quand un employé ajoute une tâche à sa propre liste." },
+  { key: 'tache_validation', icon: '🔍', label: 'Tâche à valider',
+    desc: "Quand un membre marque une tâche comme terminée." },
+  { key: 'prospect_nouveau', icon: '🎯', label: 'Nouveau prospect',
+    desc: 'À la création d\'un prospect dans le CRM.' },
+  { key: 'paiement_recu',    icon: '💰', label: 'Paiement reçu',
+    desc: "À l'enregistrement d'un paiement." },
+  { key: 'devis_accepte',    icon: '📄', label: 'Devis accepté',
+    desc: "Quand un devis passe au statut accepté." },
+  { key: 'expiration',       icon: '🌐', label: 'Expiration domaine / hébergement',
+    desc: 'Rappels à 30, 14, 7 et 1 jour, puis le jour même.' },
+]
+
 const BLOCKS: Block[] = [
   {
     kind: 'tasks_overdue', icon: '⏰',
@@ -264,6 +284,44 @@ export default function NotificationsAutoSettings() {
           <Toggle on={draft.inapp_enabled} onClick={() => set('inapp_enabled', !draft.inapp_enabled)} />
           Notification dans l'application (cloche)
         </label>
+      </div>
+
+      {/* Quelles catégories partent vraiment par email */}
+      <div className={cn('space-y-2', !draft.email_enabled && 'opacity-50 pointer-events-none')}>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Quels emails recevoir</h3>
+          <p className="text-xs text-muted-foreground">
+            Une catégorie décochée reste visible dans la cloche et en notification
+            navigateur — elle ne part simplement plus par email.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {EMAIL_KINDS.map(k => {
+            const on = (draft.email_kinds ?? []).includes(k.key)
+            return (
+              <label
+                key={k.key}
+                className="flex items-start gap-3 p-2.5 rounded-lg border border-border cursor-pointer hover:border-blue-300 transition-colors"
+              >
+                <Toggle
+                  on={on}
+                  onClick={() => set(
+                    'email_kinds',
+                    (on
+                      ? (draft.email_kinds ?? []).filter(x => x !== k.key)
+                      : [...(draft.email_kinds ?? []), k.key]) as never,
+                  )}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-foreground">
+                    {k.icon} {k.label}
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground">{k.desc}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
       </div>
 
       {/* Les 4 envois */}
