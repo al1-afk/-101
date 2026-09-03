@@ -47,10 +47,9 @@ import { serializeTaskDesc } from '@/lib/taskNotes'
 import { buildTasksFromTemplates, countTemplate } from '@/lib/templateTasks'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
-import ProjetChat, { type ProjetMessage } from '@/components/projet/ProjetChat'
+import ProjetChat from '@/components/projet/ProjetChat'
 import { getActiveTimer, setActiveTimer, formatHMS } from '@/lib/taskTimer'
 import { useAuth } from '@/hooks/useAuth'
-import { projetMessagesApi } from '@/lib/api'
 import type { SopBlock } from '@/hooks/useSops'
 import { useQueryClient } from '@tanstack/react-query'
 import { projetsApi } from '@/lib/api'
@@ -365,19 +364,8 @@ export default function ProjetDetail() {
           projetId={projet.id}
           currentUserName={auth.name ?? auth.email ?? 'Admin'}
           isAdmin={true}
-          queryKey={['projet_messages', projet.id]}
-          fetchMessages={async () => {
-            const all = await projetMessagesApi.list({ orderBy: 'created_at', order: 'asc', limit: 1000 }) as ProjetMessage[]
-            return all.filter(m => m.projet_id === projet.id)
-          }}
-          postMessage={(text) =>
-            projetMessagesApi.create({
-              projet_id:   projet.id,
-              text,
-              is_admin:    true,
-              author_name: auth.name ?? auth.email ?? 'Admin',
-            } as any)
-          }
+          as="admin"
+          queryKey={['projet-chat', projet.id]}
         />
       )}
       {tab === 'infos' && (

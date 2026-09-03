@@ -343,9 +343,8 @@ export default function MyProjetDetail() {
           projetId={id!}
           currentUserName={member ? `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || 'Membre' : 'Membre'}
           isAdmin={false}
-          queryKey={['my-space', 'projet', id, 'messages']}
-          fetchMessages={() => mySpaceApi.projetMessages(id!)}
-          postMessage={(text) => mySpaceApi.postProjetMessage(id!, text)}
+          as="member"
+          queryKey={['projet-chat', id]}
         />
       </Section>
       </div>

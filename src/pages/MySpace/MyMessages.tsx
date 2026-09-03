@@ -114,9 +114,8 @@ export default function MyMessages() {
           projetId={p.id}
           currentUserName={memberName}
           isAdmin={false}
-          queryKey={['my-space', 'projet', p.id, 'messages']}
-          fetchMessages={() => mySpaceApi.projetMessages(p.id)}
-          postMessage={(text) => mySpaceApi.postProjetMessage(p.id, text)}
+          as="member"
+          queryKey={['projet-chat', p.id]}
         />
       </div>
     )

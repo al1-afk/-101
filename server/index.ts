@@ -32,6 +32,7 @@ import taskRemindersRoutes from './routes/taskReminders'
 import notificationsRoutes from './routes/notifications'
 import timeTrackingRoutes from './routes/timeTracking'
 import mySpaceRoutes   from './routes/mySpace'
+import projetChatRoutes from './routes/projetChat'
 import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
 import outboundRoutes  from './routes/outbound'
@@ -194,6 +195,7 @@ app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/public',    emailTrackingPublicRoutes)
 app.use('/api/team',      teamRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
+app.use('/api/projet-chat', projetChatRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
 app.use('/api/activity',  activityRoutes)
 app.use('/api/outbound',  outboundRoutes)
