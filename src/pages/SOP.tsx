@@ -93,6 +93,10 @@ interface SOP {
   /* Qui a ajouté / modifié — posé par le serveur, affiché tel quel. */
   createdByName?: string | null
   updatedByName?: string | null
+  /* Cycle de vie (migration 098). Les SOPs du catalogue sont 'active' ;
+     un membre peut créer un brouillon ou archiver depuis son espace, et
+     l'admin doit le voir plutôt que de croire à une procédure publiée. */
+  status?: 'draft' | 'active' | 'archived'
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -136,6 +140,31 @@ function saveFavs(ids: string[]) {
    PAGE
    ═══════════════════════════════════════════════════════════════════ */
 /* Convertit un SOP de la DB (snake_case) vers la forme du composant (camelCase + isUserCreated) */
+/**
+ * Cycle de vie d'un SOP, côté admin.
+ *
+ * Rien n'est affiché pour un SOP actif : c'est le cas normal, et un
+ * badge sur 142 cartes n'apporterait que du bruit. En revanche un
+ * brouillon ou un archivé DOIT se distinguer — sans ça, l'admin lit un
+ * texte en cours de rédaction en le croyant applicable.
+ */
+function SopStatusBadge({ status }: { status?: 'draft' | 'active' | 'archived' }) {
+  if (!status || status === 'active') return null
+  const cfg = status === 'draft'
+    ? { label: '✏️ Brouillon', cls: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200' }
+    : { label: '📦 Archivé',   cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300' }
+  return (
+    <span
+      className={cn('text-[10px] px-1.5 py-0.5 rounded-md font-bold', cfg.cls)}
+      title={status === 'draft'
+        ? "Brouillon — en cours de rédaction, pas encore publié à l'équipe"
+        : 'Archivé — retiré des listes des membres, conservé ici'}
+    >
+      {cfg.label}
+    </span>
+  )
+}
+
 function dbSopToView(s: DbSop): SOP & { isUserCreated: true; dbId: string } {
   return {
     id:          s.id,
@@ -153,6 +182,7 @@ function dbSopToView(s: DbSop): SOP & { isUserCreated: true; dbId: string } {
     blocks:      Array.isArray(s.blocks) ? (s.blocks as SOPBlock[]) : [],
     createdByName: (s as any).created_by_name ?? null,
     updatedByName: (s as any).updated_by_name ?? null,
+    status:        ((s as any).status ?? 'active') as 'draft' | 'active' | 'archived',
     isUserCreated: true,
   }
 }
@@ -719,6 +749,7 @@ function SOPCard({ sop, isFav, onOpen, onToggleFav, delay = 0, onEdit, onDelete,
       </p>
 
       <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+        <SopStatusBadge status={sop.status} />
         {sop.tags.slice(0, 2).map(tag => (
           <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
             #{tag}
@@ -821,6 +852,7 @@ function SOPDetail({ sop, isFav, onClose, onToggleFav, onShare, onTrain, onEdit,
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <Badge variant="default" size="sm">{cat.label}</Badge>
               {sop.popular && <Badge variant="success" size="sm">Populaire</Badge>}
+              <SopStatusBadge status={sop.status} />
             </div>
             <h1 className="text-[24px] md:text-[28px] font-extrabold text-foreground leading-tight tracking-tight">
               {sop.title}

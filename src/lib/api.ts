@@ -733,23 +733,108 @@ export const mySpaceApi = {
   projetMessages:     (id: string) => memberApi.get<any[]>(`/api/my-space/projets/${id}/messages`),
   postProjetMessage:  (id: string, text: string) => memberApi.post<any>(`/api/my-space/projets/${id}/messages`, { text }),
 
-  sops:     (category?: string) => memberApi.get<any[]>(`/api/my-space/sops${category ? `?category=${category}` : ''}`),
-  sop:      (id: string) => memberApi.get<any>(`/api/my-space/sops/${id}`),
+  /* ── SOPs ─────────────────────────────────────────────────────
+     Toutes les écritures sont revérifiées côté serveur : le client
+     masque les boutons, il ne décide de rien. */
+  sops: (opts?: { category?: string; status?: 'active' | 'archived' | 'all' }) => {
+    const q = new URLSearchParams()
+    if (opts?.category) q.set('category', opts.category)
+    if (opts?.status)   q.set('status', opts.status)
+    const qs = q.toString()
+    return memberApi.get<SopRow[]>(`/api/my-space/sops${qs ? `?${qs}` : ''}`)
+  },
+  sop:      (id: string) => memberApi.get<SopRow & { images: SopImage[] }>(`/api/my-space/sops/${id}`),
   logSop:   (sop_id: string, action_type: string, details?: any) =>
     memberApi.post<{ success: true }>('/api/my-space/sops/activity', { sop_id, action_type, details }),
 
-  /* Édition par un membre — réservée aux catégories accordées au niveau
-     « Édition (formateur) » dans /equipe. Le serveur revérifie le droit
-     et estampille le nom de l'auteur : rien ici n'est décisif. */
   editableSopCategories: () => memberApi.get<string[]>('/api/my-space/sops/editable-categories'),
-  createSop: (data: {
-    title: string; description?: string | null; category: string
-    tags?: string[]; read_min?: number; blocks: any[]
-  }) => memberApi.post<any>('/api/my-space/sops', data),
-  updateSop: (id: string, data: {
-    title: string; description?: string | null; category: string
-    tags?: string[]; read_min?: number; blocks: any[]
-  }) => memberApi.put<any>(`/api/my-space/sops/${id}`, data),
+  sopCategories: () => memberApi.get<SopCategoryCount[]>('/api/my-space/sops/categories'),
+
+  createSop: (data: SopPayload) => memberApi.post<SopRow>('/api/my-space/sops', data),
+  updateSop: (id: string, data: SopPayload) => memberApi.put<SopRow>(`/api/my-space/sops/${id}`, data),
+  deleteSop: (id: string) => memberApi.delete<{ success: true }>(`/api/my-space/sops/${id}`),
+  duplicateSop: (id: string) => memberApi.post<SopRow>(`/api/my-space/sops/${id}/duplicate`, {}),
+  setSopStatus: (id: string, status: 'draft' | 'active' | 'archived') =>
+    memberApi.patch<SopRow>(`/api/my-space/sops/${id}/status`, { status }),
+  setSopFavorite: (id: string, favorite: boolean) =>
+    memberApi.patch<SopRow>(`/api/my-space/sops/${id}/favorite`, { favorite }),
+
+  sopVersions: (id: string) =>
+    memberApi.get<{ versions: SopVersion[]; can_restore: boolean }>(`/api/my-space/sops/${id}/versions`),
+  restoreSopVersion: (id: string, versionId: string) =>
+    memberApi.post<SopRow>(`/api/my-space/sops/${id}/versions/${versionId}/restore`, {}),
+
+  /* Le corps de la requête EST l'image — pas de FormData : inutile pour
+     un fichier unique, et cela évite de le recopier en mémoire. */
+  uploadSopImage: async (file: File): Promise<SopImage> => {
+    const res = await fetch(`${BASE_URL}/api/my-space/sops/images`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${memberTokenStore.get()}`,
+        'Content-Type':  file.type || 'application/octet-stream',
+        'x-filename':    encodeURIComponent(file.name),
+      },
+      credentials: 'include',
+      body: file,
+    })
+    if (!res.ok) {
+      const msg = await res.json().catch(() => ({}))
+      throw new Error(msg?.error ?? `Échec du téléversement (${res.status})`)
+    }
+    return res.json()
+  },
+  updateSopImage: (id: string, data: { caption?: string; position?: number }) =>
+    memberApi.patch<SopImage>(`/api/my-space/sops/images/${id}`, data),
+  deleteSopImage: (id: string) =>
+    memberApi.delete<{ success: true }>(`/api/my-space/sops/images/${id}`),
+}
+
+/* ── Images de SOP ──────────────────────────────────────────────
+   Servies par une route commune aux deux espaces : un SOP écrit par un
+   membre doit rester lisible depuis /sop côté admin. Le contenu passe
+   par l'API authentifiée, donc une balise <img> ne peut pas viser
+   l'URL directement — on récupère un blob local. */
+export async function sopImageBlobUrl(
+  imageId: string,
+  as: 'admin' | 'member' = 'admin',
+): Promise<string> {
+  const token = as === 'member' ? memberTokenStore.get() : tokenStore.get()
+  const res = await fetch(`${BASE_URL}/api/sop-images/${imageId}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(`Image indisponible (${res.status})`)
+  return URL.createObjectURL(await res.blob())
+}
+
+export interface SopImage {
+  id: string; filename: string; mime: string; size_bytes: number | string
+  caption: string | null; position: number; created_at: string
+}
+export interface SopVersion {
+  id: string; version_number: number; title: string; description: string | null
+  category: string; read_min: number; difficulty: string | null
+  author_name: string; created_at: string; block_count: number
+}
+export interface SopCategoryCount { key: string; total: number; can_edit: boolean }
+export interface SopPayload {
+  title: string; description?: string | null; category: string
+  tags?: string[]; read_min?: number; blocks: any[]
+  difficulty?: string | null; status?: 'draft' | 'active' | 'archived'
+  image_ids?: string[]
+}
+export interface SopRow {
+  id: string; slug: string; title: string; description: string | null
+  category: string; tags: string[]; author: string | null; author_bg: string
+  read_min: number; views: number; popular: boolean
+  status: 'draft' | 'active' | 'archived'; difficulty: string | null
+  blocks: any[]; image_count?: number
+  created_by_name: string | null; updated_by_name: string | null
+  created_at: string; updated_at: string
+  can_edit?: boolean
+  /** Favori de la personne connectée — personnel, pas d'équipe. */
+  is_favorite?: boolean
+  images?: SopImage[]
 }
 
 /* ── Generic table API ───────────────────────────────────────── */

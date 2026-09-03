@@ -3,13 +3,14 @@
  * Mirrors a subset of the BlockRenderer in src/pages/SOP.tsx but is
  * self-contained and doesn't require check-state callbacks.
  */
-import { useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { Check, Copy, Info, Lightbulb, AlertTriangle, XCircle, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { parseRichText } from './parseRichText'
 import { detectVideo } from './videoEmbed'
 import BeforeAfterBlock from '@/components/projet/BeforeAfterBlock'
 import type { SopBeforeAfterMeta, SopProjectRefMeta } from '@/hooks/useSops'
+import { sopImageBlobUrl } from '@/lib/api'
 
 interface SopBlock {
   type:    string
@@ -18,7 +19,11 @@ interface SopBlock {
   variant?: 'info' | 'tip' | 'warning' | 'danger' | 'success'
   items?:  string[]
   steps?:  Array<{ text: string; icon?: string; time?: string; status?: string }>
-  image?:  { url: string; caption?: string; size?: string; align?: string }
+  /* `url` = ancienne image collée en base64, toujours utilisée par les
+     142 SOPs du catalogue. `sopImageId` = image stockée sur le volume.
+     Les deux coexistent : rien n'a été converti, et rien ne doit l'être
+     pour que l'existant continue de s'afficher. */
+  image?:  { url?: string; sopImageId?: string; caption?: string; size?: string; align?: string }
   table?:  { headers: string[]; rows: string[][] }
   video?:  { url: string; caption?: string; size?: string; align?: string }
   beforeAfter?: SopBeforeAfterMeta
@@ -33,15 +38,67 @@ const CALLOUT_STYLES: Record<string, { bg: string; border: string; icon: React.E
   success: { bg: 'bg-emerald-50 dark:bg-emerald-950/40', border: 'border-emerald-200 dark:border-emerald-900', icon: CheckCircle2, iconColor: 'text-emerald-600 dark:text-emerald-400' },
 }
 
-export function SopBlocksRenderer({ blocks }: { blocks: SopBlock[] }) {
+/* Quel jeton sert à récupérer les images : l'espace membre et l'espace
+   admin ont deux sessions distinctes dans le même navigateur. */
+const ImageAuthContext = createContext<'admin' | 'member'>('admin')
+
+/* Un SOP peut porter vingt captures ; sans ce cache, chaque montage du
+   composant relance vingt requêtes. Les URL blob restent valides tant
+   que l'onglet vit, on ne les révoque donc pas au démontage. */
+const blobCache = new Map<string, string>()
+
+function SopStoredImage({ imageId, caption }: { imageId: string; caption?: string }) {
+  const as = useContext(ImageAuthContext)
+  const [url, setUrl] = useState<string | null>(blobCache.get(imageId) ?? null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (url) return
+    let alive = true
+    sopImageBlobUrl(imageId, as)
+      .then(u => {
+        blobCache.set(imageId, u)
+        if (alive) setUrl(u)
+      })
+      .catch(() => { if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [imageId, as, url])
+
+  if (failed) {
+    return (
+      <div className="my-3 p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+        Image indisponible
+      </div>
+    )
+  }
+  if (!url) {
+    return <div className="my-3 h-32 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" />
+  }
+  return (
+    <figure className="my-3">
+      <img src={url} alt={caption ?? ''} className="rounded-lg max-w-full" />
+      {caption && (
+        <figcaption className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center">{caption}</figcaption>
+      )}
+    </figure>
+  )
+}
+
+export function SopBlocksRenderer({ blocks, imageAuth = 'admin' }: {
+  blocks: SopBlock[]
+  /** Espace d'où les images sont demandées. */
+  imageAuth?: 'admin' | 'member'
+}) {
   const [checked, setChecked] = useState<Record<string, boolean>>({})
 
   return (
+    <ImageAuthContext.Provider value={imageAuth}>
     <div className="space-y-4 max-w-none">
       {blocks.map((block, i) => (
         <BlockOne key={i} block={block} idx={i} checked={checked} onCheck={(k) => setChecked(c => ({ ...c, [k]: !c[k] }))} />
       ))}
     </div>
+    </ImageAuthContext.Provider>
   )
 }
 
@@ -204,13 +261,19 @@ function BlockOne({ block, idx, checked, onCheck }: {
         </div>
       )
     }
-    case 'image':
-      return block.image ? (
+    case 'image': {
+      if (!block.image) return null
+      if (block.image.sopImageId) {
+        return <SopStoredImage imageId={block.image.sopImageId} caption={block.image.caption} />
+      }
+      if (!block.image.url) return null
+      return (
         <figure className="my-3">
           <img src={block.image.url} alt={block.image.caption ?? ''} className="rounded-lg max-w-full" />
           {block.image.caption && <figcaption className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center">{block.image.caption}</figcaption>}
         </figure>
-      ) : null
+      )
+    }
     case 'video': {
       const v = block.video
       if (!v?.url) return null

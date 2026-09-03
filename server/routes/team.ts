@@ -38,11 +38,33 @@ const router = Router()
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const VALID_CATEGORIES = new Set([
+/* Référentiel de base. Il n'est PAS exhaustif : un membre peut créer une
+   catégorie à la volée en écrivant un SOP (mySpaceSops.ensureCategoryWritable).
+   Filtrer sur cette seule liste effaçait la catégorie maison au premier
+   enregistrement des accès depuis /equipe — les SOPs restaient en base,
+   invisibles pour leur auteur. */
+const BASE_CATEGORIES = new Set([
   'whatsapp','quick','sales','onboarding','delivery','support','marketing',
   'faq','ai','projets','dev','media_buyer','prospection','designer',
   'commercial','community_manager',
 ])
+
+/** Catégories réellement existantes dans l'espace : référentiel + celles
+ *  déjà portées par un SOP ou par un accès accordé. */
+async function knownCategories(tenantId: string): Promise<Set<string>> {
+  const known = new Set(BASE_CATEGORIES)
+  try {
+    const rows = await tenantQuery<{ category: string }>(
+      tenantId,
+      `SELECT DISTINCT category FROM public.sops
+        UNION
+       SELECT DISTINCT sop_category AS category FROM public.team_member_sop_access`,
+      [],
+    )
+    for (const r of rows) if (r.category) known.add(r.category)
+  } catch { /* repli sur le référentiel de base */ }
+  return known
+}
 const VALID_LEVELS = new Set(['read','complete','edit'])
 
 function frontendOrigin(req: Request): string {
@@ -593,8 +615,9 @@ router.post('/invite', inviteLimiter, ...requireAdminMgr, async (req: Request, r
     }
 
     /* Insert SOP access */
+    const allowedCats = await knownCategories(tenantId)
     const validAccess = Array.isArray(sop_categories)
-      ? sop_categories.filter(a => VALID_CATEGORIES.has(a?.category) && VALID_LEVELS.has(a?.level ?? 'read'))
+      ? sop_categories.filter(a => allowedCats.has(a?.category) && VALID_LEVELS.has(a?.level ?? 'read'))
       : []
     for (const a of validAccess) {
       await tenantQuery(
@@ -798,7 +821,8 @@ router.put('/members/:id/access', ...requireAdminMgr, async (req: Request, res: 
   if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
 
   const access = Array.isArray(req.body.access) ? req.body.access : []
-  const validAccess = access.filter((a: any) => VALID_CATEGORIES.has(a?.category) && VALID_LEVELS.has(a?.level ?? 'read'))
+  const allowedCats = await knownCategories(req.user!.tenantId)
+  const validAccess = access.filter((a: any) => allowedCats.has(a?.category) && VALID_LEVELS.has(a?.level ?? 'read'))
 
   try {
     /* Wipe + reinsert is simplest and matches "replace" semantics */

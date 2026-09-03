@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express'
+import { unlink } from 'node:fs/promises'
+import path from 'node:path'
 import { tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { safeColumn } from '../middleware/security'
@@ -15,6 +17,10 @@ import {
 
 const router = Router()
 router.use(requireAuth)
+
+/* Même racine que les autres médias (server/routes/mySpaceSops.ts). */
+const UPLOAD_DIR = process.env.UPLOAD_DIR
+  || (process.env.NODE_ENV === 'production' ? '/app/uploads' : path.resolve(process.cwd(), 'uploads'))
 router.use('/:table', tableRbac)
 
 export const EXPOSED_TABLES = new Set([
@@ -429,6 +435,22 @@ router.delete('/:table/:id', async (req: Request, res: Response) => {
   try {
     await ensureTenantColumnCache()
     const scoped = tableIsTenantScoped(table)
+
+    /* Les fichiers d'images d'un SOP sont relevés AVANT le DELETE : la
+       cascade emporte les lignes sop_images et on ne saurait plus quoi
+       effacer sur le volume. Sans ça, chaque suppression d'un SOP
+       illustré laissait ses images sur le disque, définitivement. */
+    let orphanFiles: string[] = []
+    if (table === 'sops') {
+      try {
+        const imgs = await tenantQuery<{ storage_path: string }>(
+          req.user!.tenantId,
+          `SELECT storage_path FROM public.sop_images WHERE sop_id = $1`, [id],
+        )
+        orphanFiles = imgs.map(i => i.storage_path)
+      } catch (e: any) { logger.error('[crud:sop-images-scan]', e.message) }
+    }
+
     const row = await tenantQueryOne(
       req.user!.tenantId,
       `DELETE FROM ${table} WHERE id = $1${scoped ? ' AND tenant_id = $2' : ''} RETURNING id`,
@@ -438,6 +460,9 @@ router.delete('/:table/:id', async (req: Request, res: Response) => {
     if (!row) {
       noteNotFound(req, table)
       return res.status(404).json({ error: 'Non trouvé' })
+    }
+    for (const rel of orphanFiles) {
+      try { await unlink(path.join(UPLOAD_DIR, rel)) } catch { /* déjà absent */ }
     }
     res.json({ success: true })
   } catch (err: any) {

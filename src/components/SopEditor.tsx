@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -6,6 +6,7 @@ import {
   Type, ListOrdered, List as ListIcon, CheckSquare, MessageSquare, Code as CodeIcon,
   AlertCircle, Minus, Image as ImageIcon, Quote, Table as TableIcon,
   Upload, Layers, ChevronDown, ChevronUp, Video as VideoIcon, Link as LinkIcon,
+  Loader2,
 } from 'lucide-react'
 import { detectVideo } from '@/components/sop/videoEmbed'
 import type { Sop, SopBlock, SopBlockType } from '@/hooks/useSops'
@@ -30,15 +31,36 @@ interface Props {
   onSubmit?:   (payload: {
     title: string; description: string | null; category: string
     tags: string[]; read_min: number; blocks: SopBlock[]
+    difficulty?: string | null
+    status?: 'draft' | 'active' | 'archived'
+    /** Images référencées par le contenu — le serveur les rattache. */
+    image_ids?: string[]
   }) => Promise<void>
   /** « Populaire » est une mise en avant éditoriale : réservée à l'admin. */
   hidePopular?: boolean
+  /** Téléverse une image et renvoie sa référence. Absent = base64. */
+  onUploadImage?: (file: File) => Promise<{ id: string }>
+  /** Affiche difficulté et statut (brouillon / actif / archivé). */
+  showLifecycle?: boolean
+  /** Autorise la saisie d'une catégorie qui n'existe pas encore. */
+  allowCustomCategory?: boolean
 }
 
 /* Catalogue partagé — un SOP créé ici doit pouvoir tomber dans n'importe
    quelle catégorie affichée ailleurs dans l'app. Une liste recopiée avait
    fini par oublier « Commercial » et « Community Manager ». */
 const CATEGORY_OPTIONS = SOP_CATEGORIES.map(c => ({ key: c.key as string, label: c.label }))
+
+/**
+ * Téléversement des images.
+ *
+ * Sans gestionnaire (espace admin), l'image reste encodée en base64 dans
+ * le contenu — comportement historique des 142 SOPs du catalogue, qu'on
+ * ne casse pas. Avec gestionnaire (espace membre), le fichier part sur le
+ * volume et le bloc ne garde qu'une référence : une capture de 4 Mo ne
+ * pèse plus 5,3 Mo de JSON rechargés à chaque ouverture de la liste.
+ */
+const UploadContext = createContext<null | ((file: File) => Promise<{ id: string }>)>(null)
 
 interface BlockTypeDef {
   type:     SopBlockType
@@ -79,6 +101,7 @@ const MAX_IMAGE_MB = 10
 export default function SopEditor({
   open, existing, initialCategory, onClose,
   allowedCategories, onSubmit, hidePopular,
+  onUploadImage, showLifecycle, allowCustomCategory,
 }: Props) {
   const [title,       setTitle]       = useState('')
   const [description, setDescription] = useState('')
@@ -93,6 +116,11 @@ export default function SopEditor({
      clic créerait deux SOPs. */
   const [saving,      setSaving]      = useState(false)
   const [slashQuery,  setSlashQuery]  = useState('')
+  const [difficulty,  setDifficulty]  = useState<string>('')
+  const [status,      setStatus]      = useState<'draft' | 'active' | 'archived'>('active')
+  /* Saisie d'une catégorie inédite : on bascule le sélecteur en champ
+     libre plutôt que d'ouvrir une boîte de dialogue de plus. */
+  const [newCategory, setNewCategory] = useState(false)
 
   const create = useCreateSop()
   const update = useUpdateSop()
@@ -117,6 +145,8 @@ export default function SopEditor({
       setTagsInput((existing.tags ?? []).join(', '))
       setReadMin(existing.read_min ?? 2)
       setPopular(existing.popular ?? false)
+      setDifficulty((existing as any).difficulty ?? '')
+      setStatus(((existing as any).status ?? 'active') as 'draft' | 'active' | 'archived')
       setBlocks(existing.blocks ?? [])
     } else {
       const fallback = categoryOptions[0]?.key ?? 'whatsapp'
@@ -127,10 +157,13 @@ export default function SopEditor({
       setTagsInput('')
       setReadMin(2)
       setPopular(false)
+      setDifficulty('')
+      setStatus('active')
       setBlocks([{ type: 'paragraph', text: '' }])
     }
     setSlashOpen(false)
     setSlashQuery('')
+    setNewCategory(false)
   }, [open, existing, initialCategory, categoryOptions])
 
   const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
@@ -204,13 +237,22 @@ export default function SopEditor({
           return (blk.text ?? '').trim() !== ''
         })
 
+      /* Les identifiants d'images sont relus dans le contenu au moment
+         d'enregistrer : pas d'état parallèle à tenir synchronisé quand
+         l'utilisateur supprime ou remplace un bloc. */
+      const imageIds = cleanBlocks
+        .map(b => (b as any).image?.sopImageId)
+        .filter((x: unknown): x is string => typeof x === 'string')
+
       const base = {
         title:       title.trim(),
         description: description.trim() || null,
-        category,
+        category:    category.trim(),
         tags,
         read_min:    Number(readMin) || 2,
         blocks:      cleanBlocks,
+        ...(showLifecycle ? { difficulty: difficulty || null, status } : {}),
+        ...(imageIds.length ? { image_ids: imageIds } : {}),
       }
 
       /* Espace membre : l'appelant fournit son propre enregistrement
@@ -259,6 +301,7 @@ export default function SopEditor({
   if (!open) return null
 
   return createPortal(
+    <UploadContext.Provider value={onUploadImage ?? null}>
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
@@ -317,10 +360,36 @@ export default function SopEditor({
               </Field>
               <div className={cn('grid gap-3', hidePopular ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3')}>
                 <Field label="Catégorie">
-                  <select value={category} onChange={e => setCategory(e.target.value)}
-                    className="w-full h-10 rounded-lg border border-border bg-[var(--surface-input)] px-3 text-sm text-foreground focus:outline-none focus:border-[#378ADD]">
-                    {categoryOptions.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                  </select>
+                  {newCategory ? (
+                    <div className="flex gap-1">
+                      <AutocorrectInput
+                        value={category}
+                        onChange={e => setCategory(e.target.value)}
+                        placeholder="Nom de la nouvelle catégorie"
+                        maxLength={60}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { setNewCategory(false); setCategory(categoryOptions[0]?.key ?? 'whatsapp') }}
+                        className="px-2 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground"
+                        title="Revenir à la liste"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={category}
+                      onChange={e => {
+                        if (e.target.value === '__new__') { setNewCategory(true); setCategory('') }
+                        else setCategory(e.target.value)
+                      }}
+                      className="w-full h-10 rounded-lg border border-border bg-[var(--surface-input)] px-3 text-sm text-foreground focus:outline-none focus:border-[#378ADD]"
+                    >
+                      {categoryOptions.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                      {allowCustomCategory && <option value="__new__">+ Nouvelle catégorie…</option>}
+                    </select>
+                  )}
                 </Field>
                 <Field label="Temps de lecture (min)">
                   <Input type="number" min={1} max={60} value={readMin} onChange={e => setReadMin(Number(e.target.value))} />
@@ -332,6 +401,27 @@ export default function SopEditor({
                       <span className="text-sm text-foreground">Marquer comme populaire</span>
                     </label>
                   </Field>
+                )}
+                {showLifecycle && (
+                  <>
+                    <Field label="Niveau de difficulté">
+                      <select value={difficulty} onChange={e => setDifficulty(e.target.value)}
+                        className="w-full h-10 rounded-lg border border-border bg-[var(--surface-input)] px-3 text-sm text-foreground focus:outline-none focus:border-[#378ADD]">
+                        <option value="">Non précisé</option>
+                        <option value="facile">Facile</option>
+                        <option value="moyen">Moyen</option>
+                        <option value="difficile">Difficile</option>
+                      </select>
+                    </Field>
+                    <Field label="Statut">
+                      <select value={status} onChange={e => setStatus(e.target.value as typeof status)}
+                        className="w-full h-10 rounded-lg border border-border bg-[var(--surface-input)] px-3 text-sm text-foreground focus:outline-none focus:border-[#378ADD]">
+                        <option value="draft">Brouillon — visible des rédacteurs</option>
+                        <option value="active">Actif — visible de tous</option>
+                        <option value="archived">Archivé — retiré des listes</option>
+                      </select>
+                    </Field>
+                  </>
                 )}
               </div>
               <Field label="Tags (séparés par des virgules)">
@@ -436,7 +526,8 @@ export default function SopEditor({
           />
         )}
       </motion.div>
-    </AnimatePresence>,
+    </AnimatePresence>
+    </UploadContext.Provider>,
     document.body,
   )
 }
@@ -577,50 +668,102 @@ function BlockEditor({
   )
 }
 
-/* ─── Image block editor (upload base64) ──────────────────────── */
+/* ─── Image block editor — stockage disque ou base64 ───────────── */
 function ImageBlockEditor({ block, onUpdate }: { block: SopBlock; onUpdate: (patch: Partial<SopBlock>) => void }) {
-  const fileRef = useRef<HTMLInputElement>(null)
-  const meta = block.image ?? { url: '' }
+  const fileRef  = useRef<HTMLInputElement>(null)
+  const upload   = useContext(UploadContext)
+  const meta     = block.image ?? { url: '' }
+  const [busy, setBusy]     = useState(false)
+  const [preview, setPreview] = useState<string | null>(null)
 
-  const onFile = (file: File | null | undefined) => {
+  /* Aperçu immédiat : l'utilisateur voit son image pendant l'envoi,
+     plutôt qu'un carré vide le temps de l'aller-retour réseau. */
+  const stored = !!(meta as any).sopImageId
+  const shown  = preview ?? (stored ? null : meta.url)
+
+  const onFile = async (file: File | null | undefined) => {
     if (!file) return
     if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
       toast.error(`Image trop volumineuse (max ${MAX_IMAGE_MB} Mo)`)
       return
     }
-    if (!/^image\/(png|jpe?g|gif|webp|svg\+xml)$/.test(file.type)) {
-      toast.error('Format non supporté (JPG, PNG, GIF, WebP, SVG)')
+    const accepted = upload
+      ? /^image\/(png|jpe?g|webp)$/
+      : /^image\/(png|jpe?g|gif|webp|svg\+xml)$/
+    if (!accepted.test(file.type)) {
+      toast.error(upload
+        ? 'Format non supporté (JPG, PNG, WebP)'
+        : 'Format non supporté (JPG, PNG, GIF, WebP, SVG)')
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = String(reader.result || '')
-      onUpdate({ image: { ...meta, url } })
+
+    if (upload) {
+      const localUrl = URL.createObjectURL(file)
+      setPreview(localUrl)
+      setBusy(true)
+      try {
+        const saved = await upload(file)
+        onUpdate({ image: { ...meta, url: undefined, sopImageId: saved.id } as any })
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "Échec de l'envoi de l'image")
+        setPreview(null)
+        URL.revokeObjectURL(localUrl)
+      } finally {
+        setBusy(false)
+      }
+      return
     }
+
+    const reader = new FileReader()
+    reader.onload = () => onUpdate({ image: { ...meta, url: String(reader.result || '') } })
     reader.readAsDataURL(file)
   }
 
   return (
     <div className="space-y-2">
-      {meta.url ? (
+      {shown || stored ? (
         <div className={cn(
-          'mx-auto',
+          'mx-auto relative',
           meta.size === 'small' ? 'max-w-xs' : meta.size === 'medium' ? 'max-w-sm' : meta.size === 'large' ? 'max-w-md' : 'w-full',
           meta.align === 'left' ? 'mr-auto ml-0' : meta.align === 'right' ? 'ml-auto mr-0' : 'mx-auto',
         )}>
-          <img src={meta.url} alt={meta.caption || ''} className="w-full rounded-lg border border-border" />
+          {shown ? (
+            <img src={shown} alt={meta.caption || ''} className="w-full rounded-lg border border-border" />
+          ) : (
+            <div className="w-full rounded-lg border border-border bg-muted/40 p-4 text-center text-xs text-muted-foreground">
+              🖼️ Image enregistrée — visible à la lecture du SOP
+            </div>
+          )}
+          {busy && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg">
+              <Loader2 className="w-5 h-5 animate-spin text-white" />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="mt-1 text-[11px] text-blue-600 hover:underline"
+          >
+            Remplacer l'image
+          </button>
         </div>
       ) : (
-        <button onClick={() => fileRef.current?.click()}
+        <button onClick={() => fileRef.current?.click()} disabled={busy}
           className="w-full flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-all">
-          <Upload className="w-6 h-6 text-muted-foreground" />
-          <p className="text-sm font-semibold text-foreground">Cliquez pour téléverser une image</p>
-          <p className="text-xs text-muted-foreground">JPG, PNG, GIF, WebP, SVG · max {MAX_IMAGE_MB} Mo</p>
+          {busy ? <Loader2 className="w-6 h-6 animate-spin text-blue-500" /> : <Upload className="w-6 h-6 text-muted-foreground" />}
+          <p className="text-sm font-semibold text-foreground">
+            {busy ? 'Envoi en cours…' : 'Cliquez pour téléverser une image'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {upload ? 'JPG, PNG, WebP' : 'JPG, PNG, GIF, WebP, SVG'} · max {MAX_IMAGE_MB} Mo
+          </p>
         </button>
       )}
-      <input type="file" ref={fileRef} hidden accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" onChange={e => onFile(e.target.files?.[0])} />
+      <input type="file" ref={fileRef} hidden
+        accept={upload ? 'image/png,image/jpeg,image/webp' : 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml'}
+        onChange={e => { void onFile(e.target.files?.[0]); e.target.value = '' }} />
 
-      {meta.url && (
+      {(shown || stored) && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             <select value={meta.size ?? 'medium'} onChange={e => onUpdate({ image: { ...meta, size: e.target.value as any } })}

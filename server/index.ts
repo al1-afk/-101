@@ -33,6 +33,8 @@ import notificationsRoutes from './routes/notifications'
 import timeTrackingRoutes from './routes/timeTracking'
 import mySpaceRoutes   from './routes/mySpace'
 import projetChatRoutes from './routes/projetChat'
+import mySpaceSopsRoutes, { startSopImageCleanup } from './routes/mySpaceSops'
+import sopImagesRoutes from './routes/sopImages'
 import sendDocumentRoutes from './routes/sendDocument'
 import activityRoutes  from './routes/activity'
 import outboundRoutes  from './routes/outbound'
@@ -198,6 +200,8 @@ app.use('/api/google-contacts', googleContactsRoutes)
 app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/public',    emailTrackingPublicRoutes)
 app.use('/api/team',      teamRoutes)
+app.use('/api/sop-images', sopImagesRoutes)
+app.use('/api/my-space/sops', mySpaceSopsRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
 app.use('/api/projet-chat', projetChatRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
@@ -260,6 +264,7 @@ app.listen(PORT, () => {
   console.log(`\n NEXT GITAL API  →  http://localhost:${PORT}`)
   /* Démarre le scheduler de rappels d'expiration (domaines/hébergements) */
   startExpiryReminderScheduler(pool)
+  startSopImageCleanup()
   /* Démarre l'autopilot Outbound (check chaque heure les tenants dont run_hour = maintenant) */
   startAutopilotScheduler(pool)
   /* Sync Google Contacts (Caller ID) : pousse les prospects vers les contacts
