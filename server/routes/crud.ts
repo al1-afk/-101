@@ -87,6 +87,9 @@ const READONLY_COLUMNS: Record<string, Set<string>> = {
   /* « Qui a ajouté / modifié » n'a de valeur que si personne ne peut
      l'écrire soi-même : le serveur seul les pose (stampAuthorship). */
   sops:     new Set(['created_by_name', 'updated_by_name']),
+  /* Même raison pour l'accusé de consultation d'une tâche : il est posé
+     par /api/my-space quand la personne assignée ouvre la tâche. */
+  team_member_tasks: new Set(['viewed_at', 'viewed_by_name']),
 }
 
 /**

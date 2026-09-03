@@ -2,7 +2,7 @@
  * /my-space/projets/:id — fiche complète du projet pour le membre.
  * Infos client, identifiants (masqués + copy), liens utiles, ses tâches.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link } from 'react-router-dom'
 import {
@@ -75,6 +75,15 @@ export default function MyProjetDetail() {
   })
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+
+  /* Accusé de consultation : ouvrir la fiche vaut « vu », comme le ✓✓ de
+     WhatsApp. Le responsable distingue ainsi une tâche jamais ouverte
+     d'une tâche lue mais pas encore commencée. Silencieux en cas
+     d'échec : un accusé perdu ne doit pas gêner la lecture. */
+  useEffect(() => {
+    if (!openTaskId) return
+    mySpaceApi.markTaskViewed(openTaskId).catch(() => {})
+  }, [openTaskId])
 
   const updateTask = useMutation({
     mutationFn: ({ id, status, elapsed_seconds }: {

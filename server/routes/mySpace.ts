@@ -373,6 +373,50 @@ async function notifyAdminsOfNewTask(
   }
 }
 
+/**
+ * POST /api/my-space/tasks/:id/viewed — la personne a ouvert la tâche.
+ *
+ * Écrit uniquement à la première consultation (COALESCE) : c'est le
+ * moment « ✓✓ », pas un compteur de passages. Idempotent, donc le client
+ * peut l'appeler à chaque ouverture sans précaution.
+ *
+ * La tâche doit être la sienne — directement ou via sa fiche stagiaire.
+ * Sans ce filtre, un membre pourrait marquer comme lue la tâche d'un
+ * collègue et fausser ce que voit le responsable.
+ */
+router.post('/tasks/:id/viewed', async (req: Request, res: Response) => {
+  const m = await resolveMember(req)
+  if (!m) return res.status(403).json({ error: 'Compte inactif' })
+
+  const id = String(req.params.id)
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'ID invalide' })
+
+  try {
+    const name = await tenantQueryOne<{ prenom: string | null; nom: string | null; email: string }>(
+      m.tenantId, `SELECT prenom, nom, email FROM public.team_members WHERE id = $1`, [m.id],
+    )
+    const who = [name?.prenom, name?.nom].filter(Boolean).join(' ').trim() || name?.email || 'Membre'
+
+    const row = await tenantQueryOne<{ viewed_at: string }>(
+      m.tenantId,
+      `UPDATE public.team_member_tasks
+          SET viewed_at      = COALESCE(viewed_at, NOW()),
+              viewed_by_name = COALESCE(viewed_by_name, $3)
+        WHERE id = $1
+          AND (team_member_id = $2
+               OR assigned_stagiaire_id IN (
+                    SELECT id FROM public.stagiaires WHERE member_id = $2))
+        RETURNING viewed_at, viewed_by_name`,
+      [id, m.id, who],
+    )
+    if (!row) return res.status(404).json({ error: 'Tâche introuvable' })
+    res.json(row)
+  } catch (err: any) {
+    logger.error('[my-space:task-viewed]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
 router.patch('/tasks/:id', async (req: Request, res: Response) => {
   const m = await resolveMember(req)
   if (!m) return res.status(403).json({ error: 'Compte inactif' })
@@ -400,9 +444,20 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    const sets: string[] = ['updated_at = NOW()']
-    const params: any[] = []
-    let i = 1
+    /* Agir sur une tâche prouve qu'on l'a vue : démarrer le chrono ou la
+       terminer vaut consultation, même sans avoir ouvert la fiche.
+       COALESCE garde la première date. */
+    const sets: string[] = [
+      'updated_at = NOW()',
+      'viewed_at = COALESCE(viewed_at, NOW())',
+      /* Le nom est résolu en SQL : pas de requête supplémentaire juste
+         pour estampiller un accusé de lecture. */
+      `viewed_by_name = COALESCE(viewed_by_name, (
+         SELECT COALESCE(NULLIF(TRIM(COALESCE(prenom, '') || ' ' || COALESCE(nom, '')), ''), email)
+           FROM public.team_members WHERE id = $1))`,
+    ]
+    const params: any[] = [m.id]
+    let i = 2
     if (hasStatus) {
       sets.push(`status = $${i++}`)
       params.push(status)

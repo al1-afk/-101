@@ -45,6 +45,15 @@ export default function MyTasks() {
   const { member } = useMember()
   const [filter, setFilter] = useState<'all' | 'open' | 'done'>('open')
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+
+  /* Accusé de consultation : ouvrir la fiche vaut « vu », comme le ✓✓ de
+     WhatsApp. Le responsable distingue ainsi une tâche jamais ouverte
+     d'une tâche lue mais pas encore commencée. Silencieux en cas
+     d'échec : un accusé perdu ne doit pas gêner la lecture. */
+  useEffect(() => {
+    if (!openTaskId) return
+    mySpaceApi.markTaskViewed(openTaskId).catch(() => {})
+  }, [openTaskId])
   const { data: tasks = [], isLoading } = useQuery<any[]>({
     queryKey: ['my-space', 'tasks'],
     queryFn:  () => mySpaceApi.tasks(),

@@ -8,7 +8,7 @@ import {
   Crown, User as UserIcon, LayoutGrid, List as ListIcon,
   Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
   MessageSquare, Settings, Globe, Server, CalendarCheck, UserPlus,
-  Eye,
+  Eye, CheckCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -1717,6 +1717,47 @@ function TemplatePickerDialog({
   )
 }
 
+/**
+ * « L'employé a-t-il vu cette tâche ? » — le ✓✓ de WhatsApp appliqué aux
+ * tâches. viewed_at est posé par le serveur à la première ouverture de
+ * la fiche par la personne assignée, ou dès qu'elle agit dessus
+ * (démarrage du chrono, changement de statut).
+ *
+ * Rien n'est affiché sur une tâche sans destinataire : il n'y a personne
+ * pour la lire, un « Non lu » y serait un reproche adressé à personne.
+ */
+function TaskViewedBadge({ task, hasAssignee }: {
+  task: TeamMemberTask
+  hasAssignee: boolean
+}) {
+  if (!hasAssignee) return null
+
+  if (!task.viewed_at) {
+    return (
+      <span
+        className="flex items-center gap-1 text-muted-foreground/70"
+        title="La personne assignée n'a pas encore ouvert cette tâche"
+      >
+        <Check className="w-3 h-3" /> Non lu
+      </span>
+    )
+  }
+
+  const d = new Date(task.viewed_at)
+  const quand = d.toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+  return (
+    <span
+      className="flex items-center gap-1 text-blue-500 dark:text-blue-400 font-medium"
+      title={`Vu par ${task.viewed_by_name ?? 'la personne assignée'} le ${quand}`}
+    >
+      <CheckCheck className="w-3 h-3" /> Vu
+    </span>
+  )
+}
+
 function TaskRow({
   task, members, pickable, stagiaires, pickableStagiaires, isRequest, onChange, onRemove, onOpen,
 }: {
@@ -1888,6 +1929,7 @@ function TaskRow({
               ⏱ {formatHMS(totalSeconds)}{isRunning && ' …'}
             </span>
           )}
+          <TaskViewedBadge task={task} hasAssignee={!!task.team_member_id || !!task.assigned_stagiaire_id} />
         </div>
       </div>
 

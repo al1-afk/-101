@@ -722,6 +722,11 @@ export const mySpaceApi = {
     memberApi.patch<{ success: true }>(`/api/my-space/tasks/${id}`, { elapsed_seconds, ...(status && { status }) }),
   updateTaskDescription: (id: string, description: string) =>
     memberApi.patch<{ success: true }>(`/api/my-space/tasks/${id}`, { description }),
+  /* Accusé de consultation — idempotent, seule la première ouverture
+     est enregistrée. Appelable à chaque ouverture sans précaution. */
+  markTaskViewed: (id: string) =>
+    memberApi.post<{ viewed_at: string; viewed_by_name: string }>(
+      `/api/my-space/tasks/${id}/viewed`, {}),
 
   projets:    () => memberApi.get<any[]>('/api/my-space/projets'),
   projet:     (id: string) => memberApi.get<any>(`/api/my-space/projets/${id}`),

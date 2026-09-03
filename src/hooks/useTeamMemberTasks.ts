@@ -40,6 +40,11 @@ export interface TeamMemberTask {
   /** Si défini : la tâche est récurrente. À la complétion, une nouvelle
       occurrence est créée automatiquement avec la due_date calculée. */
   recurrence:        TaskRecurrence | null
+  /** Première ouverture de la tâche par la personne assignée — posé par
+   *  le serveur. null = jamais consultée. */
+  viewed_at:         string | null
+  /** Nom de la personne qui l'a consultée (instantané). */
+  viewed_by_name:    string | null
   created_at:        string
   updated_at:        string
   completed_at:      string | null
