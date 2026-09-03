@@ -16,6 +16,8 @@ import bcrypt from 'bcryptjs'
 import { query, queryOne, tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { logger } from '../lib/logger'
+import { sendPushToUser } from '../lib/webPush'
+import { notifyMemberTaskCreated } from '../lib/notificationEmails'
 
 const router = Router()
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -231,6 +233,146 @@ router.get('/tasks', async (req: Request, res: Response) => {
 })
 
 /* PATCH /api/my-space/tasks/:id — member can update status + elapsed_seconds */
+/**
+ * POST /api/my-space/tasks — un membre ajoute une tâche à SA liste.
+ *
+ * La tâche est forcément la sienne : team_member_id vient de la session,
+ * jamais du corps de la requête. Un membre ne peut donc pas se servir de
+ * cet endpoint pour assigner du travail à quelqu'un d'autre.
+ *
+ * Le projet, s'il est fourni, doit être un projet sur lequel la personne
+ * travaille — sinon elle découvrirait l'existence de projets qui ne la
+ * concernent pas en tâtonnant sur des identifiants.
+ */
+router.post('/tasks', async (req: Request, res: Response) => {
+  const m = await resolveMember(req)
+  if (!m) return res.status(403).json({ error: 'Compte inactif' })
+
+  const title = String(req.body?.title ?? '').trim()
+  if (title.length < 2)   return res.status(400).json({ error: 'Titre trop court' })
+  if (title.length > 200) return res.status(400).json({ error: 'Titre trop long (200 caractères max)' })
+
+  const description = req.body?.description == null ? null : String(req.body.description).trim().slice(0, 4000)
+
+  const priority = String(req.body?.priority ?? 'normal')
+  if (!['low', 'normal', 'high', 'urgent'].includes(priority)) {
+    return res.status(400).json({ error: 'Priorité invalide' })
+  }
+
+  /* Date seule (YYYY-MM-DD) : la colonne est de type date. */
+  const rawDue = req.body?.due_date
+  const dueDate = typeof rawDue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDue) ? rawDue : null
+
+  const projectId = typeof req.body?.project_id === 'string' && UUID_RE.test(req.body.project_id)
+    ? req.body.project_id
+    : null
+
+  try {
+    if (projectId) {
+      const allowed = await tenantQueryOne(
+        m.tenantId,
+        `SELECT 1
+           WHERE EXISTS (SELECT 1 FROM public.projet_assignees
+                          WHERE projet_id = $2
+                            AND (team_member_id = $1
+                                 OR stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
+              OR EXISTS (SELECT 1 FROM public.team_member_tasks
+                          WHERE project_id = $2
+                            AND (team_member_id = $1
+                                 OR assigned_stagiaire_id IN (SELECT id FROM public.stagiaires WHERE member_id = $1)))
+           LIMIT 1`,
+        [m.id, projectId],
+      )
+      if (!allowed) return res.status(403).json({ error: "Ce projet ne vous est pas assigné" })
+    }
+
+    const task = await tenantQueryOne<{ id: string }>(
+      m.tenantId,
+      `INSERT INTO public.team_member_tasks
+         (tenant_id, team_member_id, title, description, priority, status, due_date, project_id)
+       VALUES ($1, $2, $3, $4, $5, 'todo', $6, $7)
+       RETURNING id, title, description, priority, status, due_date, project_id, created_at`,
+      [m.tenantId, m.id, title, description, priority, dueDate, projectId],
+    )
+
+    res.status(201).json(task)
+
+    /* Après la réponse : prévenir les responsables. */
+    void notifyAdminsOfNewTask(m.tenantId, m.id, {
+      id: (task as any).id, title, priority, dueDate, projectId,
+    })
+  } catch (err: any) {
+    logger.error('[my-space:task-create]', err.message)
+    if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/**
+ * Prévient les comptes admin / manager de l'espace qu'un membre a créé
+ * une tâche : cloche, notification navigateur, et e-mail si la catégorie
+ * `tache_creee` est restée active dans les réglages (migration 096).
+ */
+async function notifyAdminsOfNewTask(
+  tenantId: string,
+  memberId: string,
+  task: { id: string; title: string; priority: string; dueDate: string | null; projectId: string | null },
+) {
+  try {
+    const me = await tenantQueryOne<{ prenom: string | null; nom: string | null; email: string }>(
+      tenantId, `SELECT prenom, nom, email FROM public.team_members WHERE id = $1`, [memberId],
+    )
+    const auteur = [me?.prenom, me?.nom].filter(Boolean).join(' ').trim() || me?.email || 'Un membre'
+
+    const projet = task.projectId
+      ? await tenantQueryOne<{ nom: string }>(tenantId, `SELECT nom FROM public.projets WHERE id = $1`, [task.projectId])
+      : null
+
+    const admins = await tenantQuery<{ user_id: string }>(
+      tenantId,
+      `SELECT user_id FROM public.tenant_users
+        WHERE tenant_id = $1 AND status = 'active' AND role IN ('admin', 'manager')`,
+      [tenantId],
+    )
+
+    const detail = [
+      projet?.nom ? `Projet : ${projet.nom}` : null,
+      task.dueDate ? `Échéance : ${task.dueDate}` : null,
+    ].filter(Boolean).join(' · ')
+
+    for (const a of admins) {
+      await tenantQuery(
+        tenantId,
+        `INSERT INTO public.notifications
+           (tenant_id, user_id, kind, severity, title, message, link, icon, data)
+         VALUES ($1, $2, 'member_task_created', 'info', $3, $4, '/taches', '✅', $5::jsonb)`,
+        [
+          tenantId, a.user_id,
+          `${auteur} a ajouté une tâche`,
+          detail ? `${task.title} — ${detail}` : task.title,
+          JSON.stringify({ task_id: task.id, member_id: memberId }),
+        ],
+      ).catch(e => logger.error('[my-space:task-notif-row]', e.message))
+
+      sendPushToUser(tenantId, a.user_id, {
+        title: `✅ ${auteur} a ajouté une tâche`,
+        body:  task.title,
+        url:   '/taches',
+        tag:   'member-task-created',
+      }).catch(() => {})
+    }
+
+    void notifyMemberTaskCreated(tenantId, {
+      titre:     task.title,
+      membre:    auteur,
+      priorite:  task.priority,
+      echeance:  task.dueDate,
+      projetNom: projet?.nom ?? null,
+    }).catch(() => {})
+  } catch (e: any) {
+    logger.error('[my-space:task-notify]', e.message)
+  }
+}
+
 router.patch('/tasks/:id', async (req: Request, res: Response) => {
   const m = await resolveMember(req)
   if (!m) return res.status(403).json({ error: 'Compte inactif' })

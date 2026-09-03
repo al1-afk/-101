@@ -10,6 +10,7 @@ import { motion } from 'framer-motion'
 import {
   CheckSquare, Square, Circle, Loader2, AlertTriangle, Calendar, Inbox,
   Briefcase, Play, Pause, Square as SquareIcon, Check, Sparkles, Clock, Timer,
+  Plus, X,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { mySpaceApi } from '@/lib/api'
@@ -48,6 +49,40 @@ export default function MyTasks() {
     queryKey: ['my-space', 'tasks'],
     queryFn:  () => mySpaceApi.tasks(),
     staleTime: 30_000,
+  })
+
+  /* Formulaire d'ajout — replié par défaut : la page sert d'abord à
+     travailler sur les tâches existantes. */
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({
+    title: '', priority: 'normal' as 'low' | 'normal' | 'high' | 'urgent',
+    due_date: '', project_id: '',
+  })
+
+  /* Les projets sur lesquels la personne travaille — pour rattacher la
+     tâche. Le serveur revérifie que le projet lui est bien assigné. */
+  const { data: myProjets = [] } = useQuery<any[]>({
+    queryKey: ['my-space', 'projets'],
+    queryFn:  () => mySpaceApi.projets(),
+    staleTime: 5 * 60_000,
+  })
+
+  const createTask = useMutation({
+    mutationFn: () => mySpaceApi.createTask({
+      title:      form.title.trim(),
+      priority:   form.priority,
+      due_date:   form.due_date || null,
+      project_id: form.project_id || null,
+    }),
+    onSuccess: () => {
+      setForm({ title: '', priority: 'normal', due_date: '', project_id: '' })
+      setAdding(false)
+      qc.invalidateQueries({ queryKey: ['my-space', 'tasks'] })
+      qc.invalidateQueries({ queryKey: ['my-space', 'dashboard'] })
+      toast.success('Tâche ajoutée — ton responsable en est informé')
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : 'Erreur'),
   })
 
   const update = useMutation({
@@ -146,6 +181,11 @@ export default function MyTasks() {
             Clique <strong>▶ Commencer</strong> pour démarrer le chrono, <strong>⏹ Terminer</strong> pour envoyer au manager.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        <Button size="sm" onClick={() => setAdding(v => !v)}>
+          {adding ? <X className="w-4 h-4 mr-1.5" /> : <Plus className="w-4 h-4 mr-1.5" />}
+          {adding ? 'Annuler' : 'Nouvelle tâche'}
+        </Button>
         <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
           {(['open','done','all'] as const).map(k => (
             <button
@@ -162,7 +202,65 @@ export default function MyTasks() {
             </button>
           ))}
         </div>
+        </div>
       </div>
+
+      {/* ── Ajouter une tâche à ma liste ── */}
+      {adding && (
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+          <input
+            autoFocus
+            value={form.title}
+            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && form.title.trim() && !createTask.isPending) createTask.mutate()
+            }}
+            placeholder="Que dois-tu faire ?"
+            maxLength={200}
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <select
+              value={form.priority}
+              onChange={e => setForm(f => ({ ...f, priority: e.target.value as typeof f.priority }))}
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent px-3 py-2 text-sm"
+            >
+              <option value="low">Priorité basse</option>
+              <option value="normal">Priorité normale</option>
+              <option value="high">Priorité haute</option>
+              <option value="urgent">Urgent</option>
+            </select>
+            <input
+              type="date"
+              value={form.due_date}
+              onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent px-3 py-2 text-sm"
+            />
+            <select
+              value={form.project_id}
+              onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent px-3 py-2 text-sm"
+            >
+              <option value="">Sans projet</option>
+              {myProjets.map(p => (
+                <option key={p.id} value={p.id}>{p.nom}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => createTask.mutate()}
+              disabled={!form.title.trim() || createTask.isPending}
+            >
+              {createTask.isPending
+                ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                : <Check className="w-4 h-4 mr-1.5" />}
+              Ajouter
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* ── Bandeau timer actif (si en cours) ── */}
       {active && (() => {
