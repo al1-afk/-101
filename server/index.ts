@@ -165,7 +165,11 @@ app.use(cors((req, cb) => {
     origin: allowed,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    /* X-Filename : nom d'origine d'une pièce jointe de discussion, envoyé
+       avec le fichier brut (server/routes/projetChat.ts). Sans lui dans
+       cette liste, le navigateur refuse la requête au contrôle préalable
+       et l'envoi échoue avec un « Failed to fetch » sans réponse HTTP. */
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Filename'],
   })
 }))
 
