@@ -5,13 +5,17 @@
 import { NavLink, Outlet, Navigate, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, BookOpen, CheckSquare, User, LogOut, Loader2, Menu, X, Briefcase, Bell, MessageSquare,
+  LayoutDashboard, BookOpen, CheckSquare, User, LogOut, Loader2, Menu, X, Briefcase, Bell,
+  MessageSquare, MessageCircle,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMember } from '@/hooks/useMember'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import NotificationBell from '@/components/NotificationBell'
 import { useTaskNotifier } from '@/hooks/useTaskNotifier'
+import { useMessagesRealtime, useMessagesUnread } from '@/hooks/useMessaging'
+import { getPresenceSessionKey } from '@/hooks/usePresenceHeartbeat'
+import { memberApi } from '@/lib/api'
 import { readNotifications, subscribe } from '@/lib/notificationStore'
 import { useSyncExternalStore } from 'react'
 import { cn } from '@/lib/utils'
@@ -20,11 +24,70 @@ const NAV = [
   { to: '/my-space',              label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/my-space/projets',      label: 'Mes projets',      icon: Briefcase },
   { to: '/my-space/tasks',        label: 'Mes tâches',       icon: CheckSquare },
-  { to: '/my-space/messages',     label: 'Messages',         icon: MessageSquare },
+  /* Deux entrées voisines mais sans rapport : « Messages » = échanges privés de
+     personne à personne, « Messages projets » = discussions rattachées à un
+     projet, visibles de toute l'équipe assignée. Le libellé les sépare. */
+  { to: '/my-space/messagerie',   label: 'Messages',         icon: MessageCircle },
+  { to: '/my-space/messages',     label: 'Messages projets', icon: MessageSquare },
   { to: '/my-space/notifications', label: 'Notifications',   icon: Bell },
   { to: '/my-space/sops',         label: 'Mes SOPs',         icon: BookOpen },
   { to: '/my-space/profile',      label: 'Mon profil',       icon: User },
 ]
+
+const PRESENCE_HEARTBEAT_MS = 60_000
+
+/**
+ * Présence de l'employé, battue avec le jeton MEMBRE.
+ *
+ * `usePresenceHeartbeat` n'est pas réutilisable tel quel ici : il passe par
+ * `securityApi.heartbeat`, qui s'authentifie sur le créneau ADMIN du stockage.
+ * Depuis /my-space ce créneau est vide ; le 401 déclencherait le rafraîchissement
+ * administrateur, puis la purge de session et une redirection vers /auth — un
+ * employé serait éjecté de son espace toutes les minutes. On refait donc le
+ * battement avec `memberApi`, en réutilisant la clé d'onglet du hook d'origine.
+ *
+ * Sans ce battement, aucun employé n'apparaîtrait JAMAIS « en ligne » côté
+ * administration : seul l'espace admin émet la présence aujourd'hui, et la
+ * pastille de présence de la messagerie resterait grise pour toute l'équipe.
+ */
+function useMemberPresenceHeartbeat(enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled) return
+    const sessionKey = getPresenceSessionKey()
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    /* Un battement raté n'a aucune conséquence fonctionnelle : la présence est
+       une couche d'observation, elle ne doit jamais remonter d'erreur. */
+    const beat = () => {
+      void memberApi.post('/api/security/heartbeat', { sessionKey }).catch(() => {})
+    }
+    const start = () => {
+      if (timer) return
+      beat()
+      timer = setInterval(beat, PRESENCE_HEARTBEAT_MS)
+    }
+    const stop = () => {
+      if (!timer) return
+      clearInterval(timer)
+      timer = null
+    }
+
+    /* Onglet en arrière-plan : on cesse d'écrire. Le serveur bascule la session
+       en « inactif » après 2 min, puis hors ligne après 15 min. */
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') start()
+      else stop()
+    }
+
+    if (document.visibilityState === 'visible') start()
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      stop()
+    }
+  }, [enabled])
+}
 
 export default function MySpaceLayout() {
   const { loading, isAuth, member, signOut } = useMember()
@@ -35,6 +98,12 @@ export default function MySpaceLayout() {
   /* Count unread notifications in store (live) */
   const notifJson = useSyncExternalStore(subscribe, () => JSON.stringify(readNotifications('member')))
   const notifUnread = (JSON.parse(notifJson) as any[]).filter(n => !n.is_read).length
+  /* Messagerie privée : compteur de la pastille + flux temps réel. Le flux est
+     monté ici et nulle part ailleurs, pour que le toast et le son suivent
+     l'employé sur toutes les pages de son espace. */
+  const dmUnread = useMessagesUnread('member')
+  useMessagesRealtime('member', '/my-space/messagerie')
+  useMemberPresenceHeartbeat(isAuth)
 
   if (loading) {
     return (
@@ -107,7 +176,11 @@ export default function MySpaceLayout() {
             const Icon = item.icon
             const isTasksLink = item.to === '/my-space/tasks'
             const isNotifLink = item.to === '/my-space/notifications'
-            const badge = isTasksLink ? unreadCount : isNotifLink ? notifUnread : 0
+            const isDmLink    = item.to === '/my-space/messagerie'
+            const badge = isTasksLink ? unreadCount
+              : isNotifLink ? notifUnread
+              : isDmLink ? dmUnread
+              : 0
             return (
               <NavLink
                 key={item.to}

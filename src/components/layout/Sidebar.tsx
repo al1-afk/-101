@@ -14,10 +14,12 @@ import {
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
   Plus, Star, Command, Search, GripVertical,
   Radar, Route, LineChart, MessagesSquare, LayoutGrid, Bell, Layers, Hourglass,
+  MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
 import { useVehicleAlerts } from '@/hooks/useVehicles'
+import { useMessagesUnread } from '@/hooks/useMessaging'
 import { useAuth } from '@/hooks/useAuth'
 import { openGlobalSearch } from '@/components/GlobalSearch'
 
@@ -30,7 +32,10 @@ interface NavItem {
   adminOnly?: boolean
 }
 
-/** All module keys known to the sidebar — used by the access-management UI */
+/** All module keys known to the sidebar — used by the access-management UI.
+ *  La messagerie n'y figure PAS : c'est une capacité de base (voir
+ *  CORE_MODULES), et l'écran de gestion des accès ne doit pas promettre un
+ *  réglage qui n'a aucun effet. */
 export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'dashboard',         label: 'Tableau de bord' },
   { key: 'prospects',         label: 'CRM / Prospects' },
@@ -90,6 +95,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     title: 'Principal',
     items: [
       { label: 'Tableau de bord', href: '/',          icon: LayoutDashboard, module: 'dashboard' },
+      { label: 'Messages',        href: '/messages',  icon: MessageCircle, badge: 'Messages', module: 'messages' },
       { label: 'Planificateur',   href: '/planificateur', icon: Target, badge: 'New', module: 'planificateur' },
       { label: '7aty — Mon temps', href: '/7aty',     icon: Hourglass, badge: 'New', module: '7aty' },
       { label: 'Ma Vision',       href: '/vision',    icon: Crown, module: 'vision', adminOnly: true },
@@ -225,13 +231,21 @@ interface SidebarProps {
 
 /* ── Badge chip ── */
 function BadgeChip({ kind, count, active }: { kind: string; count?: number; active: boolean }) {
-  const label = kind === 'Stock' || kind === 'Vehicles' ? String(count ?? 0) : kind
+  const numeric = kind === 'Stock' || kind === 'Vehicles' || kind === 'Messages'
+  /* Messages : au-delà de neuf, le compte exact n'apprend rien et déforme la
+     puce (« 137 » élargit la ligne). Les alertes stock/véhicules restent
+     exactes, elles se comptent en unités. */
+  const label =
+    !numeric                                    ? kind :
+    kind === 'Messages' && (count ?? 0) > 9     ? '9+' :
+                                                  String(count ?? 0)
   const tone =
     kind === 'IA'       ? 'text-violet-600 dark:text-violet-300 bg-violet-500/10 border-violet-500/20' :
     kind === 'MRR'      ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/20' :
     kind === 'Auto'     ? 'text-amber-600 dark:text-amber-300 bg-amber-500/10 border-amber-500/20' :
     kind === 'Soon'     ? 'text-pink-600 dark:text-pink-300 bg-pink-500/10 border-pink-500/20' :
     kind === 'Stock'    ? 'text-red-600 dark:text-red-300 bg-red-500/10 border-red-500/20' :
+    kind === 'Messages' ? 'text-red-600 dark:text-red-300 bg-red-500/10 border-red-500/20' :
     kind === 'Vehicles' ? 'text-orange-600 dark:text-orange-300 bg-orange-500/10 border-orange-500/20' :
                           'text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 border-cyan-500/20'
   return (
@@ -256,6 +270,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const stockAlertCount = stockAlerts.length
   const { data: vehicleAlerts } = useVehicleAlerts()
   const vehicleAlertCount = (vehicleAlerts?.documents.length ?? 0) + (vehicleAlerts?.maintenance.length ?? 0)
+  /* Messages privés non lus. Le compteur est rafraîchi par le flux temps réel
+     monté dans AppLayout : ici on ne fait que lire le cache react-query. */
+  const messagesUnread = useMessagesUnread('admin')
 
   /* Track recents on route change */
   useEffect(() => {
@@ -281,8 +298,16 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     'outbound', 'outbound-prospects', 'outbound-pipeline', 'outbound-followups',
   ])
 
+  /* Capacités de BASE, jamais « accordées » : au même titre que la cloche de
+     notifications ou la recherche, elles échappent au filtre par module. Sans
+     cette exemption, tout compte dont les accès ont été personnalisés AVANT
+     l'arrivée de la messagerie (tableau explicite en base, forcément sans
+     'messages') la perdrait purement et simplement, sans message d'erreur. */
+  const CORE_MODULES = new Set(['messages'])
+
   const filterItem = (item: NavItem): boolean => {
     if (item.adminOnly && userRole !== 'admin') return false
+    if (item.module && CORE_MODULES.has(item.module)) return true
 
     /* Outbound : ni viewer ni comptable */
     if (item.module?.startsWith('outbound')) {
@@ -337,7 +362,21 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     if (!item.badge) return null
     if (item.badge === 'Stock')    return stockAlertCount > 0    ? <BadgeChip kind="Stock"    count={stockAlertCount}    active={isActive} /> : null
     if (item.badge === 'Vehicles') return vehicleAlertCount > 0  ? <BadgeChip kind="Vehicles" count={vehicleAlertCount}  active={isActive} /> : null
+    if (item.badge === 'Messages') return messagesUnread > 0     ? <BadgeChip kind="Messages" count={messagesUnread}     active={isActive} /> : null
     return <BadgeChip kind={item.badge} active={isActive} />
+  }
+
+  /* Barre repliée : le libellé et la puce disparaissent, donc un message non lu
+     passerait totalement inaperçu. Un point rouge sur l'icône suffit à le dire. */
+  const renderCollapsedDot = (item: NavItem) => {
+    if (item.badge !== 'Messages' || messagesUnread <= 0) return null
+    return (
+      <span
+        aria-label={`${messagesUnread} message(s) non lu(s)`}
+        className="absolute top-1 right-1.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-[var(--sidebar-bg)]
+                   shadow-[0_0_6px_rgba(239,68,68,0.7)]"
+      />
+    )
   }
 
   const renderItem = (item: NavItem, opts?: { showStar?: boolean }) => {
@@ -358,6 +397,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
           )}
         >
           <item.icon className={cn('sidebar-icon-el flex-shrink-0', collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
+          {collapsed && renderCollapsedDot(item)}
           {!collapsed && (
             <>
               <span className="flex-1 truncate">{item.label}</span>

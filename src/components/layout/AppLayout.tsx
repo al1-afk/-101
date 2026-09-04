@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -15,6 +15,7 @@ import { useEventReminders } from '@/hooks/useEventReminders'
 import { useRelanceReminders } from '@/hooks/useRelanceReminders'
 import { useValidationNotifier } from '@/hooks/useValidationNotifier'
 import { usePresenceHeartbeat } from '@/hooks/usePresenceHeartbeat'
+import { useMessagesRealtime } from '@/hooks/useMessaging'
 import { maybeRequestPermissionOnce } from '@/lib/browserNotifications'
 import PwaInstallBanner from '@/components/PwaInstallBanner'
 import ShortcutsModal from '@/components/ShortcutsModal'
@@ -27,6 +28,7 @@ function getSavedCollapsed(): boolean {
 
 export default function AppLayout() {
   const location  = useLocation()
+  const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const [collapsed,      setCollapsed]      = useState(getSavedCollapsed)
   const [mobileOpen,     setMobileOpen]     = useState(false)
 
@@ -42,6 +44,12 @@ export default function AppLayout() {
   /* Présence réelle pour le Centre de sécurité (1 battement/min par
      onglet actif). Le layout n'est monté qu'une fois authentifié. */
   usePresenceHeartbeat(true)
+  /* Messagerie privée : un seul flux SSE pour tout l'espace administrateur.
+     Monté ici et nulle part ailleurs — c'est ce qui fait apparaître la fenêtre
+     surgissante, le son et la pastille depuis n'importe quelle page, sans
+     obliger à rester sur /messages. Le serveur plafonne les flux par personne,
+     un second montage coûterait une connexion pour rien. */
+  useMessagesRealtime('admin', `${tenantSlug ? `/${tenantSlug}` : ''}/messages`)
 
   /* Demande gentiment la permission pour les notifs navigateur (1ère visite). */
   useEffect(() => { maybeRequestPermissionOnce() }, [])

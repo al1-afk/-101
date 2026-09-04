@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import NotificationsAutoSettings from '@/components/settings/NotificationsAutoSettings'
 import TaskRemindersSettings from '@/components/settings/TaskRemindersSettings'
+import MessagesNotifSettings from '@/components/settings/MessagesNotifSettings'
 
 const LS = {
   company:  'gestiq_company',
@@ -294,6 +295,9 @@ export default function Parametres() {
         <TabsContent value="notifications" className="space-y-4">
           {/* Notifs système (son + navigateur) */}
           <SystemNotificationsPanel />
+
+          {/* Messagerie privée : par quels canaux être prévenu d'un message */}
+          <MessagesNotifSettings />
 
           {/* Envois automatiques pilotés par le serveur (alertes + rapports) */}
           <NotificationsAutoSettings />

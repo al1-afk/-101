@@ -33,6 +33,7 @@ const layout = (titleText: string, bodyHtml: string) => `<!doctype html>
 export type EmailKind =
   | 'projet_message' | 'prospect_nouveau' | 'paiement_recu'
   | 'devis_accepte'  | 'tache_validation' | 'tache_creee' | 'expiration'
+  | 'message_prive'
 
 interface DispatchOpts {
   tenantId: string
@@ -101,6 +102,44 @@ async function dispatchToAdmins({ tenantId, kind, subject, title, bodyHtml, exce
     })
   } catch (err: any) {
     console.error('[notifEmail] dispatch failed:', err?.message)
+  }
+}
+
+interface DispatchToUserOpts {
+  tenantId: string
+  kind:     EmailKind
+  /** Adresse du destinataire — une seule, jamais la liste des admins. */
+  to:       string
+  /** users.id du destinataire : sert uniquement à tracer l'envoi. */
+  userId?:  string
+  subject:  string
+  title:    string
+  bodyHtml: string
+}
+
+/**
+ * Envoi à UNE personne nommément désignée.
+ *
+ * Tous les autres envois de ce fichier diffusent à l'ensemble des admins
+ * de l'espace. Recopier un message privé à l'équipe serait exactement
+ * l'inverse de ce qu'attend son auteur : d'où ce chemin séparé. On garde
+ * malgré tout `emailKindAllowed` en amont — l'interrupteur de l'espace
+ * doit couper la catégorie quel que soit le destinataire.
+ */
+async function dispatchToUser({ tenantId, kind, to, userId, subject, title, bodyHtml }: DispatchToUserOpts): Promise<void> {
+  const email = String(to ?? '').trim()
+  try {
+    /* Un compte sans adresse (membre créé sans e-mail) n'est pas une
+       anomalie : la cloche et le temps réel restent ses canaux. */
+    if (!email) return
+    if (!(await emailKindAllowed(tenantId, kind))) {
+      console.log(`[notifEmail] "${kind}" désactivé pour cet espace — e-mail non envoyé`)
+      return
+    }
+    await sendEmail({ to: email, subject, html: layout(title, bodyHtml), text: title })
+    console.log(`[notifEmail] ✅ sent to ${email}${userId ? ` (user ${userId})` : ''}`)
+  } catch (err: any) {
+    console.error(`[notifEmail] FAILED to ${email}:`, err?.message ?? err)
   }
 }
 
@@ -298,6 +337,75 @@ export async function notifyMemberTaskCreated(
       <p><strong>${escape(task.membre)}</strong> vient d'ajouter une tâche à sa liste :</p>
       <p style="padding:12px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;">
         <strong>${escape(task.titre)}</strong><br/>${details}
+      </p>
+    `,
+  })
+}
+
+/* ───── Messagerie interne — message privé reçu ───────────────────── */
+
+/**
+ * Un message direct vient d'arriver pour quelqu'un qui n'est pas devant
+ * son écran.
+ *
+ * Appelée après la réponse HTTP (fire and forget) par la route d'envoi :
+ * l'expéditeur ne doit jamais attendre le serveur SMTP. `conversationUrl`
+ * est une URL absolue construite par l'appelant — lui seul sait dans quel
+ * espace ouvrir le fil (/:tenantSlug/messages côté admin,
+ * /my-space/messagerie côté employé).
+ */
+export async function notifyDirectMessage(tenantId: string, params: {
+  recipientUserId: string
+  recipientEmail:  string
+  recipientName:   string
+  senderName:      string
+  preview:         string
+  priority:        'normal' | 'important' | 'urgent'
+  conversationUrl: string
+  nbFichiers?:     number
+}): Promise<void> {
+  const urgent    = params.priority === 'urgent'
+  const important = params.priority === 'important'
+  const nbFichiers = params.nbFichiers ?? 0
+
+  /* Un message peut n'être qu'une pièce jointe : l'aperçu est alors vide
+     et un cadre vide passerait pour un bug d'affichage. */
+  const apercu = String(params.preview ?? '').trim() || '(pièce jointe)'
+
+  const badgeBg     = urgent ? '#fee2e2' : '#fef3c7'
+  const badgeBorder = urgent ? '#fecaca' : '#fde68a'
+  const badgeText   = urgent ? '#b91c1c' : '#b45309'
+  const badge = urgent || important
+    ? `<p style="margin:0 0 12px;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;background:${badgeBg};border:1px solid ${badgeBorder};color:${badgeText};">${urgent ? '🔴 Message marqué URGENT' : '🟠 Message marqué important'}</p>`
+    : ''
+
+  const pieces = nbFichiers > 0
+    ? `<p style="font-size:13px;color:#64748b;">📎 ${nbFichiers} pièce${nbFichiers > 1 ? 's' : ''} jointe${nbFichiers > 1 ? 's' : ''}.</p>`
+    : ''
+
+  await dispatchToUser({
+    tenantId,
+    kind:   'message_prive',
+    to:     params.recipientEmail,
+    userId: params.recipientUserId,
+    subject: `${urgent ? '🔴 URGENT — ' : ''}🔔 Nouveau message de ${params.senderName} — NEXT GITAL`,
+    title:   `🔔 Nouveau message de ${escape(params.senderName)}`,
+    bodyHtml: `
+      <p>Bonjour ${escape(params.recipientName)},</p>
+      ${badge}
+      <p><strong>${escape(params.senderName)}</strong> vous a écrit dans la messagerie interne :</p>
+      <p style="padding:12px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;white-space:pre-wrap;">
+        ${escape(apercu)}
+      </p>
+      ${pieces}
+      <p style="margin:22px 0 6px;text-align:center;">
+        <a href="${escape(params.conversationUrl)}"
+           style="display:inline-block;padding:11px 22px;background:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:10px;font-size:14px;font-weight:600;">
+          Ouvrir la conversation
+        </a>
+      </p>
+      <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;">
+        Répondez depuis la messagerie interne : cet e-mail n'accepte pas de réponse.
       </p>
     `,
   })

@@ -33,6 +33,7 @@ import notificationsRoutes from './routes/notifications'
 import timeTrackingRoutes from './routes/timeTracking'
 import mySpaceRoutes   from './routes/mySpace'
 import projetChatRoutes from './routes/projetChat'
+import messagesRoutes from './routes/messages'
 import mySpaceSopsRoutes, { startSopImageCleanup } from './routes/mySpaceSops'
 import sopImagesRoutes from './routes/sopImages'
 import sendDocumentRoutes from './routes/sendDocument'
@@ -219,6 +220,11 @@ app.use('/api/time',      timeTrackingRoutes)
    hors application. Sans clés VAPID, la route répond « désactivé ». */
 app.use('/api/push',      pushRoutes)
 app.use('/api/task-reminders', taskRemindersRoutes)
+/* Messagerie interne (1-to-1) — accepte les deux jetons, admin et
+   membre d'équipe. Montée AVANT le CRUD générique : celui-ci capte
+   /api/:table et transformerait /api/messages en lecture d'une table
+   « messages » qui n'existe pas. */
+app.use('/api/messages', messagesRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */

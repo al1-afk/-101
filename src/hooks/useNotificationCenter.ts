@@ -21,6 +21,16 @@ import { showBrowserNotification } from '@/lib/browserNotifications'
 const POLL_MS  = 60_000
 const SEEN_KEY = 'gestiq_server_notifications_seen'
 
+/* Catégories dont la cloche garde la TRACE sans jamais faire de bruit.
+   « message_prive » : la messagerie interne annonce déjà elle-même chaque
+   message reçu (toast + son + notification navigateur, useMessagesRealtime),
+   à l'instant près et en respectant les préférences DmPrefs de la personne.
+   Rejouer le même message ici, jusqu'à 60 s plus tard et sans regarder aucune
+   de ces préférences, donnait une seconde alerte en retard et impossible à
+   couper. La ligne reste visible dans la liste et continue de compter dans les
+   non-lus : c'est ce qui s'est passé pendant l'absence. */
+const SILENT_KINDS = new Set(['message_prive'])
+
 function readSeen(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as string[]) }
   catch { return new Set() }
@@ -70,7 +80,7 @@ export function useNotificationCenter(enabled = true): NotificationCenter {
     const seen  = seenRef.current ?? readSeen()
     seenRef.current = seen
 
-    const fresh = notifications.filter(n => !n.is_read && !seen.has(n.id))
+    const fresh = notifications.filter(n => !n.is_read && !seen.has(n.id) && !SILENT_KINDS.has(n.kind))
     for (const n of notifications) seen.add(n.id)
     writeSeen(seen)
 

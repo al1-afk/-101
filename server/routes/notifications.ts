@@ -147,8 +147,13 @@ router.post('/clear', async (req: Request, res: Response) => {
    CONFIGURATION (admin)
 ═══════════════════════════════════════════════════════════════════ */
 
+/* `email_kinds` (migration 096) DOIT figurer ici : sans elle, le GET ne
+   renvoie jamais la colonne, l'écran de réglages affiche les sept
+   catégories décochées et son bouton « Enregistrer » — activé par la
+   comparaison des clés reçues — reste grisé pour toujours. Le
+   commutateur d'e-mails était donc inutilisable depuis l'interface. */
 const SETTINGS_COLUMNS = `
-  tenant_id, enabled, timezone, recipients, email_enabled, inapp_enabled,
+  tenant_id, enabled, timezone, recipients, email_enabled, inapp_enabled, email_kinds,
   tasks_alert_enabled, tasks_alert_hour, tasks_stale_days,
   contacts_alert_enabled, contacts_alert_hour, contact_delay_days, new_lead_grace_days,
   daily_report_enabled, daily_report_hour,
@@ -257,6 +262,7 @@ router.put('/settings', requireRole('admin'), async (req: Request, res: Response
     const KNOWN = new Set([
       'projet_message', 'prospect_nouveau', 'paiement_recu',
       'devis_accepte', 'tache_validation', 'tache_creee', 'expiration',
+      'message_prive',
     ])
     const list = (body.email_kinds as unknown[]).map(k => String(k).trim())
     const bad = list.find(k => !KNOWN.has(k))

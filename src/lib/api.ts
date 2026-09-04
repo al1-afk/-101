@@ -1347,3 +1347,312 @@ export const taskRemindersApi = {
     api.put<TaskReminderPrefs>('/api/task-reminders/prefs', patch),
   devices:   () => api.get<PushDevice[]>('/api/push/devices'),
 }
+
+/* ── Messagerie interne (messages privés 1-à-1) ──────────────────
+   Deux publics sur les mêmes routes : l'admin/staff (jeton 'gestiq_token')
+   et l'employé (jeton 'gestiq_member_token'). Comme pour projetChatApi,
+   chaque appel reçoit `as` en dernier paramètre : c'est lui qui choisit
+   le coffre à jetons, jamais un identifiant transmis par le client. */
+export type DmPriority = 'normal' | 'important' | 'urgent'
+
+export interface DmFile {
+  id:            string
+  message_id:    string | null
+  filename:      string
+  mime:          string
+  /** pg renvoie bigint en chaîne : on accepte les deux formes. */
+  size_bytes:    number | string
+  uploader_name: string
+  created_at:    string
+}
+
+export interface DmContact {
+  user_id:      string
+  name:         string
+  email:        string
+  avatar_url:   string | null
+  kind:         'admin' | 'member'
+  role:         string | null
+  presence:     'online' | 'idle' | 'offline'
+  last_seen_at: string | null
+  conversation_id:       string | null
+  unread:                number
+  last_message_at:       string | null
+  last_message_preview:  string | null
+  last_message_mine:     boolean
+}
+
+export interface DmMessage {
+  id:              string
+  conversation_id: string
+  sender_id:       string
+  recipient_id:    string
+  sender_name:     string
+  body:            string
+  priority:        DmPriority
+  delivered_at:    string | null
+  read_at:         string | null
+  created_at:      string
+  /** Calculé par le serveur pour l'acteur courant : évite de comparer des uuid côté UI. */
+  mine:            boolean
+  files:           DmFile[]
+}
+
+export interface DmThread {
+  conversation: { id: string; peer: DmContact }
+  messages:     DmMessage[]
+  has_more:     boolean
+}
+
+export interface DmUnread {
+  total:         number
+  conversations: Array<{ conversation_id: string; peer_id: string; unread: number }>
+}
+
+export interface DmPrefs {
+  inapp_enabled:        boolean
+  popup_enabled:        boolean
+  sound_enabled:        boolean
+  browser_enabled:      boolean
+  push_enabled:         boolean
+  email_enabled:        boolean
+  urgent_email_enabled: boolean
+}
+
+export type DmStreamEvent = 'ready' | 'message' | 'read' | 'delivered' | 'unread'
+
+export interface DmStreamHandlers {
+  onEvent:   (event: DmStreamEvent, data: any) => void
+  onStatus?: (connected: boolean) => void
+}
+
+/* Flux temps réel lu à la main sur fetch + ReadableStream.
+
+   Pourquoi pas EventSource : il ne sait poser aucun en-tête, donc le seul
+   moyen de l'authentifier serait de mettre le JWT dans l'URL — où il
+   finirait recopié dans les journaux d'accès du proxy et de l'API.
+   Pourquoi pas de polling permanent : la pastille et les fils doivent
+   réagir à la seconde, ce qui imposerait une requête toutes les 2 s par
+   onglet ouvert et par personne, pour rien la plupart du temps.
+
+   Reste donc SSE à la main : une requête maintenue ouverte, un lecteur
+   d'octets, et une reconnexion à repli exponentiel quand le tuyau casse
+   (veille de l'appareil, coupure Wi-Fi, redémarrage du proxy). */
+function openMessagesStream(as: 'admin' | 'member', handlers: DmStreamHandlers): () => void {
+  let stopped     = false
+  let connected   = false
+  let refreshTried = false
+  let backoff     = 1000
+  let controller: AbortController | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+  const setConnected = (value: boolean) => {
+    if (connected === value) return
+    connected = value
+    handlers.onStatus?.(value)
+  }
+
+  const scheduleRetry = () => {
+    if (stopped || retryTimer) return
+    const delay = backoff
+    retryTimer = setTimeout(() => { retryTimer = null; void connect() }, delay)
+    /* 1s, 2s, 4s… plafonné à 30s : on ne martèle pas une API en rade. */
+    backoff = Math.min(backoff * 2, 30000)
+  }
+
+  /* Une trame SSE = des lignes « event: » / « data: » terminées par une
+     ligne vide. Les lignes commençant par « : » sont les battements
+     anti-coupure du serveur : rien à livrer, mais le tuyau est vivant. */
+  const dispatchFrame = (frame: string) => {
+    let event = 'message'
+    const dataLines: string[] = []
+    for (const line of frame.split('\n')) {
+      if (!line || line.startsWith(':')) continue
+      if (line.startsWith('event:')) { event = line.slice(6).trim(); continue }
+      /* « data: » peut se répéter : la charge utile est la concaténation. */
+      if (line.startsWith('data:'))  { dataLines.push(line.slice(5).replace(/^ /, '')) }
+    }
+    if (!dataLines.length) return
+    const raw = dataLines.join('\n')
+    let payload: any
+    try { payload = JSON.parse(raw) } catch { payload = raw }
+    handlers.onEvent(event as DmStreamEvent, payload)
+  }
+
+  const connect = async () => {
+    if (stopped) return
+    controller = new AbortController()
+
+    let res: Response
+    try {
+      res = await fetch(`${BASE_URL}/api/messages/stream`, {
+        headers: {
+          'Authorization': `Bearer ${chatToken(as)}`,
+          'Accept':        'text/event-stream',
+        },
+        credentials: 'include',
+        signal: controller.signal,
+      })
+    } catch {
+      /* Hors ligne ou requête avortée : on ne déconnecte personne, on retente. */
+      setConnected(false)
+      scheduleRetry()
+      return
+    }
+
+    /* 401 : le jeton d'accès a expiré pendant que le flux était ouvert.
+       Le flux ne sait pas le renouveler tout seul ; on déclenche donc un
+       appel ordinaire, qui passe par request() et son refresh silencieux,
+       avant de retenter — sans quoi on rouvrirait en boucle avec un jeton
+       mort. Une seule tentative tant qu'aucune trame n'est arrivée. */
+    if (res.status === 401 && !refreshTried && !stopped) {
+      refreshTried = true
+      setConnected(false)
+      try { await messagesApi.unread(as) } catch { /* refresh impossible : le repli s'en chargera */ }
+      scheduleRetry()
+      return
+    }
+
+    /* 429 : trop de flux ouverts pour ce compte (autres onglets/appareils).
+       Inutile de revenir dans la seconde, la place ne se libérera pas si vite. */
+    if (res.status === 429) backoff = Math.max(backoff, 10000)
+
+    if (!res.ok || !res.body) {
+      setConnected(false)
+      scheduleRetry()
+      return
+    }
+
+    setConnected(true)
+    const reader  = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        /* Certains proxys réécrivent les fins de ligne : on normalise avant
+           de découper, sinon la trame ne se termine jamais par '\n\n'. */
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+        let sep = buffer.indexOf('\n\n')
+        while (sep !== -1) {
+          const frame = buffer.slice(0, sep)
+          buffer = buffer.slice(sep + 2)
+          /* Toute trame reçue (battement compris) prouve que la connexion
+             est saine : on repart d'un repli d'une seconde. */
+          backoff = 1000
+          refreshTried = false
+          dispatchFrame(frame)
+          sep = buffer.indexOf('\n\n')
+        }
+      }
+    } catch {
+      /* Lecture interrompue : coupure réseau, veille, ou arrêt volontaire. */
+    }
+    setConnected(false)
+    scheduleRetry()
+  }
+
+  void connect()
+
+  /* Arrêt définitif : coupe la requête en cours ET interdit toute
+     reconnexion (sinon un démontage de composant relancerait un flux). */
+  return () => {
+    stopped = true
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    try { controller?.abort() } catch { /* déjà fermé */ }
+    controller = null
+    setConnected(false)
+  }
+}
+
+export const messagesApi = {
+  contacts: (as: 'admin' | 'member' = 'admin') =>
+    request<{ me: { user_id: string; name: string; kind: 'admin' | 'member' }; contacts: DmContact[] }>(
+      'GET', '/api/messages/contacts', undefined, as),
+
+  unread: (as: 'admin' | 'member' = 'admin') =>
+    request<DmUnread>('GET', '/api/messages/unread', undefined, as),
+
+  /** Ouvre le fil avec cette personne, ou le crée s'il n'existe pas encore. */
+  openConversation: (userId: string, as: 'admin' | 'member' = 'admin') =>
+    request<{ conversation_id: string; peer: DmContact }>(
+      'POST', '/api/messages/conversations', { user_id: userId }, as),
+
+  thread: (
+    conversationId: string,
+    opts: { limit?: number; before?: string } = {},
+    as: 'admin' | 'member' = 'admin',
+  ) => {
+    const qs = new URLSearchParams()
+    if (opts.limit)  qs.set('limit',  String(opts.limit))
+    /* `before` pagine vers le passé : on remonte l'historique par paquets. */
+    if (opts.before) qs.set('before', opts.before)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<DmThread>('GET', `/api/messages/conversations/${conversationId}${suffix}`, undefined, as)
+  },
+
+  send: (
+    conversationId: string,
+    data: { text?: string; priority?: DmPriority; file_ids?: string[] },
+    as: 'admin' | 'member' = 'admin',
+  ) => request<DmMessage>('POST', `/api/messages/conversations/${conversationId}/messages`, data, as),
+
+  markRead: (conversationId: string, as: 'admin' | 'member' = 'admin') =>
+    request<{ success: true; read: number }>(
+      'POST', `/api/messages/conversations/${conversationId}/read`, {}, as),
+
+  /** Téléverse une pièce jointe : le corps de la requête EST le fichier.
+   *  Pas de FormData — inutile pour un fichier unique, et cela évite d'en
+   *  recopier le contenu en mémoire avant l'envoi. */
+  uploadFile: async (
+    conversationId: string,
+    file: File,
+    as: 'admin' | 'member' = 'admin',
+  ): Promise<DmFile> => {
+    const res = await fetch(`${BASE_URL}/api/messages/conversations/${conversationId}/files`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${chatToken(as)}`,
+        'Content-Type':  file.type || 'application/octet-stream',
+        /* Le nom peut contenir des accents ou des espaces : un en-tête HTTP
+           n'accepte que de l'ASCII, on l'encode donc ici. */
+        'x-filename':    encodeURIComponent(file.name),
+      },
+      credentials: 'include',
+      body: file,
+    })
+    if (!res.ok) {
+      const msg = await res.json().catch(() => ({}))
+      throw new Error(msg?.error ?? `Échec du téléversement (${res.status})`)
+    }
+    return res.json()
+  },
+
+  /** Récupère le contenu d'un fichier sous forme d'URL blob locale.
+   *  Le téléchargement repasse par l'API (contrôle d'accès refait), donc
+   *  on ne peut pas pointer un <img src> directement dessus. */
+  fileBlobUrl: async (
+    fileId: string,
+    as: 'admin' | 'member' = 'admin',
+    inline = true,
+  ): Promise<string> => {
+    const res = await fetch(
+      `${BASE_URL}/api/messages/files/${fileId}${inline ? '?inline=1' : ''}`,
+      { headers: { 'Authorization': `Bearer ${chatToken(as)}` }, credentials: 'include' },
+    )
+    if (!res.ok) throw new Error(`Fichier indisponible (${res.status})`)
+    return URL.createObjectURL(await res.blob())
+  },
+
+  prefs: (as: 'admin' | 'member' = 'admin') =>
+    request<DmPrefs>('GET', '/api/messages/prefs', undefined, as),
+
+  savePrefs: (patch: Partial<DmPrefs>, as: 'admin' | 'member' = 'admin') =>
+    request<{ success: true; prefs: DmPrefs }>('PUT', '/api/messages/prefs', patch, as),
+
+  /** Ouvre le flux temps réel. Rend la fonction d'arrêt (à appeler au
+   *  démontage) : elle coupe la requête et interdit la reconnexion. */
+  stream: (as: 'admin' | 'member', handlers: DmStreamHandlers): (() => void) =>
+    openMessagesStream(as, handlers),
+}

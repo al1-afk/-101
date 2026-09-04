@@ -47,6 +47,8 @@ interface Block {
    notification_settings.email_kinds (migration 096). Les rapports
    planifiés gardent leurs propres interrupteurs, plus bas. */
 const EMAIL_KINDS: Array<{ key: string; icon: string; label: string; desc: string }> = [
+  { key: 'message_prive',    icon: '💬', label: 'Message privé reçu',
+    desc: "Quand quelqu'un vous écrit dans la messagerie interne." },
   { key: 'projet_message',   icon: '💬', label: 'Messages de discussion',
     desc: "À chaque message publié sur le fil d'un projet." },
   { key: 'tache_creee',      icon: '✅', label: 'Tâche ajoutée par un membre',

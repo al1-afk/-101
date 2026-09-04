@@ -48,6 +48,7 @@ const Statistiques   = lazy(() => import('@/pages/Statistiques'))
 const ActivityLogs   = lazy(() => import('@/pages/ActivityLogs'))
 const ConseillerIA   = lazy(() => import('@/pages/ConseillerIA'))
 const Taches         = lazy(() => import('@/pages/Taches'))
+const Messages       = lazy(() => import('@/pages/Messages'))
 const Projets        = lazy(() => import('@/pages/Projets'))
 const Templates      = lazy(() => import('@/pages/Templates'))
 const ProjetDetail   = lazy(() => import('@/pages/ProjetDetail'))
@@ -97,6 +98,7 @@ const MyProjets           = lazy(() => import('@/pages/MySpace/MyProjets'))
 const MyProjetDetail      = lazy(() => import('@/pages/MySpace/MyProjetDetail'))
 const MyNotifications     = lazy(() => import('@/pages/MySpace/MyNotifications'))
 const MyMessages          = lazy(() => import('@/pages/MySpace/MyMessages'))
+const MyMessagerie        = lazy(() => import('@/pages/MySpace/MyMessagerie'))
 const MyProfile           = lazy(() => import('@/pages/MySpace/MyProfile'))
 
 import { queryClient } from '@/lib/queryClient'
@@ -135,6 +137,9 @@ export default function App() {
               <Route path="projets"      element={<MyProjets />} />
               <Route path="projets/:id"  element={<MyProjetDetail />} />
               <Route path="notifications" element={<MyNotifications />} />
+              {/* « messagerie » = messages privés ; « messages » reste l'agrégat
+                  des discussions de projet, des liens existants pointent dessus. */}
+              <Route path="messagerie"   element={<MyMessagerie />} />
               <Route path="messages"     element={<MyMessages />} />
               <Route path="profile"      element={<MyProfile />} />
             </Route>
@@ -167,6 +172,7 @@ export default function App() {
               <Route path="clients/renewals"           element={<RenewalsBreakdown />} />
               <Route path="clients/:id"                element={<ClientDetail />} />
               <Route path="taches"                     element={<Taches />} />
+              <Route path="messages"                   element={<Messages />} />
               <Route path="projets"                    element={<Projets />} />
               <Route path="projets/:id"                element={<ProjetDetail />} />
               <Route path="templates"                  element={<Templates />} />
