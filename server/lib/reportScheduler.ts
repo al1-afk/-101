@@ -24,6 +24,7 @@
  * deux instances du serveur, et de part et d'autre d'un redémarrage.
  */
 import type { Pool } from 'pg'
+import { tenantQuery } from '../db/pool'
 import { sendEmail } from './email'
 import { logger } from './logger'
 import {
@@ -366,7 +367,13 @@ async function pushInApp(
   let n = 0
   for (const a of admins) {
     try {
-      await pool.query(`
+      /* `notifications` est FORCE RLS : avec le pool nu, la policy
+         WITH CHECK (tenant_id = current_tenant_id()) refuse l'écriture
+         en production (gestiq_api n'est ni superuser ni BYPASSRLS) et
+         le catch ci-dessous avalait l'échec — les rapports n'ont jamais
+         produit de ligne de cloche en prod, alors qu'ils marchaient en
+         développement. Le contexte tenant est donc obligatoire. */
+      await tenantQuery(tenant.tenant_id, `
         INSERT INTO public.notifications
           (tenant_id, user_id, kind, severity, title, message, link, icon, data, dedupe_key)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
