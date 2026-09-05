@@ -42,7 +42,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { PoolClient } from 'pg'
 import { query, queryOne, tenantQuery, tenantQueryOne, tenantTransaction } from '../db/pool'
-import { requireAuth } from '../middleware/auth'
+import { requireAuth, requireRole } from '../middleware/auth'
 import { logger } from '../lib/logger'
 import { sendPushToUser } from '../lib/webPush'
 import { notifyDirectMessage } from '../lib/notificationEmails'
@@ -440,13 +440,24 @@ function peersSql(where: string, orderBy = ''): string {
       ${orderBy}`
 }
 
-const CONTACTS_SQL = peersSql(
-  'WHERE q.active',
-  /* Les fils vivants d'abord, le reste par ordre alphabétique. */
-  'ORDER BY c.last_message_at DESC NULLS LAST, name ASC',
-)
-const PEER_SQL        = peersSql('WHERE q.user_id = $3::uuid')
-const PEER_ACTIVE_SQL = peersSql('WHERE q.user_id = $3::uuid AND q.active')
+/* Les fils vivants d'abord, le reste par ordre alphabétique. */
+const ORDRE_CONTACTS = 'ORDER BY c.last_message_at DESC NULLS LAST, name ASC'
+
+/* Deux variantes de chaque requête : avec et sans la table
+   d'autorisations. Le choix se fait à l'APPEL (cf. `avecRegles`), pas
+   ici : au chargement du module, on ne sait pas encore si la migration
+   101 est passée sur cette base. */
+const CONTACTS_SQL        = peersSql(`WHERE q.active AND ${visibiliteSql(false)}`, ORDRE_CONTACTS)
+const CONTACTS_SQL_REGLES = peersSql(`WHERE q.active AND ${visibiliteSql(true)}`,  ORDRE_CONTACTS)
+
+/* Sans filtre de visibilité : sert l'en-tête d'une conversation
+   EXISTANTE, qui doit rester lisible même si l'autorisation a été
+   retirée depuis — on ne réécrit pas l'histoire. */
+const PEER_SQL               = peersSql('WHERE q.user_id = $3::uuid')
+/* Avec filtre : sert l'OUVERTURE d'un fil. C'est ici que se joue le
+   refus (403) quand le correspondant n'est pas autorisé. */
+const PEER_ACTIVE_SQL        = peersSql(`WHERE q.user_id = $3::uuid AND q.active AND ${visibiliteSql(false)}`)
+const PEER_ACTIVE_SQL_REGLES = peersSql(`WHERE q.user_id = $3::uuid AND q.active AND ${visibiliteSql(true)}`)
 
 /**
  * Le MÊME périmètre que `CONTACTS_SQL`, pour les requêtes qui ne passent
@@ -476,6 +487,87 @@ function activePeerSql(tenantParam: string, peerExpr: string): string {
                  AND tm.account_status = 'active')`
 }
 
+/**
+ * QUI a le droit de voir QUI (migration 101).
+ *
+ * Trois cas, dans cet ordre :
+ *   1. je suis un compte d'ADMINISTRATION de l'espace (ligne
+ *      tenant_users active) → je vois tout le monde. C'est moi qui
+ *      distribue les autorisations, je ne peux pas m'en exclure ;
+ *   2. le correspondant EST l'administration (rôle admin ou manager) →
+ *      toujours joignable, sans réglage : couper la voie hiérarchique
+ *      laisserait un employé sans interlocuteur ;
+ *   3. une autorisation explicite existe entre nous deux, dans un sens
+ *      ou dans l'autre — une autorisation à sens unique ferait écrire à
+ *      quelqu'un incapable de répondre.
+ *
+ * Le prédicat ne demande JAMAIS de savoir en JavaScript si l'acteur est
+ * un employé : le cas 1 le déduit en SQL. Une seule expression sert donc
+ * la liste des correspondants, l'ouverture d'un fil ET les compteurs —
+ * c'est ce qui garantit qu'ils ne divergeront pas.
+ *
+ * `avecRegles` = false tant que la migration 101 n'est pas appliquée :
+ * PostgreSQL analyse la requête entière, une table absente la ferait
+ * échouer même sous un OR jamais atteint.
+ */
+function visibiliteSql(
+  avecRegles: boolean,
+  tenantExpr = '$2::uuid',
+  meExpr     = '$1::uuid',
+  peerExpr   = 'q.user_id',
+): string {
+  const regle = avecRegles ? `
+        OR EXISTS (SELECT 1 FROM public.dm_contact_rules r
+                    WHERE r.tenant_id = ${tenantExpr}
+                      AND ((r.member_user_id = ${meExpr}   AND r.peer_user_id = ${peerExpr})
+                        OR (r.member_user_id = ${peerExpr} AND r.peer_user_id = ${meExpr})))` : ''
+  return `(
+        EXISTS (SELECT 1 FROM public.tenant_users tu
+                 WHERE tu.tenant_id = ${tenantExpr} AND tu.user_id = ${meExpr}
+                   AND tu.status = 'active')
+        OR EXISTS (SELECT 1 FROM public.tenant_users tp
+                    WHERE tp.tenant_id = ${tenantExpr} AND tp.user_id = ${peerExpr}
+                      AND tp.status = 'active' AND tp.role IN ('admin', 'manager'))${regle}
+      )`
+}
+
+/* La table d'autorisations existe-t-elle ? Question posée une seule
+   fois par processus : entre le déploiement du code et l'application
+   manuelle de la migration, il y a une fenêtre où elle manque. Pendant
+   ce temps, on retombe sur le comportement de la migration 100 — tout
+   le monde se voit — plutôt que sur une liste vide, qui ferait croire à
+   une messagerie cassée. */
+let reglesDisponibles = false
+let prochainControle = 0
+
+/* Une réponse POSITIVE est définitive : une table ne disparaît pas.
+   Une réponse NÉGATIVE, elle, doit expirer — sinon un serveur démarré
+   avant l'application de la migration ignorerait les autorisations
+   jusqu'à son prochain redémarrage, et l'écran de réglage répondrait
+   « non installé » alors que la table vient d'être créée. Une minute
+   suffit : c'est le délai entre « j'applique la migration » et « je
+   rafraîchis la page ». */
+const CONTROLE_TTL_MS = 60_000
+
+async function avecRegles(tenantId: string): Promise<boolean> {
+  if (reglesDisponibles) return true
+  if (Date.now() < prochainControle) return false
+  prochainControle = Date.now() + CONTROLE_TTL_MS
+  try {
+    const row = await tenantQueryOne<{ presente: boolean }>(
+      tenantId,
+      `SELECT to_regclass('public.dm_contact_rules') IS NOT NULL AS presente`,
+    )
+    reglesDisponibles = !!row?.presente
+  } catch {
+    reglesDisponibles = false
+  }
+  if (!reglesDisponibles) {
+    logger.info('[messages] dm_contact_rules absente (migration 101) — tous les correspondants restent visibles')
+  }
+  return reglesDisponibles
+}
+
 interface PeerRow {
   user_id: string; name: string; email: string; avatar_url: string | null
   kind: 'admin' | 'member'; role: string | null
@@ -491,9 +583,12 @@ interface PeerRow {
  * affiche l'en-tête d'une conversation même si elle est partie.
  */
 async function loadPeer(actor: Actor, peerId: string, requireActive: boolean): Promise<PeerRow | null> {
+  const sql = requireActive
+    ? (await avecRegles(actor.tenantId) ? PEER_ACTIVE_SQL_REGLES : PEER_ACTIVE_SQL)
+    : PEER_SQL
   const row = await dmQueryOne<PeerRow>(
     actor,
-    requireActive ? PEER_ACTIVE_SQL : PEER_SQL,
+    sql,
     [actor.userId, actor.tenantId, peerId],
   )
   if (row || requireActive) return row
@@ -589,14 +684,26 @@ async function markDelivered(actor: Actor, conversationId?: string): Promise<voi
   }
 }
 
-/** Compteur global de non-lus d'une personne — lu en son nom. */
+/**
+ * Compteur global de non-lus d'une personne — lu en son nom.
+ *
+ * Le périmètre est EXACTEMENT celui de la liste des correspondants, et
+ * ce n'est pas un raffinement : compter un message que la liste
+ * n'affiche pas donne une pastille rouge que rien ne peut plus
+ * effacer. Le fil n'apparaît plus, on ne peut donc plus l'ouvrir, donc
+ * plus jamais le marquer lu. Correspondant parti de l'entreprise, ou
+ * autorisation retirée : les deux cas produisent le même symptôme.
+ */
 async function unreadTotalFor(tenantId: string, userId: string): Promise<number> {
+  const regles = await avecRegles(tenantId)
   const row = await asUserQueryOne<{ n: number }>(
     tenantId, userId,
     `SELECT COUNT(*)::int AS n
-       FROM public.dm_messages
-      WHERE recipient_id = $1::uuid AND read_at IS NULL`,
-    [userId],
+       FROM public.dm_messages m
+      WHERE m.recipient_id = $1::uuid AND m.read_at IS NULL
+        AND ${activePeerSql('$2::uuid', 'm.sender_id')}
+        AND ${visibiliteSql(regles, '$2::uuid', '$1::uuid', 'm.sender_id')}`,
+    [userId, tenantId],
   )
   return row?.n ?? 0
 }
@@ -630,7 +737,11 @@ router.get('/contacts', async (req: Request, res: Response) => {
        messages en attente sont donc « reçus ». */
     await markDelivered(actor)
 
-    const contacts = await dmQuery<PeerRow>(actor, CONTACTS_SQL, [actor.userId, actor.tenantId])
+    const contacts = await dmQuery<PeerRow>(
+      actor,
+      await avecRegles(actor.tenantId) ? CONTACTS_SQL_REGLES : CONTACTS_SQL,
+      [actor.userId, actor.tenantId],
+    )
 
     res.json({
       me: { user_id: actor.userId, name: actor.name, kind: actor.kind },
@@ -649,17 +760,22 @@ router.get('/contacts', async (req: Request, res: Response) => {
 router.get('/unread', async (req: Request, res: Response) => {
   const actor = getActor(req)
   try {
+    /* Le correspondant d'un fil, vu de moi : l'autre bout de la paire. */
+    const PAIR = 'CASE WHEN c.user_a = $1::uuid THEN c.user_b ELSE c.user_a END'
+    const regles = await avecRegles(actor.tenantId)
     const rows = await dmQuery<{ conversation_id: string; peer_id: string; unread: number }>(
       actor,
       `SELECT m.conversation_id,
-              CASE WHEN c.user_a = $1::uuid THEN c.user_b ELSE c.user_a END AS peer_id,
+              ${PAIR} AS peer_id,
               COUNT(*)::int AS unread
          FROM public.dm_messages m
          JOIN public.dm_conversations c ON c.id = m.conversation_id
         WHERE m.recipient_id = $1::uuid AND m.read_at IS NULL
+          AND ${activePeerSql('$2::uuid', PAIR)}
+          AND ${visibiliteSql(regles, '$2::uuid', '$1::uuid', PAIR)}
         GROUP BY m.conversation_id, c.user_a, c.user_b
         ORDER BY 3 DESC`,
-      [actor.userId],
+      [actor.userId, actor.tenantId],
     )
     res.json({
       total: rows.reduce((n, r) => n + r.unread, 0),
@@ -1372,6 +1488,164 @@ router.get('/files/:fileId', async (req: Request, res: Response) => {
   } catch (err: any) {
     logger.error('[messages:download]', err.message)
     if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* ════════════════════════════════════════════════════════════════════
+   7 bis. CORRESPONDANTS AUTORISÉS (administration)
+
+   « Toutes les personnes ne doivent pas apparaître : seules celles que
+   j'ai sélectionnées. » Ces deux routes règlent le carnet d'adresses
+   d'un employé. Elles sont réservées à l'administration — c'est le
+   propre d'une autorisation que de ne pas être délivrée par celui qui
+   en bénéficie.
+
+   L'employé n'a AUCUNE route pour modifier ses propres autorisations :
+   ce n'est pas un oubli.
+   ═══════════════════════════════════════════════════════════════════ */
+
+interface PersonneRow {
+  user_id: string; name: string; email: string; avatar_url: string | null
+  kind: 'admin' | 'member'; role: string | null; toujours_autorise: boolean
+}
+
+/* Toutes les personnes actives de l'espace, sauf celle qu'on règle.
+   `toujours_autorise` marque l'administration : ces lignes s'affichent
+   cochées et verrouillées, puisqu'aucun réglage ne peut les retirer. */
+const PERSONNES_SQL = `
+  WITH comptes AS (
+    SELECT tu.user_id, 'admin'::text AS kind, tu.role AS role,
+           (tu.role IN ('admin', 'manager')) AS toujours
+      FROM public.tenant_users tu
+     WHERE tu.tenant_id = $1::uuid AND tu.status = 'active' AND tu.user_id IS NOT NULL
+    UNION ALL
+    SELECT tm.user_id, 'member'::text, tm.job_title, FALSE
+      FROM public.team_members tm
+     WHERE tm.tenant_id = $1::uuid AND tm.account_status = 'active' AND tm.user_id IS NOT NULL
+  ),
+  uniques AS (
+    SELECT DISTINCT ON (user_id) user_id, kind, role, toujours
+      FROM comptes
+     WHERE user_id <> $2::uuid
+     ORDER BY user_id, toujours DESC, (kind = 'admin') DESC
+  )
+  SELECT x.user_id, x.kind, x.role, x.toujours AS toujours_autorise,
+         COALESCE(NULLIF(BTRIM(CONCAT_WS(' ', tm.prenom, tm.nom)), ''),
+                  NULLIF(BTRIM(u.name), ''), u.email) AS name,
+         u.email,
+         COALESCE(tm.avatar_url, u.avatar_url) AS avatar_url
+    FROM uniques x
+    JOIN public.users u ON u.id = x.user_id
+    LEFT JOIN LATERAL (
+      SELECT t.prenom, t.nom, t.avatar_url
+        FROM public.team_members t
+       WHERE t.tenant_id = $1::uuid AND t.user_id = x.user_id
+       ORDER BY (t.account_status = 'active') DESC, t.created_at DESC
+       LIMIT 1
+    ) tm ON TRUE
+   ORDER BY x.toujours DESC, name ASC`
+
+/** Résout la fiche d'équipe vers l'identité de messagerie. */
+async function userIdDuMembre(actor: Actor, teamMemberId: string): Promise<string | null> {
+  const row = await tenantQueryOne<{ user_id: string | null }>(
+    actor.tenantId,
+    `SELECT user_id FROM public.team_members
+      WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+    [teamMemberId, actor.tenantId],
+  )
+  return row?.user_id ?? null
+}
+
+/* GET /contact-rules/:teamMemberId — l'écran de réglage. */
+router.get('/contact-rules/:teamMemberId', requireRole('manager'), async (req: Request, res: Response) => {
+  const actor = getActor(req)
+  const teamMemberId = String(req.params.teamMemberId)
+  if (!UUID_RE.test(teamMemberId)) return res.status(400).json({ error: 'Membre invalide' })
+
+  try {
+    const memberUserId = await userIdDuMembre(actor, teamMemberId)
+    /* Une fiche sans compte n'a personne à qui écrire : l'invitation
+       n'a pas encore été acceptée. On le dit plutôt que de rendre une
+       liste vide, qui passerait pour un bug. */
+    if (!memberUserId) {
+      return res.json({ member_user_id: null, people: [], allowed: [], no_account: true })
+    }
+
+    const people = await tenantQuery<PersonneRow>(
+      actor.tenantId, PERSONNES_SQL, [actor.tenantId, memberUserId],
+    )
+    let allowed: string[] = []
+    if (await avecRegles(actor.tenantId)) {
+      const rows = await tenantQuery<{ peer_user_id: string }>(
+        actor.tenantId,
+        `SELECT peer_user_id FROM public.dm_contact_rules
+          WHERE tenant_id = $1::uuid AND member_user_id = $2::uuid`,
+        [actor.tenantId, memberUserId],
+      )
+      allowed = rows.map(r => r.peer_user_id)
+    }
+    res.json({ member_user_id: memberUserId, people, allowed, no_account: false })
+  } catch (err: any) {
+    if (moduleAbsent(err)) return res.status(503).json(ERREUR_MODULE_ABSENT)
+    logger.error('[messages:rules-get]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/* PUT /contact-rules/:teamMemberId — { peer_user_ids: string[] } */
+router.put('/contact-rules/:teamMemberId', requireRole('manager'), async (req: Request, res: Response) => {
+  const actor = getActor(req)
+  const teamMemberId = String(req.params.teamMemberId)
+  if (!UUID_RE.test(teamMemberId)) return res.status(400).json({ error: 'Membre invalide' })
+
+  const brut = Array.isArray(req.body?.peer_user_ids) ? req.body.peer_user_ids : null
+  if (!brut) return res.status(400).json({ error: 'Liste de correspondants attendue' })
+  const demandes = [...new Set(
+    brut.filter((v: unknown) => typeof v === 'string' && UUID_RE.test(v)) as string[],
+  )].slice(0, 200)
+
+  try {
+    if (!(await avecRegles(actor.tenantId))) {
+      return res.status(503).json({ error: 'Autorisations non installées sur cette base (migration 101).' })
+    }
+    const memberUserId = await userIdDuMembre(actor, teamMemberId)
+    if (!memberUserId) return res.status(400).json({ error: "Ce membre n'a pas encore de compte." })
+
+    /* On n'écrit que des personnes RÉELLEMENT présentes dans l'espace :
+       un identifiant venu d'ailleurs créerait une autorisation
+       fantôme, invisible dans l'écran et impossible à retirer. Les
+       comptes d'administration sont écartés — ils sont autorisés par
+       nature, une ligne pour eux serait un doublon silencieux. */
+    const connues = await tenantQuery<PersonneRow>(
+      actor.tenantId, PERSONNES_SQL, [actor.tenantId, memberUserId],
+    )
+    const valides = new Set(
+      connues.filter(p => !p.toujours_autorise).map(p => p.user_id),
+    )
+    const aEcrire = demandes.filter(id => valides.has(id))
+
+    await tenantTransaction(actor.tenantId, async (client) => {
+      await client.query(
+        `DELETE FROM public.dm_contact_rules
+          WHERE tenant_id = $1::uuid AND member_user_id = $2::uuid`,
+        [actor.tenantId, memberUserId],
+      )
+      if (aEcrire.length) {
+        await client.query(
+          `INSERT INTO public.dm_contact_rules
+             (tenant_id, member_user_id, peer_user_id, granted_by)
+           SELECT $1::uuid, $2::uuid, p, $3::uuid FROM UNNEST($4::uuid[]) AS p
+           ON CONFLICT DO NOTHING`,
+          [actor.tenantId, memberUserId, actor.userId, aEcrire],
+        )
+      }
+    }, actor.userId)
+
+    res.json({ success: true, allowed: aEcrire })
+  } catch (err: any) {
+    if (moduleAbsent(err)) return res.status(503).json(ERREUR_MODULE_ABSENT)
+    logger.error('[messages:rules-put]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
   }
 })
 

@@ -1566,6 +1566,24 @@ function openMessagesStream(as: 'admin' | 'member', handlers: DmStreamHandlers):
   }
 }
 
+/* ── Correspondants autorisés (administration) ──────────────────────
+   Qui un employé peut-il joindre ? L'administration est toujours
+   joignable (`toujours_autorise`), le reste se coche un par un. */
+export interface DmPerson {
+  user_id: string; name: string; email: string; avatar_url: string | null
+  kind: 'admin' | 'member'; role: string | null
+  /** Compte d'administration : coché d'office, non décochable. */
+  toujours_autorise: boolean
+}
+export interface DmContactRules {
+  member_user_id: string | null
+  people:  DmPerson[]
+  allowed: string[]
+  /** Invitation jamais acceptée : la personne n'a pas encore d'identité
+   *  de messagerie, il n'y a donc rien à régler. */
+  no_account: boolean
+}
+
 export const messagesApi = {
   contacts: (as: 'admin' | 'member' = 'admin') =>
     request<{ me: { user_id: string; name: string; kind: 'admin' | 'member' }; contacts: DmContact[] }>(
@@ -1655,4 +1673,14 @@ export const messagesApi = {
    *  démontage) : elle coupe la requête et interdit la reconnexion. */
   stream: (as: 'admin' | 'member', handlers: DmStreamHandlers): (() => void) =>
     openMessagesStream(as, handlers),
+  /* Réservé à l'administration : le serveur refuse (403) un jeton
+     d'employé, y compris sur sa propre fiche. */
+  contactRules: (teamMemberId: string) =>
+    request<DmContactRules>('GET', `/api/messages/contact-rules/${teamMemberId}`),
+
+  saveContactRules: (teamMemberId: string, peerUserIds: string[]) =>
+    request<{ success: true; allowed: string[] }>(
+      'PUT', `/api/messages/contact-rules/${teamMemberId}`, { peer_user_ids: peerUserIds },
+    ),
+
 }

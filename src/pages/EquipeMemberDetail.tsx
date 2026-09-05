@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Mail, Phone, Briefcase, Calendar, Loader2,
   CircleDollarSign, Wallet, TrendingUp, TrendingDown, FileDown,
   FolderKanban, ShieldCheck, Activity, CalendarDays, User,
   CheckCircle2, XCircle, Clock, MapPin, Building2, IdCard,
-  Timer, BadgeCheck, Award, Zap, Pencil,
+  Timer, BadgeCheck, Award, Zap, Pencil, MessageCircle, Lock, Check, Loader2 as Spinner,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import TeamMemberForm from '@/components/equipe/TeamMemberForm'
 import type { TeamMember } from '@/hooks/useTeam'
-import { teamMgmtApi } from '@/lib/api'
+import { teamMgmtApi, messagesApi, type DmPerson, type DmContactRules } from '@/lib/api'
 import { sopCategoryLabel } from '@/lib/sopCategories'
 import { cn } from '@/lib/utils'
 
@@ -189,6 +189,7 @@ export default function EquipeMemberDetail() {
           <TabsTrigger value="conges"><CalendarDays className="w-4 h-4 mr-1.5" /> Congés</TabsTrigger>
           <TabsTrigger value="projets"><FolderKanban className="w-4 h-4 mr-1.5" /> Projets & tâches</TabsTrigger>
           <TabsTrigger value="access"><ShieldCheck className="w-4 h-4 mr-1.5" /> Accès SOPs</TabsTrigger>
+          <TabsTrigger value="messagerie"><MessageCircle className="w-4 h-4 mr-1.5" /> Messagerie</TabsTrigger>
           <TabsTrigger value="activity"><Activity className="w-4 h-4 mr-1.5" /> Journal</TabsTrigger>
         </TabsList>
 
@@ -197,6 +198,7 @@ export default function EquipeMemberDetail() {
         <TabsContent value="conges"><CongesTab memberId={id!} /></TabsContent>
         <TabsContent value="projets"><ProjetsTab memberId={id!} member={m} tenantBase={base} /></TabsContent>
         <TabsContent value="access"><AccessTab access={m.access ?? []} /></TabsContent>
+        <TabsContent value="messagerie"><MessagerieTab memberId={id!} memberName={fullName} /></TabsContent>
         <TabsContent value="activity"><ActivityTab memberId={id!} initialActivity={m.activity ?? []} /></TabsContent>
       </Tabs>
     </div>
@@ -995,6 +997,216 @@ function AccessBadge({ level }: { level: string }) {
   }
   const s = map[level] ?? { label: level, cls: 'bg-muted text-muted-foreground' }
   return <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${s.cls}`}>{s.label}</span>
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TAB 5 bis — Messagerie : avec qui cette personne peut échanger
+
+   Par défaut, un employé ne joint que l'administration. Tout le reste
+   se coche ici, une personne à la fois : c'est la réponse à « toutes
+   les personnes ne doivent pas apparaître, seulement celles que j'ai
+   sélectionnées ».
+
+   Enregistrement immédiat, sans bouton : ces cases se cochent une par
+   une, souvent en réaction à un besoin précis (« ouvre-lui l'accès à
+   Ghita »), et un « Enregistrer » oublié laisserait l'accès fermé sans
+   que personne ne s'en aperçoive.
+═══════════════════════════════════════════════════════════════════ */
+function MessagerieTab({ memberId, memberName }: { memberId: string; memberName: string }) {
+  const qc = useQueryClient()
+  const [justSaved, setJustSaved] = useState(false)
+
+  /* Clé unique, réutilisée par la requête ET par la bascule optimiste :
+     deux littéraux divergents ici, et la case se remettrait toute seule
+     à sa position d'avant au premier rafraîchissement. */
+  const cle = ['messages', 'contact-rules', memberId] as const
+
+  const q = useQuery({
+    queryKey: cle,
+    queryFn:  () => messagesApi.contactRules(memberId),
+  })
+
+  const m = useMutation({
+    mutationFn: (ids: string[]) => messagesApi.saveContactRules(memberId, ids),
+    /* Bascule optimiste : la case répond au doigt, le serveur confirme
+       derrière. En cas d'échec, on remet l'état précédent — une case
+       qui reste cochée après un refus serait un mensonge. */
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: cle })
+      const previous = qc.getQueryData<DmContactRules>(cle)
+      qc.setQueryData<DmContactRules>(cle, old => (old ? { ...old, allowed: ids } : old))
+      return { previous }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData<DmContactRules>(cle, context.previous)
+    },
+    onSuccess: () => {
+      setJustSaved(true)
+      setTimeout(() => setJustSaved(false), 2000)
+      /* La liste des correspondants de CETTE personne change : on ne
+         peut pas la rafraîchir à sa place, mais on invalide la nôtre au
+         cas où l'autorisation nous concerne. */
+      void qc.invalidateQueries({ queryKey: ['messages'] })
+    },
+  })
+
+  if (q.isLoading) {
+    return <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+  }
+  if (q.isError) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        Impossible de charger les autorisations.{' '}
+        <button onClick={() => q.refetch()} className="text-blue-600 hover:underline">Réessayer</button>
+      </div>
+    )
+  }
+
+  const data = q.data!
+  if (data.no_account) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <MessageCircle className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+        <p className="text-sm text-muted-foreground">
+          {memberName} n'a pas encore de compte : son invitation n'a pas été acceptée.
+          Les autorisations de messagerie seront réglables dès sa première connexion.
+        </p>
+      </div>
+    )
+  }
+
+  const allowed = new Set(data.allowed)
+  const toggle = (p: DmPerson) => {
+    if (p.toujours_autorise) return
+    const next = new Set(allowed)
+    if (next.has(p.user_id)) next.delete(p.user_id)
+    else next.add(p.user_id)
+    m.mutate([...next])
+  }
+
+  const administration = data.people.filter(p => p.toujours_autorise)
+  const autres         = data.people.filter(p => !p.toujours_autorise)
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <MessageCircle className="w-4 h-4 text-blue-600" />
+              Avec qui {memberName} peut échanger
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1 max-w-2xl">
+              Dans sa messagerie, cette personne ne verra que les correspondants cochés ici.
+              L'administration de l'espace reste toujours joignable — c'est la voie hiérarchique,
+              elle ne se coupe pas.
+            </p>
+          </div>
+          <span className={cn(
+            'text-[11px] flex items-center gap-1.5 transition-opacity duration-200',
+            m.isPending || justSaved ? 'opacity-100' : 'opacity-0',
+            justSaved ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground',
+          )}>
+            {m.isPending
+              ? <><Spinner className="w-3 h-3 animate-spin" /> Enregistrement…</>
+              : <><Check className="w-3 h-3" /> Enregistré</>}
+          </span>
+        </div>
+      </div>
+
+      {administration.length > 0 && (
+        <div className="rounded-xl border border-border bg-card">
+          <div className="p-3 border-b border-border">
+            <h4 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Administration — toujours joignable
+            </h4>
+          </div>
+          <div className="divide-y divide-border">
+            {administration.map(p => <PersonneLigne key={p.user_id} p={p} coche locked />)}
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-border bg-card">
+        <div className="p-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
+          <h4 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            Le reste de l'équipe ({autres.filter(p => allowed.has(p.user_id)).length}/{autres.length} autorisé{autres.filter(p => allowed.has(p.user_id)).length > 1 ? 's' : ''})
+          </h4>
+          {autres.length > 0 && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => m.mutate(autres.map(p => p.user_id))}
+                className="text-[11px] text-blue-600 hover:underline"
+              >Tout autoriser</button>
+              <button
+                onClick={() => m.mutate([])}
+                className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              >Tout retirer</button>
+            </div>
+          )}
+        </div>
+        {autres.length === 0 ? (
+          <p className="p-6 text-center text-sm text-muted-foreground">
+            Personne d'autre dans cet espace pour l'instant.
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {autres.map(p => (
+              <PersonneLigne
+                key={p.user_id}
+                p={p}
+                coche={allowed.has(p.user_id)}
+                onToggle={() => toggle(p)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PersonneLigne({ p, coche, locked, onToggle }: {
+  p: DmPerson; coche: boolean; locked?: boolean; onToggle?: () => void
+}) {
+  const initiales = p.name.split(' ').filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase()
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      onClick={onToggle}
+      className={cn(
+        'w-full p-3 flex items-center gap-3 text-left transition-colors',
+        locked ? 'cursor-default' : 'hover:bg-muted/50',
+      )}
+    >
+      <span className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-violet-600 text-white
+                       text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+        {initiales || '?'}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm font-medium text-foreground truncate">{p.name}</span>
+        <span className="block text-[11px] text-muted-foreground truncate">
+          {p.role || (p.kind === 'admin' ? 'Compte d\'administration' : 'Employé')} · {p.email}
+        </span>
+      </span>
+      {locked ? (
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground flex-shrink-0">
+          <Lock className="w-3 h-3" /> Toujours
+        </span>
+      ) : (
+        <span className={cn(
+          'w-10 h-5 rounded-full transition-all relative flex-shrink-0',
+          coche ? 'bg-blue-600' : 'bg-border',
+        )}>
+          <span className={cn(
+            'w-4 h-4 bg-white rounded-full absolute top-0.5 transition-all',
+            coche ? 'right-0.5' : 'left-0.5',
+          )} />
+        </span>
+      )}
+    </button>
+  )
 }
 
 /* ═══════════════════════════════════════════════════════════════════
