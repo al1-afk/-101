@@ -27,6 +27,7 @@ import {
   buildSections, computePricing, sanitizeText, PROMPT_VERSION,
   type PriceGrid, type ProspectInput, type SnapshotLog, type QuoteOptions,
 } from '../lib/aiQuoteCore'
+import { peutAcceder, type CrmActor } from '../lib/crmScope'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 import {
@@ -63,6 +64,36 @@ const quoteLimiter = rateLimit({
 
 router.use(requireAuth)
 router.use(requireQuoteRole)
+
+/* ─────────────────────────────────────────────────────────────────
+   PÉRIMÈTRE CRM
+
+   Ce module contourne le CRUD générique : il lit `prospects` par ses
+   propres requêtes (`loadProspect`, `loadLogs`). Le garde de rôle
+   ci-dessus laisse donc passer TOUT commercial vers N'IMPORTE QUEL
+   prospect de l'espace — notes libres comprises, qui sont précisément
+   ce que le module envoie au fournisseur d'IA. Restreindre la liste
+   dans crud.ts n'y changeait rien : il suffit d'un identifiant pour
+   entrer ici.
+
+   L'action contrôlée est `quote` et non `view` : produire un devis à
+   partir d'un prospect est un acte commercial, pas une consultation.
+   Un partage en lecture seule (can_view sans can_quote) donne la fiche,
+   pas le droit d'aller chiffrer l'affaire de quelqu'un d'autre.
+───────────────────────────────────────────────────────────────── */
+function acteur(req: Request): CrmActor {
+  return {
+    tenantId: req.user!.tenantId,
+    userId:   req.user!.userId,
+    /* Rôle EFFECTIF : requireAuth l'a relu en base (middleware/auth.ts). */
+    role:     req.user!.role ?? '',
+  }
+}
+
+const HORS_PERIMETRE_PROSPECT =
+  'Accès refusé : ce prospect ne fait pas partie de votre périmètre.'
+const HORS_PERIMETRE_DEVIS =
+  'Accès refusé : ce devis ne fait pas partie de votre périmètre.'
 
 /* ─── Prompts système ──────────────────────────────────────────────── */
 const SECURITY_NOTE =
@@ -208,10 +239,17 @@ router.get('/status', (_req, res) => {
 ═══════════════════════════════════════════════════════════════════ */
 router.get('/context/:prospectId', async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId
+  const prospectId = String(req.params.prospectId ?? '')
+  /* Format vérifié AVANT toute requête : un id malformé provoquait un
+     cast Postgres 22P02 rendu en 500 au lieu d'un 400 lisible. */
+  if (!UUID_RE.test(prospectId)) return res.status(400).json({ error: 'Identifiant de prospect invalide' })
+  if (!(await peutAcceder(acteur(req), 'prospect', prospectId, 'quote'))) {
+    return res.status(403).json({ error: HORS_PERIMETRE_PROSPECT })
+  }
   try {
-    const prospect = await loadProspect(tenantId, req.params.prospectId)
+    const prospect = await loadProspect(tenantId, prospectId)
     if (!prospect) return res.status(404).json({ error: 'Prospect introuvable' })
-    const logs = await loadLogs(tenantId, req.params.prospectId)
+    const logs = await loadLogs(tenantId, prospectId)
     const counts: Record<string, number> = {}
     for (const l of logs) counts[l.type] = (counts[l.type] ?? 0) + 1
     const gridRows = await tenantQuery<{ n: number }>(
@@ -254,7 +292,13 @@ router.post('/analyze', quoteLimiter, async (req: Request, res: Response) => {
   const tenantId = req.user!.tenantId
   const prospectId = String(req.body?.prospectId ?? '')
   const options: QuoteOptions = (req.body?.options && typeof req.body.options === 'object') ? req.body.options : {}
-  if (!prospectId) return res.status(400).json({ error: 'prospectId requis' })
+  if (!UUID_RE.test(prospectId)) return res.status(400).json({ error: 'prospectId manquant ou invalide' })
+  /* Contrôle AVANT l'appel IA : sans lui, un commercial faisait analyser
+     par le fournisseur d'IA les notes d'un prospect qu'il n'a pas le
+     droit de lire, et en recevait le résumé structuré en réponse. */
+  if (!(await peutAcceder(acteur(req), 'prospect', prospectId, 'quote'))) {
+    return res.status(403).json({ error: HORS_PERIMETRE_PROSPECT })
+  }
 
   try {
     const prospect = await loadProspect(tenantId, prospectId)
@@ -321,7 +365,12 @@ router.post('/generate', quoteLimiter, async (req: Request, res: Response) => {
   const generationId = req.body?.generationId ? String(req.body.generationId) : null
   const options: QuoteOptions = (req.body?.options && typeof req.body.options === 'object') ? req.body.options : {}
   const analysisIn = req.body?.analysis && typeof req.body.analysis === 'object' ? req.body.analysis : {}
-  if (!prospectId) return res.status(400).json({ error: 'prospectId requis' })
+  if (!UUID_RE.test(prospectId)) return res.status(400).json({ error: 'prospectId manquant ou invalide' })
+  /* Même contrôle qu'à l'analyse : /generate est appelable directement,
+     sans passer par /analyze, et renvoie nom et société du prospect. */
+  if (!(await peutAcceder(acteur(req), 'prospect', prospectId, 'quote'))) {
+    return res.status(403).json({ error: HORS_PERIMETRE_PROSPECT })
+  }
 
   try {
     const prospect = await loadProspect(tenantId, prospectId)
@@ -441,6 +490,14 @@ router.post('/:id/link', async (req: Request, res: Response) => {
   // une erreur de cast Postgres (22P02) renvoyée en 500 au lieu d'un 400 clair.
   if (!UUID_RE.test(quoteId)) return res.status(400).json({ error: 'quoteId invalide' })
   if (!UUID_RE.test(genId))   return res.status(400).json({ error: 'Identifiant de génération invalide' })
+
+  /* L'appartenance au tenant (vérifiée plus bas par la RLS) ne suffit
+     plus : rattacher une génération à un devis, c'est écrire dans la
+     traçabilité de CE devis. On exige donc le droit de le modifier —
+     et le test répond « non » avant même de révéler s'il existe. */
+  if (!(await peutAcceder(acteur(req), 'devis', quoteId, 'edit'))) {
+    return res.status(403).json({ error: HORS_PERIMETRE_DEVIS })
+  }
 
   try {
     // Vérifie que le devis appartient bien au tenant (RLS).

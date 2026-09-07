@@ -32,6 +32,9 @@ const FinanceIA      = lazy(() => import('@/pages/FinanceIA'))
 const Abonnements    = lazy(() => import('@/pages/Abonnements'))
 const Equipe             = lazy(() => import('@/pages/Equipe'))
 const EquipeMemberDetail = lazy(() => import('@/pages/EquipeMemberDetail'))
+/* Les commerciaux — vue spécialisée de l'équipe, réservée à l'administration */
+const Commerciaux        = lazy(() => import('@/pages/Commerciaux'))
+const CommercialDetail   = lazy(() => import('@/pages/CommercialDetail'))
 const StagiaireDetail    = lazy(() => import('@/pages/StagiaireDetail'))
 const Fournisseurs   = lazy(() => import('@/pages/Fournisseurs'))
 const Contacts       = lazy(() => import('@/pages/Contacts'))
@@ -93,6 +96,7 @@ const TeamLogin           = lazy(() => import('@/pages/TeamLogin'))
 const MySpaceLayout       = lazy(() => import('@/pages/MySpace/MySpaceLayout'))
 const MyDashboard         = lazy(() => import('@/pages/MySpace/MyDashboard'))
 const MySops              = lazy(() => import('@/pages/MySpace/MySops'))
+const MyCrm               = lazy(() => import('@/pages/MySpace/MyCrm'))
 const MyTasks             = lazy(() => import('@/pages/MySpace/MyTasks'))
 const MyProjets           = lazy(() => import('@/pages/MySpace/MyProjets'))
 const MyProjetDetail      = lazy(() => import('@/pages/MySpace/MyProjetDetail'))
@@ -133,6 +137,7 @@ export default function App() {
             <Route path="/my-space" element={<MySpaceLayout />}>
               <Route index               element={<MyDashboard />} />
               <Route path="sops"         element={<MySops />} />
+              <Route path="crm"          element={<MyCrm />} />
               <Route path="tasks"        element={<MyTasks />} />
               <Route path="projets"      element={<MyProjets />} />
               <Route path="projets/:id"  element={<MyProjetDetail />} />
@@ -201,6 +206,8 @@ export default function App() {
               <Route path="abonnements"                element={<Abonnements />} />
               <Route path="abonnements-clients"        element={<AbonnementsClients />} />
               <Route path="integrations"               element={<Integrations />} />
+              <Route path="commerciaux"                element={<Commerciaux />} />
+              <Route path="commerciaux/:userId"        element={<CommercialDetail />} />
               <Route path="equipe"                     element={<Equipe />} />
               <Route path="equipe/:id"                 element={<EquipeMemberDetail />} />
               <Route path="stagiaire/:id"              element={<StagiaireDetail />} />

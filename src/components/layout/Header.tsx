@@ -17,6 +17,21 @@ import { cn } from '@/lib/utils'
 import { useAlerts, type Alert, type AlertPriority } from '@/hooks/useAlerts'
 import { openGlobalSearch } from '@/components/GlobalSearch'
 
+/* Libellé du rôle réellement porté par la personne connectée.
+   « Admin » était écrit en dur ici : tout le monde lisait « Admin » sous
+   son nom, y compris un commercial ou un comptable. Un utilisateur qui
+   teste ses propres restrictions en conclut logiquement qu'il s'est
+   trompé de session — ce qui est arrivé. */
+const LIBELLE_ROLE: Record<string, string> = {
+  admin:       'Administrateur',
+  manager:     'Manager',
+  commercial:  'Commercial',
+  comptable:   'Comptable',
+  developpeur: 'Développeur',
+  viewer:      'Lecture seule',
+}
+const libelleRole = (r?: string | null) => (r && LIBELLE_ROLE[r]) || 'Utilisateur'
+
 const BREADCRUMB_MAP: Record<string, string> = {
   '/':               'Tableau de bord',
   '/prospects':      'CRM / Prospects',
@@ -131,7 +146,7 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
   const location  = useLocation()
   const navigate  = useNavigate()
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
-  const { signOut } = useAuth()
+  const { signOut, role, name } = useAuth()
   const [alertsOpen, setAlertsOpen] = useState(false)
 
   const { alerts, unreadCount, criticalCount, dismiss, dismissAll } = useAlerts()
@@ -415,8 +430,12 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
                 <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-white/25 blur-sm" />
               </div>
               <div className="text-left hidden md:block">
-                <p className="text-[12.5px] font-semibold text-foreground leading-none">NEXT GITAL</p>
-                <p className="text-[10.5px] text-slate-400 dark:text-slate-500 mt-0.5">Admin</p>
+                <p className="text-[12.5px] font-semibold text-foreground leading-none truncate max-w-[160px]">
+                  {name || 'NEXT GITAL'}
+                </p>
+                <p className="text-[10.5px] text-slate-400 dark:text-slate-500 mt-0.5">
+                  {libelleRole(role)}
+                </p>
               </div>
             </button>
           </DropdownMenuTrigger>

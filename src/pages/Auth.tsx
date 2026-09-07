@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Eye, EyeOff, Lock, Mail, ArrowRight, Loader2, X, KeyRound,
@@ -17,7 +17,13 @@ type TwoFAMethod  = 'email' | 'admin_manual' | 'admin_approval'
 
 export default function Auth() {
   const { isAuthorized, signIn, verifyLogin, resendLoginCode } = useAuth()
-  const [email, setEmail] = useState('')
+  /* L'adresse peut arriver dans l'URL : l'espace membre renvoie ici les
+     comptes du personnel qui se sont trompés de porte, avec leur e-mail
+     déjà saisi. Le retaper serait la meilleure façon d'introduire une
+     faute de frappe — c'est exactement ce qui vient de coûter plusieurs
+     tentatives à un utilisateur. */
+  const [params] = useSearchParams()
+  const [email, setEmail] = useState(params.get('email') ?? '')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)

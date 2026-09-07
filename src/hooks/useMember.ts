@@ -60,7 +60,16 @@ export function useMember() {
            OU si erreur transient (5xx, network) → on garde la session
            hydratée pour ne pas déconnecter injustement. */
         const msg = String(err?.message ?? '')
-        if (msg === 'Session expirée') {
+        /* Fiche employé supprimée, archivée, ou détachée de son compte :
+           le jeton reste cryptographiquement valide mais ne désigne plus
+           personne. Sans ce cas, la session restait « authentifiée » avec
+           un profil vide — l'espace membre tournait alors indéfiniment sur
+           son écran de chargement, sans jamais rediriger ni expliquer.
+           On purge le jeton : la personne revient à la page de connexion,
+           qui lui dira quoi faire. */
+        const compteDisparu = /espace introuvable|compte inactif|membre/i.test(msg)
+        if (msg === 'Session expirée' || compteDisparu) {
+          memberTokenStore.clear()
           setState({ ...INITIAL, loading: false })
         } else {
           setState(prev => ({ ...prev, loading: false }))

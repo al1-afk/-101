@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { unlink } from 'node:fs/promises'
 import path from 'node:path'
-import { tenantQuery, tenantQueryOne } from '../db/pool'
+import { query, tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { safeColumn } from '../middleware/security'
 import { tableRbac } from '../middleware/rbac'
@@ -14,6 +14,10 @@ import { ensureTenantColumnCache, tableIsTenantScoped } from '../db/tenantColumn
 import {
   notifyNewProspect, notifyTaskValidation, notifyNewPaiement, notifyDevisAccepte,
 } from '../lib/notificationEmails'
+import {
+  clausePerimetre, peutAcceder, estGestionnaire,
+  type CrmActor, type CrmResource,
+} from '../lib/crmScope'
 
 const router = Router()
 router.use(requireAuth)
@@ -96,6 +100,319 @@ const READONLY_COLUMNS: Record<string, Set<string>> = {
   /* Même raison pour l'accusé de consultation d'une tâche : il est posé
      par /api/my-space quand la personne assignée ouvre la tâche. */
   team_member_tasks: new Set(['viewed_at', 'viewed_by_name']),
+  /* Propriété CRM (migration 102). Ces deux colonnes DÉCIDENT de qui voit
+     la fiche : les laisser écrire depuis un formulaire annulerait tout le
+     dispositif, un commercial s'attribuant le portefeuille entier d'un
+     `PATCH { assigned_to: moi }`. `created_by` est posée une fois par le
+     serveur à la création et ne bouge plus jamais ; `assigned_to` est
+     réinjectée juste après ce filtre pour les SEULS gestionnaires
+     (cf. appliquerAssignationCrm). */
+  prospects: new Set(['created_by', 'assigned_to']),
+  clients:   new Set(['created_by', 'assigned_to']),
+  devis:     new Set(['created_by', 'assigned_to']),
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PÉRIMÈTRE CRM PAR UTILISATEUR (migration 102)
+
+   Ce fichier est l'entonnoir d'une cinquantaine de tables. Tout ce qui
+   suit ne concerne QUE prospects, clients et devis, et doit rester
+   rigoureusement sans effet pour les autres : une table absente de la
+   correspondance ci-dessous traverse crud.ts exactement comme avant, au
+   paramètre SQL près.
+
+   La règle d'accès elle-même n'est PAS écrite ici — elle vit dans
+   server/lib/crmScope.ts, seul endroit du dépôt où elle est rédigée.
+   Ici on ne fait que la brancher aux cinq points d'entrée du CRUD :
+   liste, fiche, création, modification, suppression.
+══════════════════════════════════════════════════════════════════ */
+
+/* Map (et non objet littéral) : `RESSOURCE_CRM.get('constructor')` rend
+   undefined, là où un objet aurait rendu une fonction héritée. Le nom de
+   table est déjà filtré par guardTable, c'est une ceinture de plus. */
+const RESSOURCE_CRM = new Map<string, CrmResource>([
+  ['prospects', 'prospect'],
+  ['clients',   'client'],
+  ['devis',     'devis'],
+])
+
+/* ── Tables ENFANTS d'une ressource CRM ─────────────────────────────
+   Leur périmètre n'est pas le leur : c'est celui de leur parent. Une
+   ligne de `prospect_logs` — les « suivis » du cahier des charges :
+   appels, notes, comptes rendus — appartient au prospect qu'elle
+   documente, et rien d'autre ne peut en décider.
+
+   Sans ce branchement, la fiche d'un prospect répondait bien 403 à un
+   commercial étranger… pendant que `GET /api/prospect_logs` lui servait
+   la timeline complète de l'espace. Le contenu y est plus sensible que
+   la fiche elle-même : un test a fait ressortir mot pour mot une note
+   « marge réelle 45 %, plancher 62 000 MAD » posée par une collègue.
+   L'écriture était ouverte de la même façon — on pouvait déposer un
+   compte rendu dans le dossier d'autrui, sous son propre nom. */
+const TABLE_DE_RESSOURCE: Record<CrmResource, string> = {
+  prospect: 'prospects', client: 'clients', devis: 'devis',
+}
+
+const ENFANT_CRM = new Map<string, { parent: CrmResource; fk: string }>([
+  ['prospect_logs', { parent: 'prospect', fk: 'prospect_id' }],
+])
+
+const UUID_CRM_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Le parent d'une ligne enfant, lu en base. null si la ligne n'existe pas. */
+async function parentDeLEnfant(
+  table: string, id: string, tenantId: string,
+): Promise<string | null> {
+  const enfant = ENFANT_CRM.get(table)
+  if (!enfant) return null
+  const rows = await tenantQuery<Record<string, string | null>>(
+    tenantId,
+    `SELECT ${enfant.fk} AS parent_id FROM ${table} WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId],
+  )
+  return rows[0]?.parent_id ?? null
+}
+
+/* L'acteur, tel que crmScope l'attend. `req.user.role` est le rôle
+   EFFECTIF : requireAuth l'a relu dans tenant_users avant d'arriver ici
+   (server/middleware/auth.ts), donc un jeton émis avant une
+   rétrogradation ne porte plus les droits d'avant. */
+function acteurCrm(req: Request): CrmActor {
+  return {
+    tenantId: req.user!.tenantId,
+    userId:   req.user!.userId,
+    role:     req.user!.role,
+  }
+}
+
+/* ── Les colonnes de la 102 sont-elles déjà en base ? ────────────────
+   Les migrations de ce dépôt sont appliquées À LA MAIN en production,
+   APRÈS le déploiement automatique du code. Il existe donc une fenêtre
+   pendant laquelle ce fichier tourne sans les colonnes qu'il écrit :
+   sans ce sondage, chaque création de prospect y échouerait en 42703
+   (« column "created_by" does not exist »). On casserait l'existant pour
+   installer une nouveauté — exactement l'interdit posé.
+
+   Le OUI est définitif : ce lot ne supprime aucune colonne, une fois
+   présentes elles le restent. Le NON, lui, est REJOUÉ toutes les minutes
+   — et c'est le point important : la migration est appliquée à la main
+   SUR UN PROCESS DÉJÀ EN ROUTE. Un « non » mémorisé pour de bon ferait
+   survivre le 503 à la migration elle-même, jusqu'au prochain
+   redémarrage, et personne ne comprendrait pourquoi. Une requête sur
+   information_schema par minute, dans le pire des cas, est un prix
+   dérisoire pour ne pas avoir cet incident-là. */
+let colonnes102 = false
+let prochainSondage102 = 0
+const RESONDAGE_102_MS = 60_000
+
+async function perimetreCrmDisponible(): Promise<boolean> {
+  if (colonnes102) return true
+  const now = Date.now()
+  if (now < prochainSondage102) return false
+  prochainSondage102 = now + RESONDAGE_102_MS
+  try {
+    const rows = await query<{ n: string }>(
+      `SELECT count(*)::text AS n
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name  IN ('prospects', 'clients', 'devis')
+          AND column_name IN ('created_by', 'assigned_to')`
+    )
+    /* 3 tables x 2 colonnes : tout ou rien. Une migration à moitié
+       appliquée est un état qu'on refuse d'exploiter — estampiller
+       prospects mais pas devis produirait un périmètre incohérent,
+       bien plus difficile à diagnostiquer qu'un refus net. */
+    colonnes102 = Number(rows[0]?.n ?? 0) === 6
+    if (!colonnes102) {
+      logger.warn(
+        '[crud:crm-scope] migration 102 absente : propriété CRM non estampillée, '
+        + 'périmètre indisponible pour les non-gestionnaires'
+      )
+    }
+    return colonnes102
+  } catch (e: any) {
+    logger.error('[crud:crm-scope] sondage du schéma impossible —', e?.message)
+    return false
+  }
+}
+
+/* Résultat du calcul de périmètre pour une lecture de LISTE.
+   Trois états et non un booléen : « rien à filtrer » (gestionnaire, ou
+   capacité view_all) et « je ne PEUX pas filtrer » (schéma pas prêt)
+   mènent à des réponses opposées — tout voir, ou ne rien voir. Les
+   confondre serait la fuite. */
+type PerimetreListe =
+  | { etat: 'libre' }
+  | { etat: 'filtre'; sql: string; params: unknown[] }
+  | { etat: 'indisponible' }
+
+async function perimetreListeCrm(
+  table: string,
+  req: Request,
+  startIdx: number,
+): Promise<PerimetreListe> {
+  const r = RESSOURCE_CRM.get(table)
+  const enfant = ENFANT_CRM.get(table)
+  if (!r && !enfant) return { etat: 'libre' }
+
+  /* clausePerimetre rend null pour un gestionnaire ou un porteur de
+     `<type>.view_all` : aucune requête, aucun filtre. */
+  const ressource = r ?? enfant!.parent
+  /* Pour une table enfant, la clause est calculée sur la table PARENT,
+     puis enfermée dans un IN (…) : on ne duplique pas la règle, on la
+     réutilise là où elle est écrite. */
+  const alias = r ? table : 'p_perimetre'
+  const clause = await clausePerimetre(acteurCrm(req), ressource, alias, startIdx)
+  if (!clause) return { etat: 'libre' }
+
+  if (!(await perimetreCrmDisponible())) return { etat: 'indisponible' }
+
+  if (enfant) {
+    const parentTable = TABLE_DE_RESSOURCE[enfant.parent]
+    return {
+      etat: 'filtre',
+      sql: `${table}.${enfant.fk} IN (SELECT p_perimetre.id FROM public.${parentTable} p_perimetre`
+         + ` WHERE p_perimetre.tenant_id = ${table}.tenant_id AND ${clause.sql})`,
+      params: clause.params,
+    }
+  }
+  return { etat: 'filtre', sql: clause.sql, params: clause.params }
+}
+
+/**
+ * Refus de périmètre : 403 « Accès refusé », plus une trace.
+ *
+ * 403 et NON 404, comme l'exige le contrat — et c'est aussi le bon
+ * message : une fiche hors périmètre EXISTE, la personne peut en
+ * demander l'accès à son manager. Un 404 lui ferait croire à une donnée
+ * supprimée et produirait un ticket de support pour rien.
+ *
+ * L'événement est journalisé au même titre qu'un refus RBAC : c'est
+ * l'accumulation — quelqu'un qui balaie les fiches des autres — qui est
+ * intéressante, pas l'occurrence isolée.
+ */
+function refuserPerimetre(
+  req: Request, res: Response, table: string, action: string,
+): void {
+  markSecurityLogged(req)
+  trackSecurityEvent({
+    type: 'permission_denied', req,
+    httpStatus: 403,
+    reason: 'crm_scope_denied',
+    metadata: { table, action, role: req.user!.role },
+  })
+  res.status(403).json({ error: 'Accès refusé' })
+}
+
+/**
+ * Applique la propriété CRM à une CRÉATION.
+ *
+ * `created_by` est TOUJOURS l'utilisateur connecté, quoi qu'envoie le
+ * client : le POST générique n'applique pas READONLY_COLUMNS (ce filtre
+ * n'existe que dans le PATCH), donc le forçage est écrit ici, en toutes
+ * lettres. Sans lui, il suffirait de poster `{ created_by: <autre> }`
+ * pour se retirer une fiche du périmètre, ou pour l'attribuer à un
+ * collègue.
+ *
+ * `assigned_to` n'est recevable que d'un gestionnaire ; pour tout autre
+ * rôle elle vaut le créateur — sans quoi un commercial créerait une
+ * fiche qu'il ne verrait pas lui-même à la seconde suivante.
+ *
+ * Renvoie un message d'erreur à renvoyer en 400, ou null.
+ */
+async function appliquerProprieteCrm(
+  table: string, req: Request, data: Record<string, unknown>,
+): Promise<string | null> {
+  const r = RESSOURCE_CRM.get(table)
+  if (!r) return null
+
+  /* Ce que le client a envoyé ne compte jamais. */
+  delete data.created_by
+  delete data.assigned_to
+
+  /* Schéma pas encore migré : on n'écrit NI l'une NI l'autre, et la
+     création se comporte comme avant la 102 plutôt que d'échouer. */
+  if (!(await perimetreCrmDisponible())) return null
+
+  const moi = req.user!.userId
+  data.created_by = moi
+
+  if (!estGestionnaire(req.user!.role)) {
+    data.assigned_to = moi
+    return null
+  }
+
+  const demande = await lireAssignationDemandee(req)
+  if (!demande.ok) return demande.erreur
+  /* Un gestionnaire qui ne précise rien laisse la fiche « non
+     attribuée » (NULL) : elle reste visible des seuls gestionnaires,
+     ce qui est le comportement voulu et documenté par la migration. */
+  if (demande.valeur !== undefined) data.assigned_to = demande.valeur
+  return null
+}
+
+/**
+ * Réinjecte `assigned_to` dans une MODIFICATION, pour les seuls
+ * gestionnaires.
+ *
+ * READONLY_COLUMNS vient de la retirer du corps — c'est la bonne valeur
+ * par défaut. Mais désigner le responsable d'un dossier est précisément
+ * le geste d'un manager, et la fiche doit pouvoir le faire.
+ *
+ * NOTE sur le rôle non gestionnaire : on IGNORE sa demande, on ne la
+ * remplace pas par lui-même. Repositionner `assigned_to = créateur` à
+ * chaque PATCH — comme on le fait à la création — écraserait
+ * l'attribution décidée par un manager dès la première modification
+ * faite par le créateur. Ce serait un vol de dossier automatique.
+ */
+async function appliquerAssignationCrm(
+  table: string, req: Request, data: Record<string, unknown>,
+): Promise<string | null> {
+  const r = RESSOURCE_CRM.get(table)
+  if (!r) return null
+  if (!estGestionnaire(req.user!.role)) return null
+  if (!(await perimetreCrmDisponible())) return null
+
+  const demande = await lireAssignationDemandee(req)
+  if (!demande.ok) return demande.erreur
+  if (demande.valeur !== undefined) data.assigned_to = demande.valeur
+  return null
+}
+
+/**
+ * Lit et valide `assigned_to` du corps de la requête.
+ *   undefined → rien de demandé ; null → désattribution explicite ;
+ *   string    → uuid d'un membre ACTIF de cet espace.
+ *
+ * La vérification d'appartenance n'est pas décorative : attribuer une
+ * fiche au compte d'un AUTRE espace la rendrait invisible pour toute
+ * l'équipe qui la travaille (le périmètre est toujours joint au filtre
+ * de tenant), sans que personne ne comprenne pourquoi. Mieux vaut un
+ * refus immédiat et lisible.
+ */
+async function lireAssignationDemandee(
+  req: Request,
+): Promise<{ ok: true; valeur: string | null | undefined } | { ok: false; erreur: string }> {
+  const brut = (req.body as Record<string, unknown> | undefined)?.assigned_to
+  if (brut === undefined) return { ok: true, valeur: undefined }
+  /* '' vient des <select> vides du front : c'est « aucun responsable ». */
+  if (brut === null || brut === '') return { ok: true, valeur: null }
+  if (typeof brut !== 'string' || !UUID_CRM_RE.test(brut)) {
+    return { ok: false, erreur: 'Responsable invalide' }
+  }
+  try {
+    const membre = await tenantQueryOne<{ user_id: string }>(
+      req.user!.tenantId,
+      `SELECT user_id FROM public.tenant_users
+        WHERE tenant_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.user!.tenantId, brut],
+    )
+    if (!membre) return { ok: false, erreur: "Ce responsable ne fait pas partie de l'espace" }
+  } catch (e: any) {
+    logger.error('[crud:crm-assignation]', e?.message)
+    return { ok: false, erreur: 'Vérification du responsable impossible' }
+  }
+  return { ok: true, valeur: brut }
 }
 
 /**
@@ -236,6 +553,25 @@ router.get('/:table', async (req: Request, res: Response) => {
       whereVals.push(tenantId)
       whereClauses.push(`tenant_id = $${whereVals.length}`)
     }
+    /* Périmètre par utilisateur — ajouté APRÈS le filtre de tenant, donc
+       le premier placeholder encore libre est bien whereVals.length + 1.
+       Les paramètres du périmètre sont poussés dans le MÊME tableau :
+       LIMIT et OFFSET, numérotés à partir de whereVals.length, suivent
+       tout seuls. C'est la seule façon de ne pas décaler la requête. */
+    const perimetre = await perimetreListeCrm(table, req, whereVals.length + 1)
+    if (perimetre.etat === 'indisponible') {
+      /* On ne peut pas filtrer : on ne sert RIEN plutôt que tout. 503 et
+         non 500 — la panne est temporaire et se répare en appliquant la
+         migration, le message doit le dire. */
+      return res.status(503).json({
+        error: 'Mise à jour de la base en cours : cette liste sera de nouveau disponible dans quelques instants.',
+      })
+    }
+    if (perimetre.etat === 'filtre') {
+      whereVals.push(...perimetre.params)
+      whereClauses.push(perimetre.sql)
+    }
+
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
 
     const rows = await tenantQuery(
@@ -269,9 +605,28 @@ router.get('/:table/:id', async (req: Request, res: Response) => {
       noteNotFound(req, table)
       return res.status(404).json({ error: 'Non trouvé' })
     }
+
+    /* La fiche existe et appartient bien à l'espace — mais pas forcément
+       au périmètre de cette personne. 403, jamais 404 : voir
+       refuserPerimetre. Le contrôle est fait APRÈS la lecture pour ne pas
+       transformer un identifiant inexistant en 403, ce qui rendrait le
+       débogage impossible côté support. */
+    const rFiche = RESSOURCE_CRM.get(table)
+    if (rFiche && !(await peutAcceder(acteurCrm(req), rFiche, String(id), 'view'))) {
+      return refuserPerimetre(req, res, table, 'view')
+    }
+    /* Ligne enfant : c'est le PARENT qui décide. */
+    const enfantFiche = ENFANT_CRM.get(table)
+    if (enfantFiche) {
+      const parentId = (row as Record<string, unknown>)[enfantFiche.fk]
+      if (typeof parentId === 'string'
+          && !(await peutAcceder(acteurCrm(req), enfantFiche.parent, parentId, 'view'))) {
+        return refuserPerimetre(req, res, table, 'view')
+      }
+    }
     res.json(row)
   } catch (err: any) {
-    res.status(500).json({ error: 'Erreur serveur' })
+    sendDbError(res, err, `[GET /api/${table}/:id]`)
   }
 })
 
@@ -328,6 +683,11 @@ function sendDbError(res: Response, err: any, ctx: string, extra?: unknown): voi
     case '23503': return void res.status(400).json({ error: 'Référence liée introuvable ou déjà supprimée.' })
     case '23502': return void res.status(400).json({ error: 'Un champ obligatoire est manquant.' })
     case '23514': return void res.status(400).json({ error: 'Valeur non autorisée pour un des champs.' })
+    /* 22P02 = « invalid text representation » : un identifiant qui n'est
+       pas un UUID, une date illisible… C'est une requête MALFORMÉE, pas
+       une panne. Rendue en 500, elle faisait croire à un serveur cassé —
+       et une simple faute de frappe dans une URL suffisait à la produire. */
+    case '22P02': return void res.status(400).json({ error: 'Identifiant ou valeur au format invalide.' })
   }
   res.status(500).json({ error: code ? `Erreur serveur (${code})` : 'Erreur serveur' })
 }
@@ -341,6 +701,23 @@ router.post('/:table', async (req: Request, res: Response) => {
   const raw  = { ...req.body, tenant_id: req.user!.tenantId }
   const data = normalizeValues(Object.fromEntries(Object.entries(raw).filter(([k]) => SAFE_COL.test(k))), table)
   await stampAuthorship(table, data, req, 'create')
+  /* Propriété CRM : AVANT le calcul de keys/vals, sinon les colonnes
+     ajoutées ici n'auraient pas de placeholder. */
+  const erreurPropriete = await appliquerProprieteCrm(table, req, data)
+  if (erreurPropriete) return res.status(400).json({ error: erreurPropriete })
+
+  /* Déposer un suivi dans un dossier suppose d'avoir accès à ce dossier.
+     Sans ce contrôle, un commercial pouvait écrire un compte rendu
+     d'appel chez le prospect d'un collègue — et cette écriture
+     apparaissait chez lui, signée du nom de l'intrus. */
+  const enfantPost = ENFANT_CRM.get(table)
+  if (enfantPost) {
+    const parentId = data[enfantPost.fk]
+    if (typeof parentId === 'string' && UUID_CRM_RE.test(parentId)
+        && !(await peutAcceder(acteurCrm(req), enfantPost.parent, parentId, 'log'))) {
+      return refuserPerimetre(req, res, table, 'log')
+    }
+  }
   const keys = Object.keys(data)
   const vals = Object.values(data)
   const ph   = keys.map((_, i) => `$${i + 1}`).join(', ')
@@ -378,11 +755,50 @@ router.patch('/:table/:id', async (req: Request, res: Response) => {
   if (!guardTable(table, res, req)) return
 
   detectForgedTenant(req, table)
+
+  /* Périmètre AVANT toute écriture. Un refus doit être un 403 explicite,
+     pas un UPDATE qui ne touche aucune ligne : celui-ci finirait en 404
+     et laisserait croire à une fiche disparue. */
+  /* Modifier un suivi, c'est écrire dans le dossier du prospect : le
+     droit demandé est celui du parent, action « log ». */
+  const enfantPatch = ENFANT_CRM.get(table)
+  if (enfantPatch) {
+    const parentId = await parentDeLEnfant(table, String(id), req.user!.tenantId)
+    if (parentId && !(await peutAcceder(acteurCrm(req), enfantPatch.parent, parentId, 'log'))) {
+      return refuserPerimetre(req, res, table, 'log')
+    }
+  }
+
+  const rPatch = RESSOURCE_CRM.get(table)
+  if (rPatch && !(await peutAcceder(acteurCrm(req), rPatch, String(id), 'edit'))) {
+    return refuserPerimetre(req, res, table, 'edit')
+  }
+
   const readonly = READONLY_COLUMNS[table]
   const data = normalizeValues(Object.fromEntries(
     Object.entries(req.body as object)
       .filter(([k]) => SAFE_COL.test(k) && k !== 'tenant_id' && !readonly?.has(k))
   ), table)
+  /* Réinjection d'`assigned_to` pour un gestionnaire — AVANT le contrôle
+     « au moins un champ » : réassigner un dossier sans rien modifier
+     d'autre est une modification parfaitement légitime, et le seul
+     champ du corps vient d'être retiré par READONLY_COLUMNS. */
+  /* Déposer un suivi dans un dossier suppose d'avoir accès à ce
+     dossier. Sans ce contrôle, un commercial pouvait écrire un compte
+     rendu d'appel chez le prospect d'un collègue — et cette écriture
+     apparaissait chez lui, signée du nom de l'intrus. */
+  const enfantPost = ENFANT_CRM.get(table)
+  if (enfantPost) {
+    const parentId = data[enfantPost.fk]
+    if (typeof parentId === 'string' && UUID_CRM_RE.test(parentId)) {
+      if (!(await peutAcceder(acteurCrm(req), enfantPost.parent, parentId, 'log'))) {
+        return refuserPerimetre(req, res, table, 'log')
+      }
+    }
+  }
+
+  const erreurAssignation = await appliquerAssignationCrm(table, req, data)
+  if (erreurAssignation) return res.status(400).json({ error: erreurAssignation })
   if (!Object.keys(data).length) return res.status(400).json({ error: 'Aucun champ à mettre à jour' })
   /* Après le contrôle « au moins un champ » (l'estampille seule ne fait
      pas une mise à jour), mais AVANT le calcul de keys/vals : les deux
@@ -431,6 +847,25 @@ router.delete('/:table/:id', async (req: Request, res: Response) => {
   const table = tableParam(req)
   const { id } = req.params
   if (!guardTable(table, res, req)) return
+
+  /* Même garde qu'au PATCH, et pour la même raison : refuser avant
+     d'écrire. Aujourd'hui TABLE_ACL réserve déjà la suppression de ces
+     trois tables aux admins et managers — donc ce test passe toujours.
+     Il est là pour le jour où cette matrice s'ouvrira, pas pour
+     aujourd'hui : une règle d'accès ne doit pas dépendre d'une autre
+     règle qui, elle, peut changer. */
+  const enfantDelete = ENFANT_CRM.get(table)
+  if (enfantDelete) {
+    const parentId = await parentDeLEnfant(table, String(id), req.user!.tenantId)
+    if (parentId && !(await peutAcceder(acteurCrm(req), enfantDelete.parent, parentId, 'log'))) {
+      return refuserPerimetre(req, res, table, 'log')
+    }
+  }
+
+  const rDelete = RESSOURCE_CRM.get(table)
+  if (rDelete && !(await peutAcceder(acteurCrm(req), rDelete, String(id), 'edit'))) {
+    return refuserPerimetre(req, res, table, 'delete')
+  }
 
   try {
     await ensureTenantColumnCache()

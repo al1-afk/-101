@@ -11,6 +11,7 @@ import {
   GraduationCap,
 } from 'lucide-react'
 import { StagiairesTab } from '@/components/equipe/StagiairesTab'
+import CrmCapabilitiesCard from '@/components/equipe/CrmCapabilitiesCard'
 import TeamSpaceTab from '@/components/equipe/TeamSpaceTab'
 import StatsTab     from '@/components/equipe/StatsTab'
 import { tenantApi, teamMgmtApi, type TeamMemberAccess } from '@/lib/api'
@@ -1752,9 +1753,15 @@ export default function Equipe() {
           <InvitationsTab />
         </TabsContent>
 
-        {/* ── Permissions ── */}
+        {/* ── Permissions ──
+             Trois échelles, de la plus large à la plus fine, dans cet ordre :
+             les modules visibles au menu (MemberAccessManager), puis le
+             périmètre CRM — qui voit les fiches de qui (CrmCapabilitiesCard),
+             puis les SOP par catégorie. La matrice des rôles ferme la liste :
+             elle se lit, elle ne se règle pas. ── */}
         <TabsContent value="permissions" className="mt-4 space-y-6">
           <MemberAccessManager />
+          <CrmCapabilitiesCard />
           <TeamMembersAccessManager />
           <PermissionsMatrix />
         </TabsContent>

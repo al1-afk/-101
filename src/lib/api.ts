@@ -1684,3 +1684,656 @@ export const messagesApi = {
     ),
 
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   ACCÈS CRM — responsable d'une fiche, partages, capacités
+
+   Le serveur est la seule autorité : ces appels ÉCRIVENT les données
+   que server/lib/crmScope.ts relit à chaque requête. Rien de ce qui
+   est renvoyé ici ne doit servir à décider seul de ce qu'on affiche —
+   masquer un bouton n'a jamais fermé une API (server/routes/crmAccess.ts).
+───────────────────────────────────────────────────────────────── */
+
+/** Les trois familles de fiches soumises au périmètre par utilisateur.
+ *  Même vocabulaire fermé que crmScope.CrmResource, côté serveur. */
+export type CrmResourceType = 'prospect' | 'client' | 'devis'
+
+/** Une personne à qui l'on peut confier une fiche ou ouvrir un accès :
+ *  le personnel ACTIF de l'espace, tel que le serveur l'établit. */
+export interface CrmAssignable {
+  user_id: string
+  name:    string
+  email:   string
+  role:    string
+}
+
+/** Un partage explicite. Les cinq droits sont indépendants — sauf
+ *  `can_view`, que le serveur force dès qu'un autre est demandé : un
+ *  droit d'agir sur une fiche invisible ne s'affiche nulle part. */
+export interface CrmGrant {
+  user_id: string
+  name?:   string
+  email?:  string
+  can_view:    boolean
+  can_log:     boolean
+  can_edit:    boolean
+  can_quote:   boolean
+  can_convert: boolean
+}
+
+export interface CrmGrants {
+  assigned_to: string | null
+  /** Auteur de la fiche — informatif : il garde son accès sans partage,
+   *  et cette valeur n'est jamais modifiable. */
+  created_by:  string | null
+  grants: CrmGrant[]
+}
+
+/** Capacités transverses accordables sans promouvoir en manager.
+ *  Doit rester identique à CRM_CAPABILITIES (server/lib/crmScope.ts) :
+ *  toute valeur hors liste est refusée par un 400. */
+export const CRM_CAPABILITIES = [
+  'prospects.view_all', 'prospects.edit_all',
+  'clients.view_all',   'clients.edit_all',
+  'devis.view_all',     'devis.edit_all',
+  'activities.view_all',
+  'convert.all',
+] as const
+
+export type CrmCapability = typeof CRM_CAPABILITIES[number]
+
+/** Libellés français des cases à cocher — écrits ici pour que les deux
+ *  écrans qui les affichent (fiche prospect, équipe) ne divergent pas. */
+export const CRM_CAPABILITY_LABELS: Record<CrmCapability, string> = {
+  'prospects.view_all':  'Voir tous les prospects',
+  'prospects.edit_all':  'Modifier tous les prospects',
+  'clients.view_all':    'Voir tous les clients',
+  'clients.edit_all':    'Modifier tous les clients',
+  'devis.view_all':      'Voir tous les devis',
+  'devis.edit_all':      'Modifier tous les devis',
+  'activities.view_all': 'Voir toutes les activités',
+  'convert.all':         'Convertir n’importe quel prospect',
+}
+
+export const crmAccessApi = {
+  /** Le personnel actif de l'espace. Ouvert à tout compte connecté :
+   *  la fiche affiche le nom du responsable à tout le monde. */
+  assignables: () =>
+    request<{ users: CrmAssignable[] }>('GET', '/api/crm/assignables'),
+
+  /** État complet des accès d'une fiche (gestionnaires seulement). */
+  grants: (type: CrmResourceType, id: string) =>
+    request<CrmGrants>('GET', `/api/crm/grants/${type}/${id}`),
+
+  /**
+   * Enregistre l'état COMPLET : ce qui n'est pas dans `grants` est
+   * supprimé. Envoyer une liste partielle efface donc des partages —
+   * toujours repartir de ce que `grants()` a renvoyé.
+   *
+   * `assigned_to` omis = on ne touche pas au responsable ; `null` = on
+   * le retire. Les deux ne sont pas interchangeables.
+   */
+  saveGrants: (
+    type: CrmResourceType,
+    id: string,
+    body: { assigned_to?: string | null; grants: Array<Omit<CrmGrant, 'name' | 'email'>> },
+  ) => request<{ success: true }>('PUT', `/api/crm/grants/${type}/${id}`, body),
+
+  /** Capacités transverses d'une personne (administrateurs seulement). */
+  capabilities: (userId: string) =>
+    request<{ capabilities: CrmCapability[] }>('GET', `/api/crm/capabilities/${userId}`),
+
+  /** Remplace la liste entière ; `[]` retire tout. La révocation prend
+   *  effet immédiatement côté serveur (le cache de périmètre est vidé). */
+  saveCapabilities: (userId: string, capabilities: string[]) =>
+    request<{ success: true; capabilities: CrmCapability[] }>(
+      'PUT', `/api/crm/capabilities/${userId}`, { capabilities },
+    ),
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LES COMMERCIAUX — deux API distinctes, et c'est volontaire
+
+   1. `commercialsApi` → /api/commercials, jeton ADMIN ('gestiq_token').
+      C'est l'écran d'administration : qui est commercial, ce qu'on lui
+      accorde, ce qu'on lui attribue, ce qu'il produit.
+   2. `myCrmApi`       → /api/my-space/crm, jeton MEMBRE ('gestiq_member_token').
+      C'est l'espace du commercial lui-même : uniquement les fiches de SON
+      périmètre, découpé côté serveur par server/lib/crmScope.ts.
+
+   Pourquoi pas un objet unique avec un paramètre `as`, comme messagesApi
+   ou projetChatApi : là-bas les deux publics attaquent LES MÊMES routes,
+   avec les mêmes droits, et seul le coffre à jetons change. Ici non —
+   deux préfixes, deux niveaux d'autorisation, deux jeux de données. Les
+   fondre laisserait croire qu'un écran d'employé peut lire
+   l'administration « en passant le bon jeton » : il récolterait un 403,
+   mais surtout le code suggérerait que le périmètre se choisit côté
+   client.
+
+   Il ne s'y choisit jamais. Ce fichier n'est qu'une commodité de
+   transport : masquer un bouton n'a jamais fermé une API.
+   ═══════════════════════════════════════════════════════════════ */
+
+/**
+ * Vocabulaire COMPLET des capacités du module commercial.
+ *
+ * Doit rester identique à CRM_CAPABILITIES de server/lib/crmScope.ts :
+ * la colonne crm_user_capabilities.capabilities est un text[] sans CHECK
+ * (le schéma stocke, le code décide), c'est donc cette liste — et le 400
+ * que le serveur renvoie sur toute valeur inconnue — qui tient lieu de
+ * contrainte. Ajouter un droit = ajouter une chaîne ici et là-bas ;
+ * aucune migration.
+ *
+ * Pourquoi une SECONDE constante à côté de CRM_CAPABILITIES (plus haut
+ * dans ce fichier) plutôt que de l'élargir : cette dernière ne porte que
+ * les huit capacités « …_all » du partage fiche par fiche, et son type
+ * alimente CRM_CAPABILITY_LABELS, un Record exhaustif. Y verser les
+ * vingt-deux nouvelles clés casserait la compilation de tous les écrans
+ * qui l'utilisent déjà (CrmCapabilitiesCard, ProspectAccessCard). Les
+ * huit anciennes sont reprises ici À L'IDENTIQUE : ce sont les mêmes
+ * chaînes, déjà écrites en base sur des lignes existantes.
+ *
+ * Lecture des suffixes :
+ *   X.view      voir les fiches de MON périmètre (propriété + partages)
+ *   X.view_all  voir TOUTES les fiches de l'espace
+ *   X.edit      modifier celles de mon périmètre ; X.edit_all n'importe laquelle
+ *   crm.access  interrupteur maître : sans elle, aucune route de l'espace
+ *               commercial ne répond (403) et le menu CRM n'apparaît pas
+ *
+ * Il n'existe volontairement AUCUN niveau intermédiaire « mon équipe » :
+ * team_members ne porte ni manager_id ni team_id, il n'y a donc rien à
+ * interroger. Le simuler sur `departement` (texte libre) donnerait des
+ * périmètres faux dès la première faute de frappe.
+ */
+export const COMMERCIAL_CAPABILITIES = [
+  'crm.access',
+  'prospects.view',  'prospects.view_all', 'prospects.create', 'prospects.edit',
+  'prospects.edit_all', 'prospects.delete', 'prospects.assign',
+  'clients.view',    'clients.view_all',   'clients.create',   'clients.edit',
+  'clients.edit_all', 'clients.delete',
+  'devis.view',      'devis.view_all',     'devis.create',     'devis.edit',
+  'devis.edit_all',  'devis.send',         'devis.delete',
+  'activities.view', 'activities.view_all', 'activities.create', 'activities.edit',
+  'activities.note', 'activities.call',     'activities.whatsapp', 'activities.followup',
+  'convert.all',
+] as const
+
+export type CommercialCapability = typeof COMMERCIAL_CAPABILITIES[number]
+
+/** Libellés français des cases à cocher. Écrits ici, et pas dans l'écran,
+ *  pour que « ses prospects » et « tous les prospects » soient formulés
+ *  exactement pareil partout : un administrateur qui lit deux libellés
+ *  différents pour la même capacité finit par accorder le mauvais droit. */
+export const COMMERCIAL_CAPABILITY_LABELS: Record<CommercialCapability, string> = {
+  'crm.access':           'Accéder au module commercial',
+  'prospects.view':       'Voir ses prospects',
+  'prospects.view_all':   'Voir tous les prospects',
+  'prospects.create':     'Créer un prospect',
+  'prospects.edit':       'Modifier ses prospects',
+  'prospects.edit_all':   'Modifier tous les prospects',
+  'prospects.delete':     'Supprimer un prospect',
+  'prospects.assign':     'Attribuer un prospect à quelqu’un',
+  'clients.view':         'Voir ses clients',
+  'clients.view_all':     'Voir tous les clients',
+  'clients.create':       'Créer un client',
+  'clients.edit':         'Modifier ses clients',
+  'clients.edit_all':     'Modifier tous les clients',
+  'clients.delete':       'Supprimer un client',
+  'devis.view':           'Voir ses devis',
+  'devis.view_all':       'Voir tous les devis',
+  'devis.create':         'Créer un devis',
+  'devis.edit':           'Modifier ses devis',
+  'devis.edit_all':       'Modifier tous les devis',
+  'devis.send':           'Envoyer un devis au client',
+  'devis.delete':         'Supprimer un devis',
+  'activities.view':      'Voir ses activités',
+  'activities.view_all':  'Voir toutes les activités',
+  'activities.create':    'Enregistrer une activité',
+  'activities.edit':      'Modifier une activité',
+  'activities.note':      'Ajouter une note',
+  'activities.call':      'Enregistrer un appel',
+  'activities.whatsapp':  'Enregistrer un échange WhatsApp',
+  'activities.followup':  'Planifier une relance',
+  'convert.all':          'Convertir n’importe quel prospect',
+}
+
+/* ── Ce que l'administration voit d'un commercial ───────────────── */
+
+export interface CommercialCounts {
+  prospects:   number
+  clients:     number
+  devis:       number
+  conversions: number
+}
+
+export interface Commercial {
+  user_id:          string
+  /** NULL pour un administrateur ou un manager : il n'a pas de fiche
+   *  employé, il vient de tenant_users. Les deux mondes d'identité
+   *  cohabitent dans la même liste, c'est ce champ qui les sépare. */
+  team_member_id:   string | null
+  name:             string
+  email:            string
+  phone:            string | null
+  /** 'active' | 'invited' | 'suspended'… : le vocabulaire diffère entre
+   *  tenant_users.status et team_members.account_status, une union
+   *  mentirait sur la moitié des lignes. */
+  status:           string
+  /** Date d'embauche, ISO (YYYY-MM-DD) — nulle pour un compte d'espace. */
+  hired_at:         string | null
+  department:       string | null
+  /** D'où vient la personne : fiche employé (/team-login) ou compte de
+   *  l'espace (/auth). Détermine l'écran où l'on va corriger son profil. */
+  kind:             'member' | 'admin'
+  /** false = repéré comme commercial (team_members.role) mais crm.access
+   *  pas encore accordé. La ligne existe justement pour qu'on puisse
+   *  l'activer d'un clic, sans avoir à recréer quoi que ce soit. */
+  crm_enabled:      boolean
+  capabilities:     CommercialCapability[]
+  /** Comptés depuis assigned_to / created_by sur prospects, clients et
+   *  devis : ce sont des faits, pas un compteur entretenu à la main. */
+  counts:           CommercialCounts
+  /** Chiffre d'affaires rattaché, dans la devise de l'espace. */
+  revenue:          number
+  /** Dernière trace d'activité (ISO) — null s'il n'a encore rien fait. */
+  last_activity_at: string | null
+}
+
+/** Une personne rattachable au module. On RATTACHE de l'existant : aucun
+ *  compte n'est créé par cet écran, ni côté tenant_users ni côté
+ *  team_members. `already` dit qu'elle est déjà commerciale, pour la
+ *  montrer grisée au lieu de la faire disparaître de la liste. */
+export interface CommercialCandidate {
+  user_id:        string
+  team_member_id: string | null
+  name:           string
+  email:          string
+  kind:           'member' | 'admin'
+  already:        boolean
+}
+
+export interface CrmPerformanceKpis {
+  prospects_assigned:  number
+  prospects_contacted: number
+  prospects_open:      number
+  devis_sent:          number
+  converted:           number
+  clients_won:         number
+  revenue:             number
+  /** Calculé par le serveur et affiché tel quel : le recalculer à l'écran
+   *  à partir des autres compteurs donnerait deux taux différents sur la
+   *  même page dès que les périodes ne se recoupent pas exactement. */
+  conversion_rate:     number
+}
+
+export interface CrmPerformance {
+  kpis:    CrmPerformanceKpis
+  /** Bornes réellement retenues par le serveur (ISO) — pas celles
+   *  demandées : sans `from`/`to`, il applique sa période par défaut et
+   *  c'est ce qu'il faut afficher en titre du tableau de bord. */
+  periode: { from: string | null; to: string | null }
+}
+
+/** Accusé de réception des mutations. Le contrat fige la forme des
+ *  LECTURES, pas celle des réponses d'écriture : tout est optionnel ici
+ *  pour qu'un champ ajouté côté serveur ne fasse pas échouer la
+ *  compilation du client. L'écran se remet à jour en rappelant `list()`
+ *  ou `get()`, jamais en recopiant ce qu'il croit avoir écrit. */
+export interface CommercialMutationResult {
+  success?:      boolean
+  commercial?:   Commercial
+  capabilities?: CommercialCapability[]
+  /** Fiches réellement (dés)attribuées : une attribution en masse peut en
+   *  refuser certaines (déjà confiées à quelqu'un d'autre), et l'écran
+   *  doit annoncer le nombre traité, pas le nombre demandé. */
+  assigned?:     number
+}
+
+/* ── Les fiches vues depuis l'espace commercial ─────────────────── */
+
+export type CrmProspectStatut   = 'nouveau' | 'contacte' | 'qualifie' | 'proposition' | 'gagne' | 'perdu'
+export type CrmProspectPriorite = 'premium' | 'moyen' | 'bas'
+
+/** Les six types d'activité qu'un commercial journalise lui-même. Chacun
+ *  exige sa capacité côté serveur (activities.note, .call, .whatsapp,
+ *  .followup…) : cette union n'évite que les fautes de frappe, elle
+ *  n'autorise rien. */
+export type MyCrmActivityType = 'note' | 'appel' | 'whatsapp' | 'email' | 'rdv' | 'relance'
+
+/** Types LUS dans l'historique : les trois derniers sont écrits par le
+ *  système (création de la fiche, changement de statut, modification) et
+ *  ne sont donc jamais proposés à la saisie. */
+export type CrmActivityType = MyCrmActivityType | 'creation' | 'statut' | 'edit'
+
+/* Les trois interfaces qui suivent reprennent EXACTEMENT les champs de
+   Prospect / Client / Devis (src/hooks/useProspects.ts, useClients.ts,
+   useDevis.ts), plus les deux colonnes de périmètre de la migration 102 :
+   une fiche renvoyée ici reste donc assignable à ces types sans
+   conversion, et les composants de liste existants les acceptent tels
+   quels. Pourquoi ne pas importer directement ces types : api.ts est la
+   couche la plus basse du client — les hooks l'importent, l'inverse
+   refermerait la boucle. */
+
+export interface CrmProspect {
+  id:             string
+  created_at:     string
+  nom:            string
+  email:          string | null
+  telephone:      string | null
+  entreprise:     string | null
+  statut:         CrmProspectStatut
+  valeur_estimee: number | null
+  source:         string | null
+  notes:          string | null
+  responsable:    string | null
+  date_contact:   string | null
+  date_relance:   string | null
+  relance_at?:    string | null
+  priorite?:      CrmProspectPriorite | null
+  /** Auteur de la fiche : il garde son accès sans partage explicite. */
+  created_by?:    string | null
+  /** Responsable au sens du périmètre CRM. Nullable et ON DELETE SET NULL :
+   *  le départ d'un commercial ne fait pas disparaître ses prospects. */
+  assigned_to?:   string | null
+  /** Nom résolu par le serveur — évite un second appel juste pour
+   *  afficher « attribué à … » dans une liste. */
+  assigned_to_name?: string | null
+}
+
+export interface CrmClient {
+  id:            string
+  created_at:    string
+  nom:           string
+  email:         string | null
+  telephone:     string | null
+  entreprise:    string | null
+  adresse:       string | null
+  ville:         string | null
+  pays:          string | null
+  notes:         string | null
+  statut?:       string | null
+  is_premium?:   boolean | null
+  montant_ttc_annuel?: number | null
+  created_by?:   string | null
+  assigned_to?:  string | null
+}
+
+export interface CrmDevis {
+  id:              string
+  created_at:      string
+  numero:          string
+  client_id:       string | null
+  client_nom?:     string
+  prospect_id?:    string | null
+  statut:          'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire'
+  date_emission:   string
+  date_expiration: string | null
+  montant_ht:      number
+  tva:             number
+  montant_ttc:     number
+  notes:           string | null
+  created_by?:     string | null
+  assigned_to?:    string | null
+}
+
+export interface CrmActivity {
+  id:                string
+  prospect_id:       string
+  created_at:        string
+  type:              CrmActivityType
+  message:           string
+  auteur?:           string | null
+  /** Durée en minutes, renseignée pour les appels. */
+  duration_minutes?: number | null
+  media?:            string[] | null
+  /** Nom du prospect, joint par le serveur : l'historique d'un commercial
+   *  liste des activités de fiches différentes, sans ce champ il faudrait
+   *  charger chaque prospect pour afficher une ligne. */
+  prospect_nom?:     string | null
+}
+
+/* ── Ce que l'espace commercial a le droit de faire ──────────────── */
+
+/** Raccourcis booléens calculés par le SERVEUR à partir des capacités :
+ *  le menu n'a ainsi pas à connaître le vocabulaire ni ses règles de
+ *  cumul. Ils servent à MASQUER, jamais à autoriser — chaque route
+ *  revérifie via peutAcceder(). */
+export interface MyCrmAbilities {
+  prospects_view:    boolean
+  prospects_create:  boolean
+  prospects_edit:    boolean
+  prospects_delete:  boolean
+  clients_view:      boolean
+  devis_view:        boolean
+  devis_create:      boolean
+  devis_send:        boolean
+  activities_create: boolean
+  convert:           boolean
+}
+
+export interface MyCrmPermissions {
+  /** false = pas de crm.access : toutes les autres routes de l'espace
+   *  commercial répondront 403. À lire AVANT de monter le menu. */
+  enabled:      boolean
+  capabilities: CommercialCapability[]
+  can:          MyCrmAbilities
+}
+
+export interface MyCrmListQuery {
+  search?: string
+  limit?:  number
+  offset?: number
+}
+
+export interface MyCrmProspectsQuery extends MyCrmListQuery {
+  statut?: CrmProspectStatut
+}
+
+/** Champs qu'un commercial peut écrire lui-même. `assigned_to` n'y est
+ *  volontairement pas : s'attribuer une fiche est une opération
+ *  d'administration (capacité prospects.assign), pas une modification. */
+export interface MyCrmProspectInput {
+  nom:             string
+  email?:          string | null
+  telephone?:      string | null
+  entreprise?:     string | null
+  statut?:         CrmProspectStatut
+  valeur_estimee?: number | null
+  source?:         string | null
+  notes?:          string | null
+  priorite?:       CrmProspectPriorite | null
+  date_relance?:   string | null
+}
+
+export interface MyCrmActivityInput {
+  type:          MyCrmActivityType
+  contenu:       string
+  /** Uniquement pour une relance : la date du rappel à planifier. */
+  date_relance?: string | null
+}
+
+/** Résultat d'une conversion prospect → client. L'écran doit rebondir sur
+ *  `client_id` renvoyé ici : le client est une NOUVELLE fiche, la ré-appeler
+ *  par le nom du prospect ramènerait l'ancienne. */
+export interface MyCrmConversionResult {
+  success?:   boolean
+  client_id?: string
+  client?:    CrmClient
+}
+
+/* Quatre agents écrivent ce module en parallèle contre le même contrat,
+   qui fige l'enveloppe des listes principales ({ commercials }, { people })
+   mais pas celle des listes secondaires. Ces deux lecteurs acceptent donc
+   les deux formes — le tableau nu et l'objet enveloppé — et rendent
+   toujours quelque chose d'exploitable : un écran ne doit pas rester
+   blanc parce que le serveur a répondu `[]` au lieu de `{ prospects: [] }`. */
+function listeDe<T>(payload: unknown, cle: string): T[] {
+  if (Array.isArray(payload)) return payload as T[]
+  const valeur = (payload as Record<string, unknown> | null | undefined)?.[cle]
+  return Array.isArray(valeur) ? valeur as T[] : []
+}
+
+function ficheDe<T>(payload: unknown, cle: string): T {
+  const valeur = (payload as Record<string, unknown> | null | undefined)?.[cle]
+  return (valeur && typeof valeur === 'object' ? valeur : payload) as T
+}
+
+/* ── API d'administration (jeton ADMIN) ──────────────────────────
+   Le créneau 'admin' est écrit en toutes lettres bien qu'il soit le
+   défaut de request() : c'est la SEULE différence avec myCrmApi plus
+   bas, autant qu'elle se voie sur chaque ligne. */
+export const commercialsApi = {
+  /** Le tableau de bord : toute personne portant crm.access, PLUS tout
+   *  employé actif dont le rôle est « commercial » même sans accès encore
+   *  accordé (il arrive avec crm_enabled=false, prêt à être activé). */
+  list: () =>
+    request<{ commercials: Commercial[] }>('GET', '/api/commercials', undefined, 'admin'),
+
+  /** Les personnes rattachables. Aucun compte n'est créé par cet écran. */
+  candidates: () =>
+    request<{ people: CommercialCandidate[] }>('GET', '/api/commercials/candidates', undefined, 'admin'),
+
+  /** Accorde crm.access et un jeu de départ raisonnable (voir ses
+   *  prospects, en créer, les modifier, journaliser note/appel/relance).
+   *  Idempotent : réactiver quelqu'un ne duplique ni ligne ni capacité. */
+  add: (userId: string) =>
+    request<CommercialMutationResult>('POST', '/api/commercials', { user_id: userId }, 'admin'),
+
+  /** Retire crm.access, et LUI SEUL. Les fiches, l'historique et les
+   *  autres capacités restent en place : on désactive un accès, on ne
+   *  détruit pas le passé — et une réactivation ne redemande donc pas de
+   *  tout reconfigurer. */
+  remove: (userId: string) =>
+    request<CommercialMutationResult>(
+      'DELETE', `/api/commercials/${encodeURIComponent(userId)}`, undefined, 'admin'),
+
+  get: (userId: string) =>
+    request<{ commercial: Commercial; capabilities: CommercialCapability[] }>(
+      'GET', `/api/commercials/${encodeURIComponent(userId)}`, undefined, 'admin'),
+
+  /** Remplace la liste ENTIÈRE : ce qui n'est pas envoyé est retiré.
+   *  Toujours repartir de ce que `get()` a renvoyé, sinon on révoque sans
+   *  le vouloir. Le serveur refuse par un 400 toute valeur hors
+   *  COMMERCIAL_CAPABILITIES et vide son cache de périmètre dans la
+   *  foulée : la révocation prend effet à la requête suivante. */
+  saveCapabilities: (userId: string, capabilities: string[]) =>
+    request<{ success: true; capabilities: CommercialCapability[] }>(
+      'PUT', `/api/commercials/${encodeURIComponent(userId)}/capabilities`,
+      { capabilities }, 'admin'),
+
+  /** Ses prospects : ceux dont il est created_by OU assigned_to. */
+  prospects: async (userId: string): Promise<{ prospects: CrmProspect[] }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/commercials/${encodeURIComponent(userId)}/prospects`, undefined, 'admin')
+    return { prospects: listeDe<CrmProspect>(payload, 'prospects') }
+  },
+
+  clients: async (userId: string): Promise<{ clients: CrmClient[] }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/commercials/${encodeURIComponent(userId)}/clients`, undefined, 'admin')
+    return { clients: listeDe<CrmClient>(payload, 'clients') }
+  },
+
+  activities: async (userId: string, limit?: number): Promise<{ activities: CrmActivity[] }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/commercials/${encodeURIComponent(userId)}/activities${qs({ limit })}`,
+      undefined, 'admin')
+    return { activities: listeDe<CrmActivity>(payload, 'activities') }
+  },
+
+  /** Bornes optionnelles : sans elles le serveur applique sa période par
+   *  défaut et la renvoie dans `periode`. */
+  performance: (userId: string, periode: { from?: string; to?: string } = {}) =>
+    request<CrmPerformance>(
+      'GET', `/api/commercials/${encodeURIComponent(userId)}/performance${qs({ from: periode.from, to: periode.to })}`,
+      undefined, 'admin'),
+
+  /** Attribution en masse : envoie la sélection en UN appel plutôt qu'un
+   *  PATCH par fiche — cent prospects cochés ne doivent pas devenir cent
+   *  requêtes dont la moitié échoue en silence. */
+  assignProspects: (userId: string, prospectIds: string[]) =>
+    request<CommercialMutationResult>(
+      'POST', `/api/commercials/${encodeURIComponent(userId)}/prospects`,
+      { prospect_ids: prospectIds }, 'admin'),
+
+  /** Retire l'attribution (assigned_to = NULL) : la fiche reste, elle
+   *  retourne simplement au pot commun. */
+  unassignProspect: (userId: string, prospectId: string) =>
+    request<CommercialMutationResult>(
+      'DELETE',
+      `/api/commercials/${encodeURIComponent(userId)}/prospects/${encodeURIComponent(prospectId)}`,
+      undefined, 'admin'),
+}
+
+/* ── API de l'espace commercial (jeton MEMBRE) ───────────────────
+   Ces routes acceptent aussi un jeton d'espace, mais le client d'un
+   employé n'en a pas : on passe donc 'member' partout. Chaque réponse
+   est DÉJÀ filtrée par clausePerimetre() — ce qui n'arrive pas ici
+   n'existe pas pour cette personne, il n'y a rien à re-filtrer. */
+export const myCrmApi = {
+  /** Première requête de l'espace : elle dit si le module s'affiche et
+   *  quelles entrées de menu montrer. */
+  permissions: () =>
+    request<MyCrmPermissions>('GET', '/api/my-space/crm/permissions', undefined, 'member'),
+
+  prospects: async (q: MyCrmProspectsQuery = {}): Promise<{ prospects: CrmProspect[]; total?: number }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/my-space/crm/prospects${qs({ search: q.search, statut: q.statut, limit: q.limit, offset: q.offset })}`,
+      undefined, 'member')
+    const enveloppe = (payload ?? {}) as { total?: number }
+    return { prospects: listeDe<CrmProspect>(payload, 'prospects'), total: enveloppe.total }
+  },
+
+  /** La fiche et son historique. Un 403 ici n'est pas un bug d'affichage :
+   *  le prospect existe, il est simplement hors périmètre. */
+  prospect: async (id: string): Promise<{ prospect: CrmProspect; activities: CrmActivity[] }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/my-space/crm/prospects/${encodeURIComponent(id)}`, undefined, 'member')
+    return {
+      prospect:   ficheDe<CrmProspect>(payload, 'prospect'),
+      activities: listeDe<CrmActivity>(payload, 'activities'),
+    }
+  },
+
+  /** Le serveur pose lui-même created_by (et l'attribution) : le client
+   *  n'envoie aucun identifiant de propriétaire, il serait falsifiable. */
+  createProspect: async (data: MyCrmProspectInput): Promise<CrmProspect> => {
+    const payload = await request<unknown>('POST', '/api/my-space/crm/prospects', data, 'member')
+    return ficheDe<CrmProspect>(payload, 'prospect')
+  },
+
+  updateProspect: async (id: string, patch: Partial<MyCrmProspectInput>): Promise<CrmProspect> => {
+    const payload = await request<unknown>(
+      'PATCH', `/api/my-space/crm/prospects/${encodeURIComponent(id)}`, patch, 'member')
+    return ficheDe<CrmProspect>(payload, 'prospect')
+  },
+
+  /** Journalise une activité. Le type choisi décide de la capacité exigée
+   *  côté serveur : quelqu'un qui peut noter n'enregistre pas forcément
+   *  un appel. */
+  logActivity: async (prospectId: string, data: MyCrmActivityInput): Promise<CrmActivity> => {
+    const payload = await request<unknown>(
+      'POST', `/api/my-space/crm/prospects/${encodeURIComponent(prospectId)}/activities`, data, 'member')
+    return ficheDe<CrmActivity>(payload, 'activity')
+  },
+
+  convert: (prospectId: string) =>
+    request<MyCrmConversionResult>(
+      'POST', `/api/my-space/crm/prospects/${encodeURIComponent(prospectId)}/convert`, {}, 'member'),
+
+  clients: async (q: MyCrmListQuery = {}): Promise<{ clients: CrmClient[]; total?: number }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/my-space/crm/clients${qs({ search: q.search, limit: q.limit, offset: q.offset })}`,
+      undefined, 'member')
+    const enveloppe = (payload ?? {}) as { total?: number }
+    return { clients: listeDe<CrmClient>(payload, 'clients'), total: enveloppe.total }
+  },
+
+  devis: async (q: MyCrmListQuery = {}): Promise<{ devis: CrmDevis[]; total?: number }> => {
+    const payload = await request<unknown>(
+      'GET', `/api/my-space/crm/devis${qs({ search: q.search, limit: q.limit, offset: q.offset })}`,
+      undefined, 'member')
+    const enveloppe = (payload ?? {}) as { total?: number }
+    return { devis: listeDe<CrmDevis>(payload, 'devis'), total: enveloppe.total }
+  },
+}

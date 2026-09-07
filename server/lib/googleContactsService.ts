@@ -1,6 +1,14 @@
 /**
  *  Service de synchronisation Google Contacts — orchestre la base + People API.
  *  Partagé par la route (`/api/google-contacts/sync`) et le scheduler.
+ *
+ *  ── Périmètre CRM ───────────────────────────────────────────────────
+ *  Cette fonction est le chemin de SORTIE le plus large du CRM : elle
+ *  recopie des prospects dans le carnet d'adresses Google PERSONNEL de
+ *  l'utilisateur relié — nom, société, téléphone, statut. Une fois
+ *  partis, ils ne reviennent pas ; un départ de l'entreprise emporte la
+ *  copie. La liste envoyée est donc filtrée par le périmètre du
+ *  porteur du lien (crmScope), exactement comme les écrans.
  */
 import type { Pool } from 'pg'
 import { pool, tenantQuery, tenantQueryOne } from '../db/pool'
@@ -12,6 +20,8 @@ import {
 import {
   computeSyncPlan, runPlan, type ProspectForSync, type MapRow, type SyncOptions,
 } from './googleContactsSync'
+import { getEffectiveRole } from './effectiveRole'
+import { clausePerimetre } from './crmScope'
 
 export interface GoogleLinkRow {
   id: string
@@ -58,11 +68,70 @@ export async function syncLink(link: GoogleLinkRow): Promise<SyncSummary> {
   const client = makePeopleClient(accessToken)
 
   try {
-    const prospects = await tenantQuery<ProspectForSync>(link.tenant_id,
-      `SELECT id, nom, entreprise, telephone, statut FROM prospects`)
-    const mapRows = await tenantQuery<MapRow>(link.tenant_id,
+    /* Rôle EFFECTIF du porteur du lien, relu en base : le scheduler
+       n'a pas de requête HTTP, donc pas de req.user. `null` = plus
+       d'appartenance active (départ, compte désactivé). On s'arrête
+       alors NET, sans rien pousser ET sans rien supprimer : purger
+       Google au moment d'un départ transformerait une révocation
+       d'accès en effacement du carnet personnel de quelqu'un. */
+    const role = await getEffectiveRole(link.user_id, link.tenant_id)
+    if (!role) {
+      await tenantQuery(link.tenant_id,
+        `UPDATE google_contacts_links SET status='error', last_error=$2 WHERE id=$1`,
+        [link.id, "Accès à l'espace révoqué — synchronisation suspendue"]).catch(() => {})
+      return { ok: false, status: 'no_access', error: "Accès à l'espace révoqué" }
+    }
+
+    /* Filtre de périmètre. `null` = gestionnaire ou capacité
+       « voir tous les prospects » → aucune restriction, et la requête
+       redevient celle d'avant au caractère près.
+
+       La clause sert ici de COLONNE CALCULÉE, pas de WHERE. On veut en
+       effet distinguer deux populations que `computeSyncPlan` confondrait
+       autrement, parce qu'il déduit ses suppressions d'une simple
+       absence :
+         · le prospect a quitté le CRM (supprimé, numéro effacé)
+           → suppression légitime du contact Google ;
+         · le prospect existe toujours mais n'est plus dans mon périmètre
+           → il ne doit PLUS être poussé ni rafraîchi.
+
+       Pourquoi ne pas le supprimer aussi de Google, ce qui serait plus
+       « propre » : le jour du déploiement, les 176 prospects existants
+       n'ont ni assigned_to ni created_by. Le périmètre de chaque
+       commercial est donc VIDE, et un WHERE aurait vidé d'un coup le
+       carnet Google personnel de chacun — la fonctionnalité (voir le nom
+       du prospect à l'appel) tombe pour tout le monde avant même qu'un
+       administrateur ait pu attribuer quoi que ce soit. On refuse de
+       détruire des données dans un compte tiers pour appliquer une règle
+       de lecture. La fuite est arrêtée (plus rien ne sort), les copies
+       déjà parties se purgent quand le prospect quitte le CRM ou à la
+       main depuis le groupe « NEXT GITAL – Prospects ». */
+    const perimetre = await clausePerimetre(
+      { tenantId: link.tenant_id, userId: link.user_id, role },
+      'prospect', 'prospects', 1,
+    )
+    /* `boolean | null` et non `boolean` : sur une ligne où assigned_to et
+       created_by valent NULL et où aucun partage n'existe, l'expression
+       vaut NULL, pas FALSE (`NULL = x` → NULL). Un `filter(l => l.dans_perimetre)`
+       l'écarte correctement, mais typer `boolean` mentirait à la lecture. */
+    const lignes = await tenantQuery<ProspectForSync & { dans_perimetre: boolean | null }>(
+      link.tenant_id,
+      `SELECT id, nom, entreprise, telephone, statut,
+              ${perimetre ? perimetre.sql : 'TRUE'} AS dans_perimetre
+         FROM prospects`,
+      perimetre ? perimetre.params : [])
+
+    const prospects: ProspectForSync[] = lignes.filter(l => l.dans_perimetre)
+    /* Encore dans le CRM, mais hors périmètre : on les met de côté pour
+       les retirer du diff plus bas. */
+    const horsPerimetre = new Set(lignes.filter(l => !l.dans_perimetre).map(l => l.id))
+
+    const toutesLesMaps = await tenantQuery<MapRow>(link.tenant_id,
       `SELECT prospect_id, resource_name, etag, content_hash FROM google_contact_map WHERE link_id = $1`,
       [link.id])
+    /* Retirer ces lignes de la map les rend invisibles au diff : ni
+       UPDATE (donc plus aucune donnée fraîche ne sort), ni DELETE. */
+    const mapRows = toutesLesMaps.filter(m => !horsPerimetre.has(m.prospect_id))
 
     const plan = computeSyncPlan(prospects, mapRows, opts)
     const result = await runPlan(client, plan)

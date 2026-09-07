@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
+import { clausePerimetre } from '../lib/crmScope'
 
 const router = Router()
 router.use(requireAuth)
@@ -378,15 +379,31 @@ router.get('/tickets', async (req: Request, res: Response) => {
   const limit  = Math.min(Number(req.query.limit)  || 100, 500)
   const offset = Math.max(Number(req.query.offset) || 0, 0)
   try {
+    /* Le point de vente lit la table `clients` par jointure, donc hors du
+       CRUD générique et hors de son filtrage. Un commercial y retrouvait
+       le nom de N'IMPORTE QUEL client de l'espace, ticket par ticket.
+
+       On restreint la JOINTURE, pas la liste : les tickets restent tous
+       visibles (ils appartiennent à la caisse, pas au portefeuille), mais
+       le nom du client sort NULL quand il est hors périmètre. Filtrer les
+       tickets eux-mêmes aurait faussé la caisse — c'est le contraire du
+       « ne rien casser ».
+
+       Placeholders : $1/$2 sont pris par limit/offset, le périmètre
+       commence donc à $3. Postgres se moque de l'ordre d'apparition. */
+    const perimetre = await clausePerimetre(
+      { tenantId: req.user!.tenantId, userId: req.user!.userId, role: req.user!.role ?? '' },
+      'client', 'c', 3,
+    )
     const rows = await tenantQuery(req.user!.tenantId,
       `SELECT t.*,
               c.nom AS client_full_nom,
               (SELECT COUNT(*) FROM stock_ticket_lines l WHERE l.ticket_id = t.id) AS lines_count
        FROM stock_tickets t
-       LEFT JOIN clients c ON c.id = t.client_id
+       LEFT JOIN clients c ON c.id = t.client_id${perimetre ? ` AND ${perimetre.sql}` : ''}
        ORDER BY t.date DESC
        LIMIT $1 OFFSET $2`,
-      [limit, offset],
+      [limit, offset, ...(perimetre?.params ?? [])],
     )
     res.json(rows)
   } catch (err: any) {

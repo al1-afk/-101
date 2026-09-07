@@ -29,6 +29,7 @@ import { sendEmail } from '../lib/email'
 import { buildOutboundEmailHtml } from '../lib/outboundEmailTemplate'
 import { pool } from '../db/pool'
 import { runAutopilotForTenantId, DEFAULT_MOROCCAN_CITIES } from '../lib/outboundAutopilot'
+import { journaliser } from '../lib/crmScope'
 
 const router = Router()
 router.use(requireAuth)
@@ -582,11 +583,37 @@ router.post('/prospects/:id/convert', async (req: Request, res: Response) => {
     outbound.service_propose ? `Service proposé : ${outbound.service_propose}` : '',
   ].filter(Boolean)
 
+  /* ── Périmètre CRM : la fiche créée doit naître avec un propriétaire ──
+     Cet INSERT contourne le CRUD générique, donc rien n'y remplissait
+     created_by / assigned_to : la fiche arrivait « non attribuée »,
+     visible des seuls gestionnaires. L'agent qui a travaillé le prospect
+     pendant des semaines le perdait à la seconde de sa conversion — la
+     régression la plus visible du lot.
+
+     · created_by  = le gestionnaire qui convertit (trace de l'acte) ;
+     · assigned_to = l'agent Outbound qui suivait l'affaire, s'il est
+       toujours membre ACTIF de l'espace. La vérification n'est pas
+       cosmétique : outbound_prospects.assigned_to_id ne porte aucune
+       clé étrangère (cf. contraintes de la table) et peut désigner un
+       compte parti — ce qui rendrait la fiche invisible à tout le monde
+       sauf aux gestionnaires, sans que personne comprenne pourquoi. */
+  let assignedTo: string | null = null
+  if (outbound.assigned_to_id) {
+    const membre = await tenantQueryOne<{ user_id: string }>(tenantId,
+      `SELECT tu.user_id
+         FROM public.tenant_users tu
+         JOIN public.users u ON u.id = tu.user_id
+        WHERE tu.user_id = $1 AND tu.tenant_id = $2
+          AND tu.status = 'active' AND u.is_active IS NOT FALSE`,
+      [outbound.assigned_to_id, tenantId])
+    assignedTo = membre?.user_id ?? null
+  }
+
   try {
     const crm = await tenantQueryOne<any>(tenantId,
       `INSERT INTO prospects (tenant_id, nom, email, telephone, entreprise, statut, valeur_estimee,
-                              source, notes, responsable, date_contact)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+                              source, notes, responsable, date_contact, created_by, assigned_to)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         tenantId,
         contactName,
@@ -599,8 +626,24 @@ router.post('/prospects/:id/convert', async (req: Request, res: Response) => {
         notesArr.join('\n'),
         req.user!.email ?? null,
         outbound.date_dernier_contact ? new Date(outbound.date_dernier_contact).toISOString().slice(0,10) : null,
+        userId,
+        assignedTo,
       ])
     if (!crm) return res.status(500).json({ error: 'Échec création CRM' })
+
+    /* Trace dans le journal d'activité : la création passe hors du CRUD,
+       donc hors de sa journalisation. Sans cette ligne, un prospect CRM
+       apparaîtrait dans la base sans aucun événement de création. */
+    await journaliser(
+      { tenantId, userId, role: req.user!.role ?? '' },
+      {
+        module:      'prospects',
+        recordId:    crm.id,
+        action:      'create',
+        description: `Prospect converti depuis Outbound Marketing${assignedTo ? '' : ' (non attribué)'}`,
+        apres:       { id: crm.id, nom: crm.nom, created_by: userId, assigned_to: assignedTo },
+      },
+    )
 
     /* Marquer Outbound comme converti */
     const updated = await tenantQueryOne<any>(tenantId,

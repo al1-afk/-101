@@ -36,6 +36,8 @@ import {
   type DateRange, type DatePreset,
 } from '@/components/ui/DateRangeFilter'
 import { useListNavMemory, listNavKey } from '@/hooks/useListNavMemory'
+import { useAuth } from '@/hooks/useAuth'
+import { usePermissions } from '@/hooks/usePermissions'
 import { canonicalPhone, groupByPhone } from '@/lib/phone'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
@@ -62,6 +64,50 @@ function relanceTime(v: string | null | undefined): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
 
+/* ─── Filtre « Mes prospects » ─────────────────────────────────────
+   CE FILTRE N'EST PAS UNE SÉCURITÉ. Le serveur a déjà réduit la liste au
+   périmètre de la personne connectée (server/lib/crmScope.ts, appliqué
+   dans server/routes/crud.ts) : ce que `useProspects` reçoit est DÉJÀ ce
+   qu'elle a le droit de voir. On ne trie ici que pour le confort — « à qui
+   dois-je m'occuper en premier ». Masquer une carte dans l'interface n'a
+   jamais fermé une API, et l'inverse est vrai aussi : si ce filtre
+   disparaissait demain, rien ne fuiterait.
+
+   « Partagés avec moi » se déduit par élimination — ni créés, ni assignés —
+   parce que la liste ne transporte pas les lignes de crm_record_grants. Pour
+   un gestionnaire, qui voit tout l'espace, cette catégorie n'est donc pas un
+   partage mais « le portefeuille des autres » : le libellé change en
+   conséquence, sans quoi il promettrait quelque chose de faux. */
+type PortefeuilleFiltre = 'all' | 'created' | 'assigned' | 'shared'
+
+/* `assigned_to` et `created_by` arrivent bien de l'API — la migration 102 les
+   ajoute aux trois tables du CRM — mais ne figurent pas dans l'interface
+   `Prospect`, qui appartient à src/hooks/useProspects.ts. On les lit par accès
+   indexé plutôt que d'élargir un type dont ce fichier n'est pas propriétaire.
+   Une chaîne vide compte pour NULL : « non attribué », ce qui n'est jamais
+   « à tout le monde ». */
+function champUuid(p: Prospect, cle: 'assigned_to' | 'created_by'): string | null {
+  const v = (p as unknown as Record<string, unknown>)[cle]
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+/* `moi` nul = session pas encore résolue (le premier rendu précède la réponse
+   de /api/auth/me). Filtrer sur une identité inconnue viderait la liste et
+   ferait croire à un portefeuille vide : on n'exclut alors rien. */
+function correspondPortefeuille(
+  p: Prospect,
+  filtre: PortefeuilleFiltre,
+  moi: string | null,
+): boolean {
+  if (filtre === 'all' || !moi) return true
+  const assigne = champUuid(p, 'assigned_to')
+  const auteur  = champUuid(p, 'created_by')
+  if (filtre === 'created')  return auteur  === moi
+  if (filtre === 'assigned') return assigne === moi
+  /* 'shared' : tout ce qui est visible sans m'appartenir. */
+  return assigne !== moi && auteur !== moi
+}
+
 /* Filtre par défaut : « Toute la période ». On ne masque jamais de prospects
    à l'ouverture — la période se restreint ensuite d'un clic si besoin. */
 const DEFAULT_FILTERS: ListFilters = {
@@ -70,6 +116,7 @@ const DEFAULT_FILTERS: ListFilters = {
   filterStatut: 'all',
   todayOnly:    false,
   dupOnly:      false,
+  portefeuille: 'all',
   dateRange:    DEFAULT_RANGE,
 }
 
@@ -82,6 +129,8 @@ interface ListFilters {
   todayOnly:    boolean
   /** N'afficher que les prospects dont le téléphone apparaît plusieurs fois. */
   dupOnly:      boolean
+  /** Tri par appartenance — confort de lecture, pas un contrôle d'accès. */
+  portefeuille: PortefeuilleFiltre
   dateRange:    DateRange
 }
 
@@ -1200,6 +1249,12 @@ export default function Prospects() {
   const deleteProspect  = useDeleteProspect()
   const addLog          = useAddProspectLog()
   const qc              = useQueryClient()
+  /* Identité du lecteur : sert UNIQUEMENT à trier « ce qui est à moi ».
+     Le rôle sert à nommer honnêtement la 4ᵉ catégorie — un gestionnaire voit
+     tout l'espace, ce ne sont donc pas des partages mais les fiches des
+     autres. Aucun des deux ne décide de ce qui est chargé : c'est le serveur. */
+  const { userId } = useAuth()
+  const { isManager } = usePermissions()
 
   /* Dernier appel enregistré par prospect (allLogs est trié du + récent au + ancien). */
   const lastCallByProspect = useMemo(() => {
@@ -1225,6 +1280,8 @@ export default function Prospects() {
   const [todayOnly,    setTodayOnly]    = useState(nav.initialFilters.todayOnly)
   /* `?? false` : un instantané enregistré avant l'ajout du filtre n'a pas la clé. */
   const [dupOnly,      setDupOnly]      = useState(nav.initialFilters.dupOnly ?? false)
+  /* Même précaution : un instantané d'avant ce filtre vaut « Tous mes accès ». */
+  const [portefeuille, setPortefeuille] = useState<PortefeuilleFiltre>(nav.initialFilters.portefeuille ?? 'all')
   const [dateRange,    setDateRange]    = useState<DateRange>(nav.initialFilters.dateRange)
   const [page,         setPage]         = useState(nav.initialPage)
   const [drawerOpen,   setDrawerOpen]   = useState(false)
@@ -1282,9 +1339,12 @@ export default function Prospects() {
       /* Le filtre doublons reste actif même pendant une recherche : il sert
          justement à retrouver l'autre fiche du même client. */
       const matchDup     = !dupOnly || phoneGroups.has(canonicalPhone(p.telephone))
-      return matchSearch && matchStatut && matchToday && matchDup
+      /* Appartenance : dans la base et non dans `filtered`, pour que les
+         pastilles de période comptent bien le portefeuille affiché. */
+      const matchMien    = correspondPortefeuille(p, portefeuille, userId)
+      return matchSearch && matchStatut && matchToday && matchDup && matchMien
     })
-  }, [prospects, search, filterStatut, todayOnly, dupOnly, phoneGroups])
+  }, [prospects, search, filterStatut, todayOnly, dupOnly, portefeuille, userId, phoneGroups])
 
   const filtered = useMemo(() => (
     baseFiltered
@@ -1320,7 +1380,7 @@ export default function Prospects() {
      On compare une signature plutôt que de « sauter le 1er passage » : sous
      StrictMode l'effet est monté deux fois, et un simple drapeau laisserait le
      2ᵉ passage écraser la page restaurée au retour d'une fiche. */
-  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dupOnly, dateRange })
+  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dupOnly, portefeuille, dateRange })
   const filterSigRef = useRef(filterSig)
   useEffect(() => {
     if (filterSigRef.current === filterSig) return
@@ -1346,7 +1406,7 @@ export default function Prospects() {
      les mêmes filtres, la même page, la même position, et la ligne ouverte
      reste surlignée pour enchaîner sur le prospect suivant. */
   const openEdit    = (p: Prospect) => {
-    nav.remember(p.id, { view, search, filterStatut, todayOnly, dupOnly, dateRange }, page)
+    nav.remember(p.id, { view, search, filterStatut, todayOnly, dupOnly, portefeuille, dateRange }, page)
     navigate(`${base}/prospects/${p.id}`)
   }
   const closeDrawer = () => setDrawerOpen(false)
@@ -1421,13 +1481,26 @@ export default function Prospects() {
     })
   }, [prospects, qc, updateProspect, addLog])
 
-  /* ── Stats ── */
+  /* ── Stats ──
+     Calculées sur `filtered`, c'est-à-dire sur ce que le tableau montre
+     RÉELLEMENT, et non sur la liste complète comme auparavant. Deux raisons,
+     dans cet ordre :
+       • un total de 176 au-dessus d'un tableau qui en affiche 12 est faux :
+         chaque filtre posé (période, statut, « à contacter aujourd'hui »)
+         laissait les quatre cartes raconter une autre liste que celle du
+         dessous, pipeline et valeur gagnée compris ;
+       • depuis le périmètre par utilisateur, ces montants sont des chiffres
+         de portefeuille. Les agréger hors du filtre « Mes prospects »
+         donnerait à un commercial un pipeline qui n'est pas le sien.
+     Les compteurs qui doivent DÉLIBÉRÉMENT rester globaux — doublons de
+     téléphone, relances du jour, pastilles de période — gardent leur propre
+     calcul, chacun commenté à sa définition. */
   const stats = useMemo(() => ({
-    total:  prospects.length,
-    gagne:  prospects.filter(p => p.statut === 'gagne').length,
-    valeur: prospects.filter(p => p.statut === 'gagne').reduce((s, p) => s + (p.valeur_estimee ?? 0), 0),
-    pipe:   prospects.filter(p => !['gagne','perdu'].includes(p.statut)).reduce((s, p) => s + (p.valeur_estimee ?? 0), 0),
-  }), [prospects])
+    total:  filtered.length,
+    gagne:  filtered.filter(p => p.statut === 'gagne').length,
+    valeur: filtered.filter(p => p.statut === 'gagne').reduce((s, p) => s + (p.valeur_estimee ?? 0), 0),
+    pipe:   filtered.filter(p => !['gagne','perdu'].includes(p.statut)).reduce((s, p) => s + (p.valeur_estimee ?? 0), 0),
+  }), [filtered])
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -1436,14 +1509,25 @@ export default function Prospects() {
       <div className="page-header">
         <div>
           <h1 className="page-title">CRM – Prospects</h1>
+          {/* « 12 sur 176 » dès qu'un filtre retire quelque chose : maintenant
+              que les cartes comptent la liste affichée, ce rappel évite de
+              croire que des prospects ont disparu. */}
           <p className="text-muted-foreground text-sm mt-1">
-            {stats.total} prospects · {stats.gagne} gagnés · Pipeline {formatCurrency(stats.pipe)}
+            {stats.total}
+            {stats.total !== prospects.length && <> sur {prospects.length}</>}
+            {' '}prospects · {stats.gagne} gagnés · Pipeline {formatCurrency(stats.pipe)}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* `data={filtered}` et non `prospects` : l'export doit livrer ce que
+              l'écran montre. Avec la liste complète, un commercial exportait
+              d'un clic tout ce que sa session avait chargé, filtres ignorés —
+              et « exporter la sélection de la semaine » produisait le fichier
+              de l'année entière. Le périmètre serveur limite déjà ce qui est
+              chargé ; ceci aligne le fichier sur ce qui est affiché. */}
           <ImportExportButtons
             schema={prospectsSchema}
-            data={prospects}
+            data={filtered}
             onImport={async (row) => { await createProspect.mutateAsync(row as any) }}
           />
           <Button size="sm" onClick={openNew}>
@@ -1460,7 +1544,11 @@ export default function Prospects() {
           </div>
           <div>
             <p className="text-2xl font-extrabold text-foreground">{stats.total}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Total prospects</p>
+            {/* Le libellé suit le chiffre : « Total » serait un mensonge dès
+                qu'un filtre est posé. */}
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {stats.total === prospects.length ? 'Total prospects' : 'Prospects affichés'}
+            </p>
           </div>
         </div>
         <div className="card-premium p-5 flex items-center gap-4">
@@ -1543,6 +1631,27 @@ export default function Prospects() {
                 </span>
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+
+        {/* Portefeuille — CONFORT DE TRI, PAS UNE SÉCURITÉ.
+            Le serveur n'a envoyé que les prospects accessibles à cette
+            personne (crmScope) : ce menu ne fait que ranger cette liste.
+            Il reste affiché pour un gestionnaire, à qui il sert de « mes
+            dossiers » au milieu de ceux de toute l'équipe. */}
+        <Select value={portefeuille} onValueChange={v => setPortefeuille(v as PortefeuilleFiltre)}>
+          <SelectTrigger className="w-44 h-8 text-sm" title="Trier par appartenance">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous mes accès</SelectItem>
+            <SelectItem value="created">Créés par moi</SelectItem>
+            <SelectItem value="assigned">Assignés à moi</SelectItem>
+            {/* Pour un gestionnaire, ces fiches ne sont pas « partagées » :
+                il les voit par son rôle. Le libellé le dit. */}
+            <SelectItem value="shared">
+              {isManager ? 'Ceux des autres' : 'Partagés avec moi'}
+            </SelectItem>
           </SelectContent>
         </Select>
 
@@ -1692,8 +1801,14 @@ export default function Prospects() {
                 <div className="py-16 text-center">
                   <User className="w-10 h-10 text-muted-foreground opacity-30 mx-auto mb-3" />
                   <p className="text-sm font-medium text-foreground">Aucun prospect trouvé</p>
+                  {/* Le filtre de portefeuille est testé en premier : sinon
+                      « Assignés à moi » sur un portefeuille vide invitait à
+                      « ajouter votre premier prospect » alors qu'il suffit de
+                      revenir à « Tous mes accès ». */}
                   <p className="text-xs text-muted-foreground mt-1">
-                    {todayOnly ? "Aucune relance prévue aujourd'hui" : 'Ajoutez votre premier prospect'}
+                    {portefeuille !== 'all'
+                      ? 'Aucun prospect dans cette sélection — revenez à « Tous mes accès »'
+                      : todayOnly ? "Aucune relance prévue aujourd'hui" : 'Ajoutez votre premier prospect'}
                   </p>
                 </div>
               )}

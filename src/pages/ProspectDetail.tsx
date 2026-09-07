@@ -29,6 +29,7 @@ import { canonicalPhone } from '@/lib/phone'
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils'
 import { usePermissions } from '@/hooks/usePermissions'
 import AIQuoteGeneratorDialog from '@/components/devis/AIQuoteGeneratorDialog'
+import ProspectAccessCard from '@/components/crm/ProspectAccessCard'
 import { toast } from 'sonner'
 
 /* ─── Stage helpers ───────────────────────────────────────────────── */
@@ -1100,6 +1101,13 @@ export default function ProspectDetail() {
               </Button>
             </div>
           </Section>
+
+          {/* ── Responsable et partage de la fiche ──
+             Colonne principale et non colonne de droite (300 px) : cinq
+             interrupteurs par personne n'y tiendraient pas sans les
+             empiler. Le composant ne s'affiche qu'aux gestionnaires et
+             se retire tout seul pour les autres rôles. */}
+          <ProspectAccessCard prospectId={prospect.id} />
         </div>
 
         {/* RIGHT */}

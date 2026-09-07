@@ -9,6 +9,9 @@ import helmet from 'helmet'
 import authRoutes     from './routes/auth'
 import { requireAuth, requireRole } from './middleware/auth'
 import crudRoutes     from './routes/crud'
+import crmAccessRoutes from './routes/crmAccess'
+import commercialsRoutes from './routes/commercials'
+import mySpaceCrmRoutes  from './routes/mySpaceCrm'
 import tenantRoutes   from './routes/tenants'
 import stockRoutes    from './routes/stock'
 import vehiclesRoutes from './routes/vehicles'
@@ -202,6 +205,13 @@ app.use('/api/public',    publicLeadsRoutes)
 app.use('/api/public',    emailTrackingPublicRoutes)
 app.use('/api/team',      teamRoutes)
 app.use('/api/sop-images', sopImagesRoutes)
+/* CRM du commercial. Monté AVANT '/api/my-space' pour la même raison que
+   les SOP juste au-dessus, et cette fois c'est structurel : le routeur
+   mySpace pose un garde de niveau ROUTEUR qui refuse 403 tout jeton dont
+   le rôle n'est pas 'team_member'. Monté après lui, /api/my-space/crm ne
+   verrait jamais un administrateur — alors que ce module doit répondre
+   aux DEUX jetons, membre et admin. */
+app.use('/api/my-space/crm',  mySpaceCrmRoutes)
 app.use('/api/my-space/sops', mySpaceSopsRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
 app.use('/api/projet-chat', projetChatRoutes)
@@ -225,6 +235,18 @@ app.use('/api/task-reminders', taskRemindersRoutes)
    /api/:table et transformerait /api/messages en lecture d'une table
    « messages » qui n'existe pas. */
 app.use('/api/messages', messagesRoutes)
+/* Administration des accès CRM (responsable d'une fiche, partages
+   explicites, capacités « voir tout »). Même contrainte d'ordre que la
+   messagerie : montée après le CRUD, l'URL /api/crm/... serait lue comme
+   la table « crm » et n'atteindrait jamais ce routeur. */
+app.use('/api/crm',      crmAccessRoutes)
+/* Administration du module « Les commerciaux » (qui est commercial, avec
+   quels droits, quel portefeuille). Même contrainte d'ordre que
+   ci-dessus : montée après le CRUD générique, l'URL /api/commercials
+   serait lue comme la table « commercials » — qui n'existe pas — et ce
+   routeur ne serait jamais atteint. Le pendant côté commercial est monté
+   plus haut, sous /api/my-space/crm. */
+app.use('/api/commercials',  commercialsRoutes)
 app.use('/api',          crudRoutes)
 
 /* ── Health check (no DB details in prod) ───────────────────── */

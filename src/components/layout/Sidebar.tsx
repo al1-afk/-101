@@ -14,7 +14,7 @@ import {
   BookOpen, Crown, MapPin, FolderKanban, FileCheck, Wrench, Contact,
   Plus, Star, Command, Search, GripVertical,
   Radar, Route, LineChart, MessagesSquare, LayoutGrid, Bell, Layers, Hourglass,
-  MessageCircle,
+  MessageCircle, Handshake,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useStockAlerts } from '@/hooks/useStock'
@@ -61,6 +61,7 @@ export const ALL_MODULES: { key: string; label: string }[] = [
   { key: 'finance-ia',        label: 'Finance IA' },
   { key: 'abonnements',       label: 'Abonnements' },
   { key: 'abonnements-clients', label: 'Abonnements clients' },
+  { key: 'commerciaux',       label: 'Les commerciaux' },
   { key: 'equipe',            label: 'Équipe' },
   { key: 'fournisseurs',      label: 'Fournisseurs' },
   { key: 'contacts',          label: 'Contacts' },
@@ -154,6 +155,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Ressources',
     items: [
+      { label: 'Les commerciaux', href: '/commerciaux', icon: Handshake, module: 'commerciaux' },
       { label: 'Équipe',         href: '/equipe',       icon: Briefcase, module: 'equipe' },
       { label: 'Fournisseurs',   href: '/fournisseurs', icon: Building2, module: 'fournisseurs' },
       { label: 'Contacts',       href: '/contacts',     icon: Contact, module: 'contacts' },
@@ -224,6 +226,21 @@ function pushRecent(href: string) {
   } catch {/* ignore */}
 }
 
+/* Libellé du rôle réellement porté par la personne connectée.
+   « Admin » était écrit en dur ici : tout le monde lisait « Admin » sous
+   son nom, y compris un commercial ou un comptable. Un utilisateur qui
+   teste ses propres restrictions en conclut logiquement qu'il s'est
+   trompé de session — ce qui est arrivé. */
+const LIBELLE_ROLE: Record<string, string> = {
+  admin:       'Administrateur',
+  manager:     'Manager',
+  commercial:  'Commercial',
+  comptable:   'Comptable',
+  developpeur: 'Développeur',
+  viewer:      'Lecture seule',
+}
+const libelleRole = (r?: string | null) => (r && LIBELLE_ROLE[r]) || 'Utilisateur'
+
 interface SidebarProps {
   collapsed: boolean
   onToggle:  () => void
@@ -282,7 +299,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     setRecents(getRecents())
   }, [location.pathname, base])
 
-  const { role: userRole, allowedModules } = useAuth()
+  const { role: userRole, allowedModules, name: userName } = useAuth()
 
   /* Modules Outbound réservés aux managers (admin/manager).
      L'agent (commercial) voit uniquement les pages où il gère ses propres données. */
@@ -684,8 +701,12 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <span className="text-white text-[11px] font-bold">NG</span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[12.5px] font-semibold text-foreground truncate leading-tight">NEXT GITAL</p>
-              <p className="text-[10.5px] text-slate-500 dark:text-slate-400">Admin · En ligne</p>
+              <p className="text-[12.5px] font-semibold text-foreground truncate leading-tight">
+                {userName || 'NEXT GITAL'}
+              </p>
+              <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
+                {libelleRole(userRole)} · En ligne
+              </p>
             </div>
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
           </div>

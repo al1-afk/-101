@@ -25,15 +25,31 @@ export default function TeamLogin() {
     if (!loading && isAuth) window.location.replace('/my-space')
   }, [loading, isAuth])
 
+  /* Compte du PERSONNEL arrivé sur la mauvaise porte.
+     Le serveur répond « Aucun espace membre lié à ce compte », ce qui est
+     exact mais ne dit pas quoi faire — et l'application a deux connexions
+     distinctes : les employés ici, le personnel (admin, manager,
+     commercial, comptable) sur /auth. Sans cette aiguille, la personne
+     ressaie son mot de passe jusqu'à déclencher le blocage anti-force-brute
+     et conclut que son compte est cassé. */
+  const [mauvaisePorte, setMauvaisePorte] = useState(false)
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email || !password) return
     setSubmitting(true)
+    setMauvaisePorte(false)
     try {
       await signIn(email, password)
       toast.success('Bienvenue dans votre espace')
     } catch (err: any) {
-      toast.error(err?.message ?? 'Identifiants incorrects')
+      const message = String(err?.message ?? '')
+      if (/aucun espace membre/i.test(message)) {
+        setMauvaisePorte(true)
+        toast.error('Ce compte n\'est pas un compte employé')
+      } else {
+        toast.error(message || 'Identifiants incorrects')
+      }
       setSubmitting(false)
     }
   }
@@ -120,6 +136,27 @@ export default function TeamLogin() {
               Mot de passe oublié ?
             </button>
           </div>
+
+          {mauvaisePorte && (
+            <div className="mt-5 rounded-xl border border-blue-200 dark:border-blue-900/60
+                            bg-blue-50 dark:bg-blue-950/30 p-4 text-center">
+              <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+                Ce compte n'est pas un compte employé
+              </p>
+              <p className="text-xs text-blue-800/80 dark:text-blue-300/80 mt-1">
+                <strong>{email}</strong> est un compte du personnel (administrateur, manager,
+                commercial ou comptable). Il se connecte sur l'espace de travail, pas ici.
+              </p>
+              <Link
+                to={`/auth?email=${encodeURIComponent(email)}`}
+                className="mt-3 inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg
+                           bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold
+                           transition-colors active:scale-[0.98]"
+              >
+                Aller à la connexion administrateur →
+              </Link>
+            </div>
+          )}
 
           <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800 text-center">
             <p className="text-xs text-slate-500 dark:text-slate-400">

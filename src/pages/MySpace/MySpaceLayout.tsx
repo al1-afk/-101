@@ -6,14 +6,16 @@ import { NavLink, Outlet, Navigate, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, BookOpen, CheckSquare, User, LogOut, Loader2, Menu, X, Briefcase, Bell,
-  MessageSquare, MessageCircle,
+  MessageSquare, MessageCircle, Handshake,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useMember } from '@/hooks/useMember'
 import ThemeToggle from '@/components/ui/ThemeToggle'
 import NotificationBell from '@/components/NotificationBell'
 import { useTaskNotifier } from '@/hooks/useTaskNotifier'
 import { useMessagesRealtime, useMessagesUnread } from '@/hooks/useMessaging'
+import { myCrmApi } from '@/lib/api'
 import { getPresenceSessionKey } from '@/hooks/usePresenceHeartbeat'
 import { memberApi } from '@/lib/api'
 import { readNotifications, subscribe } from '@/lib/notificationStore'
@@ -24,6 +26,10 @@ const NAV = [
   { to: '/my-space',              label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/my-space/projets',      label: 'Mes projets',      icon: Briefcase },
   { to: '/my-space/tasks',        label: 'Mes tâches',       icon: CheckSquare },
+  /* Réservée aux commerciaux : l'entrée n'apparaît que si l'administration
+     a accordé crm.access (voir `crmOuvert` plus bas). Sans cette condition,
+     tous les employés verraient un onglet menant à un écran verrouillé. */
+  { to: '/my-space/crm',          label: 'CRM',              icon: Handshake, crmSeulement: true },
   /* Deux entrées voisines mais sans rapport : « Messages » = échanges privés de
      personne à personne, « Messages projets » = discussions rattachées à un
      projet, visibles de toute l'équipe assignée. Le libellé les sépare. */
@@ -102,6 +108,20 @@ export default function MySpaceLayout() {
      monté ici et nulle part ailleurs, pour que le toast et le son suivent
      l'employé sur toutes les pages de son espace. */
   const dmUnread = useMessagesUnread('member')
+
+  /* L'entrée « CRM » n'apparaît que si l'administration a ouvert l'accès.
+     On interroge le serveur — jamais un rôle local : `team_members.role`
+     est décoratif et ne décide d'aucun droit. Tant que la réponse n'est
+     pas là, l'entrée reste cachée : la faire disparaître sous les yeux
+     serait pire que de l'afficher une seconde plus tard.
+     `retry: false` parce qu'un 403 est une RÉPONSE, pas une panne. */
+  const { data: crmDroits } = useQuery({
+    queryKey: ['my-space', 'crm', 'permissions'],
+    queryFn:  () => myCrmApi.permissions(),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const crmOuvert = crmDroits?.enabled === true
   useMessagesRealtime('member', '/my-space/messagerie')
   useMemberPresenceHeartbeat(isAuth)
 
@@ -172,7 +192,7 @@ export default function MySpaceLayout() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-          {NAV.map(item => {
+          {NAV.filter(item => !item.crmSeulement || crmOuvert).map(item => {
             const Icon = item.icon
             const isTasksLink = item.to === '/my-space/tasks'
             const isNotifLink = item.to === '/my-space/notifications'
