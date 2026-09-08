@@ -1107,7 +1107,16 @@ export default function ProspectDetail() {
              interrupteurs par personne n'y tiendraient pas sans les
              empiler. Le composant ne s'affiche qu'aux gestionnaires et
              se retire tout seul pour les autres rôles. */}
-          <ProspectAccessCard prospectId={prospect.id} />
+          {/* On passe l'appartenance : c'est elle qui décide si le
+              panneau s'affiche pour un commercial (sa propre fiche) ou
+              seulement pour l'administration. La fiche est déjà chargée
+              ici — la redemander dans le composant coûterait un
+              aller-retour pour une donnée qu'on a sous la main. */}
+          <ProspectAccessCard
+            prospectId={prospect.id}
+            assignedTo={(prospect as { assigned_to?: string | null }).assigned_to ?? null}
+            createdBy={(prospect as { created_by?: string | null }).created_by ?? null}
+          />
         </div>
 
         {/* RIGHT */}

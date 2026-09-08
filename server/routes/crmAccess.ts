@@ -38,6 +38,7 @@ import { requireAuth, requireRole } from '../middleware/auth'
 import { logger } from '../lib/logger'
 import {
   CRM_CAPABILITIES,
+  estGestionnaire,
   estCapaciteValide,
   estRessourceCrm,
   invaliderCapacites,
@@ -355,7 +356,12 @@ interface GrantRow extends Droits {
 }
 
 /** GET /grants/:type/:id — l'état complet des accès d'une fiche. */
-router.get('/grants/:type/:id', requireRole('manager'), async (req: Request, res: Response) => {
+/* Lecture des partages d'une fiche. Ouverte au GESTIONNAIRE et au
+   PROPRIÉTAIRE : sans cela, le commercial ne pourrait pas voir avec qui
+   il a déjà partagé sa propre fiche — il partagerait à l'aveugle, sans
+   jamais pouvoir retirer un accès. Le contrôle de propriété est fait
+   plus bas, une fois la fiche lue : c'est elle qui porte la réponse. */
+router.get('/grants/:type/:id', async (req: Request, res: Response) => {
   const type = req.params.type
   const id   = String(req.params.id ?? '')
 
@@ -374,6 +380,16 @@ router.get('/grants/:type/:id', requireRole('manager'), async (req: Request, res
       [id, a.tenantId],
     )
     if (!fiche) return res.status(404).json({ error: 'Fiche introuvable' })
+
+    /* Même règle qu'à l'écriture : on ne consulte les accès que d'une
+       fiche qu'on possède, ou de n'importe laquelle si l'on gère
+       l'espace. Un 404 plutôt qu'un 403 : l'existence d'une fiche
+       d'autrui n'a pas à être confirmée. */
+    if (!estGestionnaire(a.role)
+        && fiche.assigned_to !== a.userId
+        && fiche.created_by  !== a.userId) {
+      return res.status(404).json({ error: 'Fiche introuvable' })
+    }
 
     /* JOIN et non LEFT JOIN : une ligne dont l'utilisateur a été
        supprimé n'existe plus (FK ON DELETE CASCADE). Le LEFT JOIN
@@ -412,7 +428,25 @@ router.get('/grants/:type/:id', requireRole('manager'), async (req: Request, res
  * dire visible des seuls gestionnaires — une panne d'accès silencieuse
  * pour toute une équipe.
  */
-router.put('/grants/:type/:id', requireRole('manager'), async (req: Request, res: Response) => {
+/**
+ * PUT /grants/:type/:id — poser les partages d'une fiche.
+ *
+ * Deux publics, une seule route, parce que c'est la même écriture :
+ *
+ *  • un GESTIONNAIRE fait ce qu'il veut : partager avec n'importe qui,
+ *    retirer n'importe quel partage, changer le responsable ;
+ *  • un COMMERCIAL peut partager SES PROPRES fiches, et uniquement avec
+ *    l'administration. Il ne change pas le responsable — partager n'est
+ *    pas céder — et il ne peut pas effacer les partages posés par un
+ *    gestionnaire : ceux-ci sont réinjectés tels quels avant l'écriture,
+ *    sans quoi un écran qui n'affiche que l'administration les emporterait
+ *    en silence à chaque enregistrement.
+ *
+ * Le refus de partager entre commerciaux est une règle métier explicite
+ * du client, pas une limite technique : un portefeuille se confie par la
+ * hiérarchie, pas de proche en proche.
+ */
+router.put('/grants/:type/:id', async (req: Request, res: Response) => {
   const type = req.params.type
   const id   = String(req.params.id ?? '')
 
@@ -445,6 +479,14 @@ router.put('/grants/:type/:id', requireRole('manager'), async (req: Request, res
 
   try {
     const personnel = await personnelActif(a.tenantId)
+    const gestionnaire = estGestionnaire(a.role)
+
+    /* Changer le responsable, c'est céder la fiche : réservé à
+       l'administration. Un commercial qui le pourrait se déchargerait
+       d'un dossier, ou s'en attribuerait un. */
+    if (!gestionnaire && changeAssignation) {
+      return res.status(403).json({ error: "Seule l'administration peut changer le responsable d'une fiche" })
+    }
 
     if (assignedTo && !personnel.has(assignedTo)) {
       return res.status(400).json({ error: "Ce responsable ne fait pas partie du personnel actif de l'espace" })
@@ -462,14 +504,17 @@ router.put('/grants/:type/:id', requireRole('manager'), async (req: Request, res
       if (!personnel.has(uid)) {
         return res.status(400).json({ error: "Un des destinataires ne fait pas partie du personnel actif de l'espace" })
       }
+      if (!gestionnaire && !estGestionnaire(personnel.get(uid)?.role ?? '')) {
+        return res.status(403).json({
+          error: "Vous ne pouvez partager qu'avec l'administration de l'espace",
+        })
+      }
       const droits = normaliserDroits(g)
       if (droits) voulus.set(uid, droits)
       /* Aucune case cochée : la ligne n'est simplement pas retenue, donc
          supprimée par le DELETE ci-dessous. */
       else voulus.delete(uid)
     }
-
-    const gardes = [...voulus.keys()]
 
     const diff = await tenantTransaction(a.tenantId, async (client) => {
       /* FOR UPDATE : deux gestionnaires qui réassignent la même fiche en
@@ -485,12 +530,41 @@ router.put('/grants/:type/:id', requireRole('manager'), async (req: Request, res
       if (!fiche.rowCount) throw new HttpError(404, 'Fiche introuvable')
       const avantAssigned = fiche.rows[0].assigned_to
 
+      /* On partage ce qu'on POSSÈDE. Une fiche seulement partagée avec
+         soi ne se repartage pas : sans cette condition, un accès accordé
+         se propagerait de proche en proche et l'administration perdrait
+         la trace de qui voit quoi. */
+      if (!gestionnaire) {
+        const mienne = fiche.rows[0].assigned_to === a.userId
+                    || fiche.rows[0].created_by  === a.userId
+        if (!mienne) throw new HttpError(403, 'Vous ne pouvez partager que vos propres fiches')
+      }
+
       const anciens = await client.query<Droits & { user_id: string }>(
         `SELECT user_id, can_view, can_log, can_edit, can_quote, can_convert
            FROM public.crm_record_grants
           WHERE tenant_id = $1 AND resource_type = $2 AND resource_id = $3`,
         [a.tenantId, type, id],
       )
+
+      /* Un commercial ne voit, dans son écran, que les gestionnaires : la
+         liste qu'il renvoie ne parle donc PAS des partages accordés à
+         ses collègues par l'administration. Les réinjecter tels quels
+         avant l'écriture évite qu'un simple enregistrement de sa part ne
+         les efface — un retrait d'accès silencieux, que personne
+         n'aurait demandé ni constaté. */
+      if (!gestionnaire) {
+        for (const r of anciens.rows) {
+          if (voulus.has(r.user_id)) continue
+          if (estGestionnaire(personnel.get(r.user_id)?.role ?? '')) continue
+          voulus.set(r.user_id, {
+            can_view: r.can_view, can_log: r.can_log, can_edit: r.can_edit,
+            can_quote: r.can_quote, can_convert: r.can_convert,
+          })
+        }
+      }
+
+      const gardes = [...voulus.keys()]
 
       /* Tableau vide : `user_id = ANY('{}')` est faux, NOT faux est vrai
          → tous les partages tombent. C'est bien le résultat voulu quand

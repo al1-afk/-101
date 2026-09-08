@@ -106,10 +106,16 @@ const aUnDroit = (d: Droits) =>
 
 interface ProspectAccessCardProps {
   prospectId: string
+  /** Responsable et auteur de la fiche, tels que l'écran appelant les a
+   *  déjà chargés. Ils décident si la personne connectée peut partager
+   *  cette fiche-ci : le serveur applique la même règle, ceci ne sert
+   *  qu'à ne pas afficher un panneau qui répondrait 403. */
+  assignedTo?: string | null
+  createdBy?:  string | null
 }
 
-export default function ProspectAccessCard({ prospectId }: ProspectAccessCardProps) {
-  const { role } = useAuth()
+export default function ProspectAccessCard({ prospectId, assignedTo, createdBy }: ProspectAccessCardProps) {
+  const { role, userId } = useAuth()
   const qc = useQueryClient()
 
   /* Volontairement fermé par défaut, à l'inverse de usePermissions qui
@@ -117,6 +123,15 @@ export default function ProspectAccessCard({ prospectId }: ProspectAccessCardPro
      doit pas s'ouvrir parce qu'une session est encore en cours
      d'hydratation. */
   const gestionnaire = estGestionnaire(role)
+
+  /* Le PROPRIÉTAIRE d'une fiche peut la partager — avec l'administration
+     seulement (le serveur le vérifie ; ici on ne fait que ne pas
+     proposer l'impossible). L'appartenance vient de la fiche elle-même,
+     passée en props par l'écran qui l'a déjà chargée : la redemander
+     provoquerait un aller-retour de plus juste pour savoir si l'on a le
+     droit d'afficher un panneau. */
+  const proprietaire = !!userId && (assignedTo === userId || createdBy === userId)
+  const peutPartager = gestionnaire || proprietaire
 
   /* Le tenant entre dans les clés de cache : ce dépôt autorise un
      changement d'espace sans rechargement, et les accès d'un espace
@@ -127,7 +142,7 @@ export default function ProspectAccessCard({ prospectId }: ProspectAccessCardPro
   const qPersonnel = useQuery<{ users: CrmAssignable[] }>({
     queryKey: ['crm-assignables', cacheTenant],
     queryFn:  () => crmAccessApi.assignables(),
-    enabled:  gestionnaire,
+    enabled:  peutPartager,
     /* Le personnel de l'espace bouge en semaines, pas en secondes. */
     staleTime: 5 * 60_000,
   })
@@ -135,7 +150,7 @@ export default function ProspectAccessCard({ prospectId }: ProspectAccessCardPro
   const qAcces = useQuery<CrmGrants>({
     queryKey: cleAcces,
     queryFn:  () => crmAccessApi.grants('prospect', prospectId),
-    enabled:  gestionnaire && !!prospectId,
+    enabled:  peutPartager && !!prospectId,
   })
 
   const [responsable, setResponsable] = useState<string | null>(null)
@@ -276,6 +291,13 @@ export default function ProspectAccessCard({ prospectId }: ProspectAccessCardPro
   const lignes = useMemo(() => {
     const q = recherche.trim().toLowerCase()
     return personnel
+      /* Un commercial ne partage qu'avec l'administration : lui montrer
+         ses collègues reviendrait à lui proposer des cases que le
+         serveur refusera (403). La règle métier est celle du client —
+         un portefeuille se confie par la hiérarchie, pas de proche en
+         proche — et le serveur l'applique de son côté ; ce filtre ne
+         fait qu'éviter la promesse intenable. */
+      .filter(u => gestionnaire || estGestionnaire(u.role))
       .filter(u => !q
         || (u.name ?? '').toLowerCase().includes(q)
         || (u.email ?? '').toLowerCase().includes(q))
@@ -295,7 +317,7 @@ export default function ProspectAccessCard({ prospectId }: ProspectAccessCardPro
           : null
         return { u, d, implicite }
       })
-  }, [personnel, droits, responsable, createur, recherche])
+  }, [personnel, droits, responsable, createur, recherche, gestionnaire])
 
   const nbPartages = useMemo(
     () => Object.values(droits).filter(d => d.can_view).length,
@@ -303,7 +325,7 @@ export default function ProspectAccessCard({ prospectId }: ProspectAccessCardPro
   )
 
   /* Après les hooks : React exige un nombre d'appels constant. */
-  if (!gestionnaire) return null
+  if (!peutPartager) return null
 
   const chargement = qAcces.isLoading || qPersonnel.isLoading
   const enErreur   = qAcces.isError   || qPersonnel.isError
