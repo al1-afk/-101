@@ -54,6 +54,11 @@ function ymd(v: string | null | undefined): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 const TODAY = ymd(new Date().toISOString())
+
+/* Radix refuse un <SelectItem value=""> : il lui faut une valeur non
+   vide pour représenter « personne ». Même convention que le panneau
+   d'accès de la fiche (src/components/crm/ProspectAccessCard.tsx). */
+const SANS_RESPONSABLE = '__none__'
 const isRelanceToday = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) === TODAY
 
 /* Heure de relance 'HH:MM' (depuis relance_at) — vide si minuit / non renseignée. */
@@ -991,7 +996,7 @@ function ProspectDrawer({ open, prospect, onClose }: DrawerProps) {
 
 /* ─── ProspectRow (table) ─────────────────────────────────────────── */
 function ProspectRow({
-  p, onEdit, selected, onToggle, lastCall, visited, twins,
+  p, onEdit, selected, onToggle, lastCall, visited, twins, onTransfer, responsable,
 }: {
   p: Prospect
   onEdit:   (p: Prospect) => void
@@ -1002,6 +1007,12 @@ function ProspectRow({
   visited?: boolean
   /** Autres prospects partageant ce numéro — signalés pour ne pas rappeler deux fois. */
   twins?: Prospect[]
+  /** Confier la fiche à quelqu'un d'autre. Absent = pas de colonne : le
+   *  serveur refuse ce geste aux commerciaux (403), leur afficher le
+   *  bouton ne ferait que promettre une action impossible. */
+  onTransfer?: (p: Prospect) => void
+  /** Nom du responsable actuel, pour l'infobulle du bouton. */
+  responsable?: string
 }) {
   const accent  = stageAccent(p.statut)
   const dot     = stageDot(p.statut)
@@ -1025,6 +1036,9 @@ function ProspectRow({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -16 }}
       className={`table-row cursor-pointer group ${tone}`}
+      /* La colonne d'action épinglée ne peut pas porter les classes de
+         teinte (elle doit rester opaque) : elle les relit ici, en CSS. */
+      data-tone={selected ? 'selected' : visited ? 'visited' : isToday ? 'today' : undefined}
       onClick={() => onEdit(p)}
     >
       {/* Checkbox */}
@@ -1128,6 +1142,23 @@ function ProspectRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </td>
+      {/* Transfert — stopPropagation : la ligne entière ouvre la fiche,
+          et un clic sur ce bouton ne doit pas faire les deux. */}
+      {onTransfer && (
+        <td className="col-action px-3 py-3 w-12 text-right" onClick={e => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => onTransfer(p)}
+            title={responsable
+              ? `Responsable : ${responsable} — transférer à quelqu'un d'autre`
+              : 'Aucun responsable — attribuer cette fiche'}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md opacity-60 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            <span className="sr-only">Transférer</span>
+          </button>
+        </td>
+      )}
     </motion.tr>
   )
 }
@@ -1300,6 +1331,11 @@ export default function Prospects() {
   const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
   const [confirmOpen,  setConfirmOpen]  = useState(false)
   const [deleting,     setDeleting]     = useState(false)
+  /* Transfert : la liste des fiches concernées vaut aussi « boîte
+     ouverte » — une ligne depuis le tableau, ou toute la sélection. */
+  const [transfertIds,  setTransfertIds]  = useState<string[] | null>(null)
+  const [transfertVers, setTransfertVers] = useState<string>(SANS_RESPONSABLE)
+  const [transfert,     setTransfert]     = useState(false)
 
   /* ─── Filtre « Commercial » (gestionnaires) ──────────────────────
      Le périmètre d'une personne, c'est ses fiches PLUS celles qu'on lui a
@@ -1348,6 +1384,14 @@ export default function Prospects() {
      encore arrivée : « ce commercial » vaut mieux qu'un trou dans la phrase. */
   const nomCommercialActif = qPersonnel.data?.users
     .find(u => u.user_id === commercialActif)?.name || 'ce commercial'
+
+  /* Nom du responsable par identifiant — sert l'infobulle du bouton de
+     transfert. Vide tant que la liste n'est pas arrivée : l'infobulle
+     retombe alors sur « Aucun responsable », jamais sur un UUID. */
+  const nomsPersonnel = useMemo(
+    () => new Map((qPersonnel.data?.users ?? []).map(u => [u.user_id, u.name])),
+    [qPersonnel.data],
+  )
 
   /* À partir d'ici, le reste de la page ne voit qu'une liste : rien d'autre
      ne change selon que le filtre est actif ou non. */
@@ -1489,6 +1533,48 @@ export default function Prospects() {
     setSelectedIds(prev =>
       prev.size === filtered.length ? new Set() : new Set(filtered.map(p => p.id))
     )
+
+  /* ─── Transfert de responsable (administration) ───────────────────
+     Le serveur ne change qu'`assigned_to` et laisse les partages en
+     place : un collègue à qui la fiche avait été partagée ne la perd
+     pas parce que le responsable change. L'ANCIEN responsable, lui, la
+     perd — c'est le sens du mot, et la boîte de dialogue le dit. */
+  const ouvrirTransfert = useCallback((ids: string[], responsableActuel?: string | null) => {
+    if (!ids.length) return
+    setTransfertVers(responsableActuel ?? SANS_RESPONSABLE)
+    setTransfertIds(ids)
+  }, [])
+
+  /* useCallback : passée à chaque ligne, une fonction recréée à chaque
+     rendu ferait retomber la mémoïsation des lignes. */
+  const transfererLigne = useCallback((p: Prospect) => {
+    ouvrirTransfert([p.id], (p as { assigned_to?: string | null }).assigned_to ?? null)
+  }, [ouvrirTransfert])
+
+  const lancerTransfert = async () => {
+    if (!transfertIds?.length) return
+    const dest = transfertVers === SANS_RESPONSABLE ? null : transfertVers
+    setTransfert(true)
+    try {
+      const r = await crmAccessApi.transfer(transfertIds, dest)
+      const nom = qPersonnel.data?.users.find(u => u.user_id === dest)?.name
+      const n   = r.transferees
+      toast.success(
+        n === 0
+          ? 'Aucun changement : ces fiches sont déjà attribuées ainsi'
+          : `${n} prospect${n > 1 ? 's' : ''} transféré${n > 1 ? 's' : ''} ${dest ? `à ${nom ?? 'ce commercial'}` : 'au pot commun'}`,
+      )
+      setTransfertIds(null)
+      setSelectedIds(new Set())
+      /* Le préfixe seul : il couvre la liste de l'espace ET la liste
+         filtrée par commercial, qui partagent la même racine de clé. */
+      await qc.invalidateQueries({ queryKey: ['prospects'] })
+    } catch (e: any) {
+      toast.error(e?.message || 'Transfert impossible')
+    } finally {
+      setTransfert(false)
+    }
+  }
 
   const handleBulkDelete = async () => {
     setDeleting(true)
@@ -1842,6 +1928,17 @@ export default function Prospects() {
                   >
                     Désélectionner
                   </Button>
+                  {isManager && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => ouvrirTransfert([...selectedIds])}
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      Transférer ({selectedIds.size})
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     className="h-7 text-xs bg-red-500 hover:bg-red-600 text-white border-0"
@@ -1872,6 +1969,9 @@ export default function Prospects() {
                     {['Prospect', 'Contact', 'Statut', 'Valeur', 'Source', 'Relance', 'Dernière note'].map(h => (
                       <th key={h}>{h}</th>
                     ))}
+                    {/* Colonne d'actions réservée à l'administration —
+                        cf. ProspectRow.onTransfer. */}
+                    {isManager && <th className="col-action px-3 py-3 w-12 text-right">Transfert</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1886,6 +1986,8 @@ export default function Prospects() {
                         lastCall={lastCallByProspect.get(p.id)}
                         visited={p.id === nav.lastOpenedId}
                         twins={twinsOf(p)}
+                        onTransfer={isManager ? transfererLigne : undefined}
+                        responsable={nomsPersonnel.get((p as { assigned_to?: string | null }).assigned_to ?? '')}
                       />
                     ))}
                   </AnimatePresence>
@@ -2043,6 +2145,66 @@ export default function Prospects() {
           </div>
         </DragDropContext>
       )}
+
+      {/* ── Transfert de responsable ── */}
+      <Dialog open={!!transfertIds} onOpenChange={o => { if (!o && !transfert) setTransfertIds(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="w-5 h-5 text-blue-500" />
+              Transférer {transfertIds && transfertIds.length > 1
+                ? `${transfertIds.length} prospects`
+                : 'ce prospect'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                Nouveau responsable
+              </label>
+              <Select value={transfertVers} onValueChange={setTransfertVers}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choisir…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SANS_RESPONSABLE}>— Aucun (pot commun)</SelectItem>
+                  {(qPersonnel.data?.users ?? []).map(u => (
+                    <SelectItem key={u.user_id} value={u.user_id}>
+                      {u.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Dire ce que le transfert FAIT vraiment : l'ancien
+                responsable perd la fiche s'il n'a pas de partage
+                dessus. Le découvrir après coup, c'est croire à une
+                perte de données. */}
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Le nouveau responsable voit {transfertIds && transfertIds.length > 1 ? 'ces fiches' : 'cette fiche'} dans son CRM.
+              L'ancien la perd, sauf si un partage lui a été accordé. Les partages
+              existants, eux, ne changent pas.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setTransfertIds(null)}
+                disabled={transfert}
+              >
+                Annuler
+              </Button>
+              <Button size="sm" onClick={lancerTransfert} disabled={transfert}>
+                {transfert
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <ArrowRightLeft className="w-3.5 h-3.5" />
+                }
+                Transférer
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Confirmation delete dialog ── */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

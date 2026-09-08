@@ -4,6 +4,7 @@
  *   GET  /api/crm/assignables            le personnel à qui confier une fiche
  *   GET  /api/crm/grants/:type/:id       responsable + partages d'une fiche   (gestionnaire)
  *   PUT  /api/crm/grants/:type/:id       remplace TOUS les partages d'une fiche (gestionnaire)
+ *   POST /api/crm/transfer               change le responsable de N fiches      (gestionnaire)
  *   GET  /api/crm/capabilities/:userId   les cases « voir tout »               (admin)
  *   PUT  /api/crm/capabilities/:userId   idem, en écriture                     (admin)
  *
@@ -693,6 +694,157 @@ async function journaliserPartages(o: {
     }
   } catch (e: any) {
     logger.error('[crmAccess:journal-partages]', e?.message)
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   2 bis. TRANSFÉRER — changer le responsable, sans toucher aux partages
+   ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * POST /api/crm/transfer — confie une ou plusieurs fiches à quelqu'un
+ * d'autre.
+ *
+ * ── Pourquoi une route à part, alors que PUT /grants sait déjà écrire
+ *    `assigned_to` ─────────────────────────────────────────────────────
+ * Parce que PUT /grants remplace TOUS les partages de la fiche : pour ne
+ * changer que le responsable, l'appelant doit d'abord GET les accès puis
+ * les renvoyer à l'identique. Deux allers-retours par fiche, et surtout
+ * une fenêtre pendant laquelle un partage accordé entre-temps serait
+ * effacé par une liste devenue périmée. Sur une sélection de vingt
+ * lignes, c'est quarante requêtes et vingt occasions de perdre un accès.
+ *
+ * Ici on n'écrit qu'une colonne, et les partages existants ne sont ni
+ * lus ni réécrits : ils survivent au transfert, ce qui est le
+ * comportement attendu (un collègue à qui la fiche avait été partagée ne
+ * perd pas sa visibilité parce que le responsable a changé).
+ *
+ * ── Réservé à l'administration ──────────────────────────────────────
+ * Même règle que `assigned_to` dans PUT /grants : céder une fiche, c'est
+ * s'en décharger ou s'en emparer. Un commercial reçoit 403, quelle que
+ * soit sa capacité CRM et même s'il est le responsable actuel. Le rôle
+ * est relu en base par requireAuth — rien du corps de la requête ne
+ * participe à la décision.
+ *
+ * ── L'ancien responsable perd la fiche ──────────────────────────────
+ * C'est le sens du mot « transférer ». S'il doit garder un œil dessus,
+ * c'est un PARTAGE qu'il faut lui laisser (panneau « Accès » de la
+ * fiche), et l'écran le dit avant de valider.
+ */
+const MAX_TRANSFERTS = 200
+
+router.post('/transfer', async (req: Request, res: Response) => {
+  const a     = acteur(req)
+  const corps = req.body ?? {}
+  const type  = typeof corps.type === 'string' ? corps.type : 'prospect'
+
+  if (!estRessourceCrm(type)) return res.status(400).json({ error: 'Type de fiche inconnu' })
+
+  if (!estGestionnaire(a.role)) {
+    return res.status(403).json({ error: "Seule l'administration peut changer le responsable d'une fiche" })
+  }
+
+  /* `assigned_to: null` est une valeur légitime — « remettre la fiche au
+     pot commun » — et se distingue d'un champ absent, qui est une
+     requête incomplète. */
+  if (!Object.prototype.hasOwnProperty.call(corps, 'assigned_to')) {
+    return res.status(400).json({ error: 'Responsable manquant' })
+  }
+  const brut = corps.assigned_to
+  let assignedTo: string | null = null
+  if (brut === null || brut === '') assignedTo = null
+  else if (typeof brut === 'string' && UUID_RE.test(brut)) assignedTo = brut
+  else return res.status(400).json({ error: 'Responsable invalide' })
+
+  const ids: string[] = Array.isArray(corps.ids)
+    ? [...new Set<string>(corps.ids.map((v: unknown) => String(v ?? '')))]
+    : []
+  if (!ids.length)                  return res.status(400).json({ error: 'Aucune fiche à transférer' })
+  if (ids.length > MAX_TRANSFERTS)  return res.status(400).json({ error: `Trop de fiches en une fois (${MAX_TRANSFERTS} maximum)` })
+  if (ids.some(id => !UUID_RE.test(id))) return res.status(400).json({ error: 'Identifiant de fiche invalide' })
+
+  const table = tableDe(type as CrmResource)
+
+  try {
+    if (assignedTo) {
+      const personnel = await personnelActif(a.tenantId)
+      if (!personnel.has(assignedTo)) {
+        return res.status(400).json({ error: "Ce responsable ne fait pas partie du personnel actif de l'espace" })
+      }
+    }
+
+    const changements = await tenantTransaction(a.tenantId, async (client) => {
+      /* FOR UPDATE, comme dans PUT /grants : deux transferts simultanés
+         sur la même fiche se sérialisent, et le journal raconte alors
+         une histoire vraie. `= ANY` plutôt qu'une boucle : une seule
+         prise de verrou, dans un ordre déterminé par ORDER BY id, ce qui
+         évite l'interblocage entre deux sélections qui se croisent. */
+      const avant = await client.query<{ id: string; assigned_to: string | null }>(
+        `SELECT id, assigned_to
+           FROM public.${table}
+          WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+          ORDER BY id
+          FOR UPDATE`,
+        [a.tenantId, ids],
+      )
+
+      const aChanger = avant.rows.filter(r => r.assigned_to !== assignedTo).map(r => r.id)
+      if (aChanger.length) {
+        await client.query(
+          `UPDATE public.${table}
+              SET assigned_to = $1
+            WHERE tenant_id = $2 AND id = ANY($3::uuid[])`,
+          [assignedTo, a.tenantId, aChanger],
+        )
+      }
+      return avant.rows
+    }, a.userId)
+
+    /* Les identifiants inconnus de l'espace ne sont pas une erreur : ils
+       sont simplement absents du résultat. Le dire évite qu'un écran
+       annonce « 12 fiches transférées » quand la base en a vu 9. */
+    const modifiees = changements.filter(r => r.assigned_to !== assignedTo).length
+    res.json({ success: true, transferees: modifiees, introuvables: ids.length - changements.length })
+
+    void journaliserTransferts(a, type as CrmResource, assignedTo, changements)
+  } catch (e: any) {
+    echec(res, 'transfer', e)
+  }
+})
+
+/** Une ligne de journal PAR fiche réellement transférée — mêmes
+ *  conventions que journaliserPartages (module = nom de table, action =
+ *  'update', vocabulaire fermé de la page Journal). */
+async function journaliserTransferts(
+  a: CrmActor,
+  type: CrmResource,
+  apres: string | null,
+  lignes: Array<{ id: string; assigned_to: string | null }>,
+): Promise<void> {
+  try {
+    const changees = lignes.filter(r => r.assigned_to !== apres)
+    if (!changees.length) return
+
+    const module  = tableDe(type)
+    const libelle = LIBELLE_RESSOURCE[type]
+    const noms = await nomsDe(a.tenantId, [
+      ...(apres ? [apres] : []),
+      ...changees.map(r => r.assigned_to).filter((v): v is string => !!v),
+    ])
+    const nom = (uid: string | null) => (uid ? (noms.get(uid) ?? uid) : 'non attribué')
+
+    for (const r of changees) {
+      await journaliser(a, {
+        module,
+        recordId: r.id,
+        action: 'update',
+        description: `Responsable commercial du ${libelle} : ${nom(r.assigned_to)} → ${nom(apres)}`,
+        avant: { assigned_to: r.assigned_to },
+        apres: { assigned_to: apres },
+      })
+    }
+  } catch (e: any) {
+    logger.error('[crmAccess:journal-transferts]', e?.message)
   }
 }
 

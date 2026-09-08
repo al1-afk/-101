@@ -1779,6 +1779,22 @@ export const crmAccessApi = {
     body: { assigned_to?: string | null; grants: Array<Omit<CrmGrant, 'name' | 'email'>> },
   ) => request<{ success: true }>('PUT', `/api/crm/grants/${type}/${id}`, body),
 
+  /**
+   * Change le responsable de N fiches d'un coup, SANS toucher aux
+   * partages — l'inverse de `saveGrants`, qui les remplace tous.
+   *
+   * Réservé à l'administration (403 pour un commercial, même sur ses
+   * propres fiches). `assigned_to: null` remet la fiche au pot commun.
+   */
+  transfer: (
+    ids: string[],
+    assignedTo: string | null,
+    type: CrmResourceType = 'prospect',
+  ) =>
+    request<{ success: true; transferees: number; introuvables: number }>(
+      'POST', '/api/crm/transfer', { ids, assigned_to: assignedTo, type },
+    ),
+
   /** Capacités transverses d'une personne (administrateurs seulement). */
   capabilities: (userId: string) =>
     request<{ capabilities: CrmCapability[] }>('GET', `/api/crm/capabilities/${userId}`),

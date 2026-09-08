@@ -72,6 +72,13 @@
     --surface-table-hd:   #F7F9FC;
     --surface-row-alt:    rgba(245,247,251,0.6);
     --surface-row-visited:#EDE9FE;   /* dernière fiche ouverte (violet-100) */
+    /* Teintes de LIGNE posées par les classes Tailwind de ProspectRow
+       (bg-blue-50/50, bg-amber-50/70). Reprises ici en variables pour
+       la colonne d'action épinglée, qui ne peut pas porter la classe :
+       son fond doit rester opaque. Toute retouche de l'une va avec
+       l'autre — c'est la même ligne, elle doit avoir une seule couleur. */
+    --surface-row-selected: rgba(239,246,255,0.5);
+    --surface-row-today:    rgba(255,251,235,0.7);
     --surface-glass:      rgba(255,255,255,0.55);
     --surface-glass-border: rgba(15,30,54,0.08);
     --surface-input:      #FFFFFF;
@@ -190,6 +197,9 @@
     --surface-table-hd:   hsl(218 40% 11%);
     --surface-row-alt:    hsl(218 40% 10% / 0.5);
     --surface-row-visited:hsl(258 55% 26%);  /* dernière fiche ouverte */
+    /* Pendants sombres de bg-blue-900/10 et bg-amber-500/10. */
+    --surface-row-selected: rgba(30,58,138,0.10);
+    --surface-row-today:    rgba(245,158,11,0.10);
     --surface-glass:      rgba(15,30,54,0.55);
     --surface-glass-border: rgba(255,255,255,0.06);
     --surface-input:      hsl(218 35% 13%);
@@ -608,6 +618,63 @@
   }
   .table-row.row-visited td:first-child {
     box-shadow: inset 4px 0 0 0 #8b5cf6;
+  }
+
+  /* ── Colonne d'ACTION épinglée à droite ──────────────────────────
+     Ce tableau déborde déjà à 1440 px : sans `sticky`, un bouton placé
+     en dernière colonne n'existe que pour qui pense à faire défiler
+     horizontalement — c'est-à-dire pour personne. Il reste donc visible
+     pendant que le reste des colonnes glisse dessous.
+
+     Le fond doit être OPAQUE, sinon on voit les cellules passer au
+     travers, et il doit reprendre CELUI DE LA LIGNE : les zébrures et
+     le survol sont peints sur les <td> (cf. plus haut), une couleur
+     figée trancherait une ligne sur deux. La ligne visitée, elle, porte
+     un !important qui gagne de lui-même. */
+  .table-header th.col-action { right: 0; z-index: 3; }
+  .table-row td.col-action {
+    position: sticky; right: 0; z-index: 1;
+    /* Fond OPAQUE en couche du dessous. Les teintes de ligne
+       (--surface-row-alt : alpha 0.6, --surface-hover : alpha 0.06)
+       sont TRANSLUCIDES : posées seules sur une cellule épinglée, on
+       lisait le texte des autres colonnes défiler par transparence.
+       Elles sont donc empilées PAR-DESSUS, en couche d'image, au lieu
+       de remplacer la couleur de fond. */
+    background-color: var(--surface-card);
+    box-shadow: inset 1px 0 0 0 hsl(var(--border) / 0.45);
+  }
+  :root .table-row:nth-child(even) td.col-action,
+  .light .table-row:nth-child(even) td.col-action {
+    /* La couleur est REDÉCLARÉE ici : la règle générale des lignes
+       paires est plus spécifique que celle ci-dessus et lui reprendrait
+       son fond opaque — c'était exactement le texte qu'on voyait
+       défiler par transparence. */
+    background-color: var(--surface-card);
+    background-image: linear-gradient(var(--surface-row-alt), var(--surface-row-alt));
+  }
+  /* Le survol doit gagner sur la zébrure — d'où la reprise du sélecteur
+     pair, plus spécifique, comme pour les autres cellules. */
+  .table-row:hover td.col-action,
+  :root .table-row:nth-child(even):hover td.col-action,
+  .light .table-row:nth-child(even):hover td.col-action {
+    background-color: var(--surface-card) !important;
+    background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
+  }
+  /* La ligne visitée peint déjà un fond opaque (!important) : la teinte
+     de zébrure par-dessus la ferait dériver du violet des autres
+     cellules. */
+  .table-row.row-visited td.col-action { background-image: none; }
+
+  /* Sélection et relance du jour : ces teintes-là viennent de classes
+     Tailwind posées sur le <tr>, que la cellule épinglée ne peut pas
+     reprendre sans redevenir translucide. Elle les repeint donc
+     elle-même, par-dessus son fond opaque. Sans ces deux règles, la
+     dernière colonne restait blanche au milieu d'une ligne teintée. */
+  .table-row[data-tone="selected"] td.col-action {
+    background-image: linear-gradient(var(--surface-row-selected), var(--surface-row-selected));
+  }
+  .table-row[data-tone="today"] td.col-action {
+    background-image: linear-gradient(var(--surface-row-today), var(--surface-row-today));
   }
 
   /* ══ FORM ══ */
