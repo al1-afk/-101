@@ -8,6 +8,7 @@ import helmet from 'helmet'
 
 import authRoutes     from './routes/auth'
 import { requireAuth, requireRole } from './middleware/auth'
+import { moduleRbac } from './middleware/rbac'
 import crudRoutes     from './routes/crud'
 import crmAccessRoutes from './routes/crmAccess'
 import commercialsRoutes from './routes/commercials'
@@ -194,10 +195,19 @@ app.use('/api', apiLimiter)
 /* ── Routes ─────────────────────────────────────────────────── */
 app.use('/api/auth',     authRoutes)
 app.use('/api/tenants',  tenantRoutes)
-app.use('/api/stock',    stockRoutes)
-app.use('/api/vehicles', vehiclesRoutes)
+/* `moduleRbac` ferme ces routeurs à qui n'a pas le module correspondant.
+   Il vient APRÈS requireAuth — il lui faut req.user — d'où sa présence
+   explicite ici : chaque routeur appelle requireAuth en interne, mais
+   trop tard pour un middleware monté devant lui. Le double appel ne
+   coûte qu'une vérification de jeton, le rôle effectif étant déjà mis
+   en cache. Sans ce garde-fou, /api/stock, /api/vehicles,
+   /api/outbound et /api/time répondaient 200 à un compte restreint au
+   seul CRM — la barre latérale masquait l'entrée, l'API servait quand
+   même la donnée. */
+app.use('/api/stock',    requireAuth, moduleRbac, stockRoutes)
+app.use('/api/vehicles', requireAuth, moduleRbac, vehiclesRoutes)
 app.use('/api/finance-ai', financeAiRoutes)
-app.use('/api/finance',   financeRoutes)
+app.use('/api/finance',   requireAuth, moduleRbac, financeRoutes)
 app.use('/api/ai',        aiRoutes)
 app.use('/api/ai-quote',  aiQuoteRoutes)
 app.use('/api/google-contacts', googleContactsRoutes)
@@ -217,7 +227,7 @@ app.use('/api/my-space',  mySpaceRoutes)
 app.use('/api/projet-chat', projetChatRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
 app.use('/api/activity',  activityRoutes)
-app.use('/api/outbound',  outboundRoutes)
+app.use('/api/outbound',  requireAuth, moduleRbac, outboundRoutes)
 app.use('/api/paiements-recovery', paiementsRecoveryRoutes)
 app.use('/api/admin/2fa', admin2faRoutes)
 app.use('/api/security',  securityRoutes)
@@ -225,7 +235,7 @@ app.use('/api/notifications', notificationsRoutes)
 /* 7aty — suivi du temps & des distractions (données strictement
    personnelles : la route scope à req.user.userId, pas seulement au
    tenant ; d'où l'absence de ces tables dans le CRUD générique). */
-app.use('/api/time',      timeTrackingRoutes)
+app.use('/api/time',      requireAuth, moduleRbac, timeTrackingRoutes)
 /* Abonnements Web Push (un par navigateur) — sert les rappels de tâches
    hors application. Sans clés VAPID, la route répond « désactivé ». */
 app.use('/api/push',      pushRoutes)

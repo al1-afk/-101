@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -275,6 +275,34 @@ function BadgeChip({ kind, count, active }: { kind: string; count?: number; acti
   )
 }
 
+/* Modules Outbound réservés aux managers (admin/manager).
+   L'agent (commercial) voit uniquement les pages où il gère ses propres données. */
+const OUTBOUND_MANAGER_ONLY = new Set([
+  'outbound-campaigns',
+  'outbound-templates',
+  'outbound-sectors',
+  'outbound-team',
+  'outbound-reports',
+])
+/* Modules Outbound accessibles aussi à commercial */
+const OUTBOUND_MODULES = new Set([
+  'outbound', 'outbound-prospects', 'outbound-pipeline', 'outbound-followups',
+])
+
+/* Capacités de BASE, jamais « accordées » : au même titre que la cloche de
+   notifications ou la recherche, elles échappent au filtre par module. Sans
+   cette exemption, tout compte dont les accès ont été personnalisés AVANT
+   l'arrivée de la messagerie (tableau explicite en base, forcément sans
+   'messages') la perdrait purement et simplement, sans message d'erreur. */
+const CORE_MODULES = new Set(['messages'])
+
+/* Ces trois ensembles sont HORS du composant : constants, ils n'ont jamais
+   dépendu d'une prop ni d'un état. Construits à l'intérieur, ils étaient
+   refabriqués à chaque rendu, et `filterItem` — désormais mémorisé pour
+   filtrer aussi les Favoris et les Récents — les lisait sans pouvoir les
+   déclarer en dépendance : soit une règle figée par erreur, soit une
+   mémorisation annulée à chaque rendu. Sortis d'ici, le problème n'existe
+   plus. */
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const location       = useLocation()
   const navigate       = useNavigate()
@@ -301,30 +329,23 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   const { role: userRole, allowedModules, name: userName } = useAuth()
 
-  /* Modules Outbound réservés aux managers (admin/manager).
-     L'agent (commercial) voit uniquement les pages où il gère ses propres données. */
-  const OUTBOUND_MANAGER_ONLY = new Set([
-    'outbound-campaigns',
-    'outbound-templates',
-    'outbound-sectors',
-    'outbound-team',
-    'outbound-reports',
-  ])
-  /* Modules Outbound accessibles aussi à commercial */
-  const OUTBOUND_MODULES = new Set([
-    'outbound', 'outbound-prospects', 'outbound-pipeline', 'outbound-followups',
-  ])
-
-  /* Capacités de BASE, jamais « accordées » : au même titre que la cloche de
-     notifications ou la recherche, elles échappent au filtre par module. Sans
-     cette exemption, tout compte dont les accès ont été personnalisés AVANT
-     l'arrivée de la messagerie (tableau explicite en base, forcément sans
-     'messages') la perdrait purement et simplement, sans message d'erreur. */
-  const CORE_MODULES = new Set(['messages'])
-
-  const filterItem = (item: NavItem): boolean => {
+  const filterItem = useCallback((item: NavItem): boolean => {
     if (item.adminOnly && userRole !== 'admin') return false
     if (item.module && CORE_MODULES.has(item.module)) return true
+
+    /* ── Un accès personnalisé fait autorité, SANS exception ──────────
+       Quand une personne porte une liste explicite de modules, cette
+       liste est la seule règle : ni son rôle, ni le cas particulier
+       d'Outbound ci-dessous ne peuvent la rouvrir.
+
+       Sans cette priorité, un compte « commercial » restreint au seul
+       CRM continuait de voir toute la section Outbound Marketing —
+       le bloc suivant renvoyait `true` avant même que la liste ne soit
+       consultée. L'écran de gestion des accès promettait donc un
+       cloisonnement que la barre latérale ne respectait pas. */
+    if (userRole !== 'admin' && Array.isArray(allowedModules)) {
+      return !!item.module && allowedModules.includes(item.module)
+    }
 
     /* Outbound : ni viewer ni comptable */
     if (item.module?.startsWith('outbound')) {
@@ -337,9 +358,8 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
     if (userRole === 'admin') return true
     if (!item.module) return true
-    if (Array.isArray(allowedModules)) return allowedModules.includes(item.module)
     return true
-  }
+  }, [userRole, allowedModules])
   const VISIBLE_GROUPS = NAV_GROUPS
     .map(g => ({ ...g, items: g.items.filter(filterItem) }))
     .filter(g => g.items.length > 0)
@@ -366,13 +386,23 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     setFavorites(next); saveFavorites(next)
   }
 
+  /* Favoris et Récents viennent du navigateur, pas du serveur : ils
+     survivent donc à un retrait de droits. Sans ce filtre, une personne
+     dont on ferme l'accès aux Factures gardait le raccourci « Factures »
+     en tête de barre — et tombait sur un écran vide ou une erreur en
+     cliquant. Ils passent par la MÊME règle que le reste du menu. */
   const favoriteItems = useMemo(
-    () => favorites.map(h => ALL_ITEMS.find(i => i.href === h)).filter(Boolean) as NavItem[],
-    [favorites],
+    () => favorites
+      .map(h => ALL_ITEMS.find(i => i.href === h))
+      .filter((i): i is NavItem => !!i && filterItem(i)),
+    [favorites, filterItem],
   )
   const recentItems = useMemo(
-    () => recents.map(h => ALL_ITEMS.find(i => i.href === h)).filter(Boolean).slice(0, 3) as NavItem[],
-    [recents],
+    () => recents
+      .map(h => ALL_ITEMS.find(i => i.href === h))
+      .filter((i): i is NavItem => !!i && filterItem(i))
+      .slice(0, 3),
+    [recents, filterItem],
   )
 
   const renderBadge = (item: NavItem, isActive: boolean) => {
@@ -711,14 +741,23 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
           </div>
         )}
-        <NavLink
-          to={`${base}/securite`}
-          className={cn('sidebar-item', location.pathname === `${base}/securite` && 'active', collapsed && 'justify-center px-0')}
-          title={collapsed ? 'Sécurité' : undefined}
-        >
-          <ShieldCheck className={cn('sidebar-icon-el flex-shrink-0', collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
-          {!collapsed && <span>Sécurité</span>}
-        </NavLink>
+        {/* Écran d'administration de la sécurité (sessions, appareils de
+            confiance, double authentification des AUTRES comptes). Il était
+            rendu sans condition : un commercial restreint au seul CRM y
+            accédait par le pied de barre, sous les entrées qu'on venait de
+            lui fermer. Le serveur le refuse (requireSecurityMonitoring),
+            mais proposer une porte qui claque au visage n'est pas un
+            cloisonnement — c'est une incohérence. */}
+        {['admin', 'manager'].includes(userRole ?? '') && (
+          <NavLink
+            to={`${base}/securite`}
+            className={cn('sidebar-item', location.pathname === `${base}/securite` && 'active', collapsed && 'justify-center px-0')}
+            title={collapsed ? 'Sécurité' : undefined}
+          >
+            <ShieldCheck className={cn('sidebar-icon-el flex-shrink-0', collapsed ? 'w-[18px] h-[18px]' : 'w-[15px] h-[15px]')} />
+            {!collapsed && <span>Sécurité</span>}
+          </NavLink>
+        )}
         <NavLink
           to={`${base}/parametres`}
           className={cn('sidebar-item', location.pathname === `${base}/parametres` && 'active', collapsed && 'justify-center px-0')}

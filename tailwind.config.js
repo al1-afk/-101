@@ -199,13 +199,18 @@ export default {
           from: { height: 'var(--radix-accordion-content-height)' },
           to:   { height: '0' },
         },
+        /* `none` et non translateY(0) : avec un fill-mode « forwards »,
+           une transformation identité reste posée sur l'élément et en fait
+           le bloc conteneur de ses descendants en position: fixed — les
+           surcouches s'y calaient au lieu de se caler sur la fenêtre.
+           Voir le commentaire détaillé dans src/index.css. */
         'fade-in': {
           from: { opacity: '0', transform: 'translateY(8px)' },
-          to:   { opacity: '1', transform: 'translateY(0)' },
+          to:   { opacity: '1', transform: 'none' },
         },
         'slide-in': {
           from: { opacity: '0', transform: 'translateX(-16px)' },
-          to:   { opacity: '1', transform: 'translateX(0)' },
+          to:   { opacity: '1', transform: 'none' },
         },
         shimmer: {
           '0%':   { backgroundPosition: '-400px 0' },

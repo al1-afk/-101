@@ -279,6 +279,108 @@ async function perimetreListeCrm(
   return { etat: 'filtre', sql: clause.sql, params: clause.params }
 }
 
+/* Message rendu quand le périmètre ne peut pas être calculé (colonnes de
+   la migration 102 absentes). Nommé une fois : les deux points d'entrée
+   qui l'utilisent — périmètre personnel et filtre « Commercial » — sont
+   la même panne vue de deux endroits, et doivent la dire pareil. */
+const MESSAGE_MIGRATION_EN_COURS =
+  'Mise à jour de la base en cours : cette liste sera de nouveau disponible dans quelques instants.'
+
+/* ══════════════════════════════════════════════════════════════════
+   FILTRE « COMMERCIAL » DE LA PAGE CRM  (§9 à §11 du cahier des charges)
+
+   `GET /api/prospects?commercial=<uuid>` restreint la liste au
+   portefeuille d'UNE personne. C'est un écran de pilotage pour
+   l'administrateur : « montre-moi les leads de Yassmine ».
+
+   ── Pourquoi côté serveur et pas dans le tableau du front ──────────
+   Parce que le navigateur ne connaît pas la troisième branche du
+   périmètre. Il sait lire `assigned_to` et `created_by` sur les lignes
+   qu'il a reçues ; il ne sait rien des lignes qu'on a PARTAGÉES avec
+   Yassmine (crm_record_grants), qui ne portent ni son identifiant ni son
+   nom. Un filtre en mémoire afficherait donc un portefeuille amputé, et
+   l'administrateur conclurait qu'elle n'a pas travaillé ces dossiers.
+
+   ── Réservé aux gestionnaires, et IGNORÉ pour les autres ───────────
+   Silencieusement ignoré, pas refusé : une commerciale qui forgerait
+   `?commercial=<uuid d'une collègue>` reçoit sa propre liste, sans rien
+   apprendre de l'existence du paramètre ni de la personne visée. Un 403
+   aurait confirmé que l'identifiant essayé désigne bien quelqu'un.
+
+   ── La règle de périmètre n'est PAS réécrite ici ───────────────────
+   `clausePerimetre` (server/lib/crmScope.ts) est appelée telle quelle,
+   avec la personne CIBLE en acteur. Une seconde condition écrite à la
+   main aurait fini par diverger de la première, et l'écran de contrôle
+   de l'administrateur aurait alors affiché un périmètre différent de
+   celui que la commerciale voit vraiment — un mensonge sur un écran de
+   contrôle d'accès, ce qui est pire que pas d'écran du tout.
+
+   Deux conséquences assumées de cette réutilisation :
+     · la cible porte `<type>.view_all` → `clausePerimetre` rend `null`,
+       aucun filtre : l'administrateur voit tout l'espace, ce qui EST le
+       portefeuille de quelqu'un qui voit tout l'espace ;
+     · la cible porte `crm.access` sans `<type>.view` → la clause vaut
+       `FALSE`, la liste est vide : elle ne voit effectivement rien.
+   Aucun compte de la base ne se trouve dans le premier cas aujourd'hui.
+══════════════════════════════════════════════════════════════════ */
+
+/* Rôle prêté à la personne CIBLE le temps du calcul.
+   `clausePerimetre` court-circuite tout pour un gestionnaire (elle rend
+   `null` = « rien à filtrer »). Filtrer sur un manager renverrait donc
+   la liste entière, et le filtre n'aurait plus aucun effet visible dès
+   qu'on choisit un manager dans la liste déroulante. On demande donc
+   « à quoi ressemble le PORTEFEUILLE de cette personne », question qui a
+   un sens pour tout le monde, y compris pour un manager. */
+const ROLE_POUR_PORTEFEUILLE = 'commercial'
+
+type FiltreCommercial =
+  | { etat: 'aucun' }
+  | { etat: 'invalide' }
+  | { etat: 'indisponible' }
+  | { etat: 'filtre'; sql: string; params: unknown[] }
+
+async function filtreCommercialCrm(
+  table: string,
+  req: Request,
+  startIdx: number,
+): Promise<FiltreCommercial> {
+  /* Hors CRM, `commercial` n'a aucun sens — et il est de toute façon
+     retiré des filtres d'égalité génériques (cf. RESERVED), sans quoi il
+     partirait en `WHERE commercial = '…'` sur une colonne qui n'existe
+     nulle part : une erreur 42703 rendue en 500. */
+  const r = RESSOURCE_CRM.get(table)
+  if (!r) return { etat: 'aucun' }
+
+  const brut = req.query.commercial
+  if (typeof brut !== 'string') return { etat: 'aucun' }
+  const cible = brut.trim()
+  /* « all » et la valeur vide sont la première option de la liste
+     déroulante : comportement d'avant, aucun filtre ajouté. */
+  if (!cible || cible === 'all') return { etat: 'aucun' }
+
+  if (!estGestionnaire(req.user!.role)) return { etat: 'aucun' }
+
+  /* Un gestionnaire, lui, mérite une erreur : sa liste déroulante
+     n'envoie que des UUID, donc une valeur illisible est une requête
+     forgée ou un bug du front. La rendre en « aucun filtre » ferait
+     afficher les 133 fiches de l'espace sous l'étiquette d'une seule
+     personne — l'écran mentirait au lieu de signaler la panne. */
+  if (!UUID_CRM_RE.test(cible)) return { etat: 'invalide' }
+
+  const clause = await clausePerimetre(
+    { tenantId: req.user!.tenantId, userId: cible, role: ROLE_POUR_PORTEFEUILLE },
+    r, table, startIdx,
+  )
+  if (!clause) return { etat: 'aucun' }
+
+  /* La clause s'appuie sur created_by / assigned_to : sans la migration
+     102, elle échouerait en 42703. Même réponse que pour le périmètre
+     personnel — on refuse de servir une liste qu'on ne sait pas filtrer. */
+  if (!(await perimetreCrmDisponible())) return { etat: 'indisponible' }
+
+  return { etat: 'filtre', sql: clause.sql, params: clause.params }
+}
+
 /**
  * Refus de périmètre : 403 « Accès refusé », plus une trace.
  *
@@ -532,7 +634,12 @@ router.get('/:table', async (req: Request, res: Response) => {
   /* Filtres d'égalité optionnels : tout query param hors réservés est traité
      comme `colonne = valeur` (nom validé par SAFE_COL, valeur paramétrée).
      Ex. /api/prospect_logs?prospect_id=… → timeline scopée à un prospect. */
-  const RESERVED = new Set(['orderBy', 'order', 'limit', 'offset'])
+  /* `commercial` est RÉSERVÉ : il désigne une personne, pas une colonne.
+     Sans cette réservation, la boucle ci-dessous en ferait un
+     `WHERE commercial = '<uuid>'` sur une colonne qui n'existe dans
+     aucune table — 42703, rendu en 500. Il est traité plus bas par
+     filtreCommercialCrm. */
+  const RESERVED = new Set(['orderBy', 'order', 'limit', 'offset', 'commercial'])
   const whereClauses: string[] = []
   const whereVals: unknown[] = []
   for (const [k, v] of Object.entries(req.query)) {
@@ -563,13 +670,28 @@ router.get('/:table', async (req: Request, res: Response) => {
       /* On ne peut pas filtrer : on ne sert RIEN plutôt que tout. 503 et
          non 500 — la panne est temporaire et se répare en appliquant la
          migration, le message doit le dire. */
-      return res.status(503).json({
-        error: 'Mise à jour de la base en cours : cette liste sera de nouveau disponible dans quelques instants.',
-      })
+      return res.status(503).json({ error: MESSAGE_MIGRATION_EN_COURS })
     }
     if (perimetre.etat === 'filtre') {
       whereVals.push(...perimetre.params)
       whereClauses.push(perimetre.sql)
+    }
+
+    /* Filtre « Commercial » — s'AJOUTE au périmètre du demandeur, il ne
+       le remplace pas. En pratique les deux ne se cumulent jamais : le
+       paramètre n'est lu que pour un gestionnaire, dont le périmètre est
+       justement « libre ». Le AND reste écrit tel quel pour que ce soit
+       encore vrai si la règle changeait. */
+    const filtreCom = await filtreCommercialCrm(table, req, whereVals.length + 1)
+    if (filtreCom.etat === 'invalide') {
+      return res.status(400).json({ error: 'Commercial invalide' })
+    }
+    if (filtreCom.etat === 'indisponible') {
+      return res.status(503).json({ error: MESSAGE_MIGRATION_EN_COURS })
+    }
+    if (filtreCom.etat === 'filtre') {
+      whereVals.push(...filtreCom.params)
+      whereClauses.push(filtreCom.sql)
     }
 
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''

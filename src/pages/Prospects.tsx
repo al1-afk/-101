@@ -12,7 +12,7 @@ import {
   UserPlus, ArrowRightLeft, Clock, CheckSquare, Square, AlertTriangle,
   MessageCircle, Eye, Copy,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button }   from '@/components/ui/button'
 import { Input }    from '@/components/ui/input'
 import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
@@ -38,6 +38,8 @@ import {
 import { useListNavMemory, listNavKey } from '@/hooks/useListNavMemory'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
+import { crmAccessApi, prospectsApi, type CrmAssignable } from '@/lib/api'
+import { currentTenantIdForCache } from '@/lib/authToken'
 import { canonicalPhone, groupByPhone } from '@/lib/phone'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
@@ -117,6 +119,7 @@ const DEFAULT_FILTERS: ListFilters = {
   todayOnly:    false,
   dupOnly:      false,
   portefeuille: 'all',
+  commercial:   'all',
   dateRange:    DEFAULT_RANGE,
 }
 
@@ -131,6 +134,8 @@ interface ListFilters {
   dupOnly:      boolean
   /** Tri par appartenance — confort de lecture, pas un contrôle d'accès. */
   portefeuille: PortefeuilleFiltre
+  /** Portefeuille d'UNE personne, 'all' sinon. Résolu par le serveur. */
+  commercial:   string
   dateRange:    DateRange
 }
 
@@ -1242,7 +1247,10 @@ export default function Prospects() {
   const navigate = useNavigate()
   const { tenantSlug } = useParams<{ tenantSlug: string }>()
   const base = tenantSlug ? `/${tenantSlug}` : ''
-  const { data: prospects = [], isLoading, isError } = useProspects()
+  /* Liste de l'espace, telle qu'elle a toujours été chargée. Le filtre
+     « Commercial » ci-dessous lui substitue une seconde requête quand un
+     gestionnaire cible une personne — voir plus bas. */
+  const { data: prospectsEspace = [], isLoading: chargeEspace, isError: erreurEspace } = useProspects()
   const { data: allLogs = [] } = useAllProspectLogs()
   const createProspect  = useCreateProspect()
   const updateProspect  = useUpdateProspect()
@@ -1282,6 +1290,9 @@ export default function Prospects() {
   const [dupOnly,      setDupOnly]      = useState(nav.initialFilters.dupOnly ?? false)
   /* Même précaution : un instantané d'avant ce filtre vaut « Tous mes accès ». */
   const [portefeuille, setPortefeuille] = useState<PortefeuilleFiltre>(nav.initialFilters.portefeuille ?? 'all')
+  /* Filtre « Commercial » : l'identifiant d'une personne, ou 'all'. Même
+     précaution que ci-dessus pour un instantané enregistré avant ce filtre. */
+  const [commercial,   setCommercial]   = useState<string>(nav.initialFilters.commercial ?? 'all')
   const [dateRange,    setDateRange]    = useState<DateRange>(nav.initialFilters.dateRange)
   const [page,         setPage]         = useState(nav.initialPage)
   const [drawerOpen,   setDrawerOpen]   = useState(false)
@@ -1289,6 +1300,66 @@ export default function Prospects() {
   const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
   const [confirmOpen,  setConfirmOpen]  = useState(false)
   const [deleting,     setDeleting]     = useState(false)
+
+  /* ─── Filtre « Commercial » (gestionnaires) ──────────────────────
+     Le périmètre d'une personne, c'est ses fiches PLUS celles qu'on lui a
+     partagées ; ces partages vivent dans crm_record_grants, que la liste ne
+     transporte pas. Filtrer en mémoire sur `assigned_to` afficherait donc un
+     portefeuille amputé de tous les partages, et l'écran de l'admin mentirait
+     sur ce que voit réellement la commerciale. C'est le serveur qui tranche
+     (paramètre `commercial` de GET /api/prospects, adossé à crmScope).
+
+     `isManager` conditionne l'envoi : le serveur ignore de toute façon le
+     paramètre pour les autres rôles, mais un instantané de navigation gardé
+     d'une session de gestionnaire ne doit pas émettre une requête que cet
+     écran-ci n'a pas le droit de composer. */
+  const commercialActif = isManager && commercial !== 'all' ? commercial : null
+  /* Le tenant entre dans les clés de cache : ce dépôt autorise un changement
+     d'espace sans rechargement, et les fiches d'un espace n'ont rien à faire
+     dans l'autre. */
+  const cacheTenant = currentTenantIdForCache()
+
+  const qPersonnel = useQuery<{ users: CrmAssignable[] }>({
+    queryKey: ['crm-assignables', cacheTenant],
+    queryFn:  () => crmAccessApi.assignables(),
+    enabled:  isManager,
+    /* Le personnel de l'espace bouge en semaines, pas en secondes. */
+    staleTime: 5 * 60_000,
+  })
+
+  /* Requête SÉPARÉE, et non `useProspects` avec un argument, pour deux
+     raisons. L'identifiant choisi entre dans la clé de cache : sans lui,
+     passer de Yassmine à Sara réafficherait les fiches de Yassmine. Et on
+     appelle l'API directement plutôt que la couche hors-ligne, qui remplace
+     tout le cache IndexedDB par ce qu'elle reçoit — le portefeuille d'une
+     seule personne deviendrait alors, hors connexion, « tout le CRM ».
+     Le préfixe 'prospects' reste celui de useProspects : les mutations, qui
+     invalident ['prospects'], rafraîchissent donc aussi cette liste. */
+  const qParCommercial = useQuery<Prospect[]>({
+    queryKey: ['prospects', cacheTenant, 'commercial', commercialActif],
+    queryFn:  () => prospectsApi.list({
+      orderBy: 'created_at', order: 'desc', commercial: commercialActif as string,
+    }) as Promise<Prospect[]>,
+    enabled:  !!commercialActif,
+    staleTime: 1000 * 60 * 2,
+  })
+
+  /* Nom affiché dans l'état vide. La liste du personnel peut n'être pas
+     encore arrivée : « ce commercial » vaut mieux qu'un trou dans la phrase. */
+  const nomCommercialActif = qPersonnel.data?.users
+    .find(u => u.user_id === commercialActif)?.name || 'ce commercial'
+
+  /* À partir d'ici, le reste de la page ne voit qu'une liste : rien d'autre
+     ne change selon que le filtre est actif ou non. */
+  /* useMemo : sans lui, le `?? []` fabriquerait un tableau neuf à chaque
+     rendu, et tous les calculs de la page (doublons, compteurs, pagination)
+     repartiraient de zéro tant que la requête n'a pas répondu. */
+  const prospects = useMemo(
+    () => (commercialActif ? (qParCommercial.data ?? []) : prospectsEspace),
+    [commercialActif, qParCommercial.data, prospectsEspace],
+  )
+  const isLoading = commercialActif ? qParCommercial.isLoading : chargeEspace
+  const isError   = commercialActif ? qParCommercial.isError   : erreurEspace
 
   const todayCount = useMemo(
     () => prospects.filter(isRelanceToday).length,
@@ -1380,7 +1451,7 @@ export default function Prospects() {
      On compare une signature plutôt que de « sauter le 1er passage » : sous
      StrictMode l'effet est monté deux fois, et un simple drapeau laisserait le
      2ᵉ passage écraser la page restaurée au retour d'une fiche. */
-  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dupOnly, portefeuille, dateRange })
+  const filterSig = JSON.stringify({ search, filterStatut, todayOnly, dupOnly, portefeuille, commercial, dateRange })
   const filterSigRef = useRef(filterSig)
   useEffect(() => {
     if (filterSigRef.current === filterSig) return
@@ -1406,7 +1477,7 @@ export default function Prospects() {
      les mêmes filtres, la même page, la même position, et la ligne ouverte
      reste surlignée pour enchaîner sur le prospect suivant. */
   const openEdit    = (p: Prospect) => {
-    nav.remember(p.id, { view, search, filterStatut, todayOnly, dupOnly, portefeuille, dateRange }, page)
+    nav.remember(p.id, { view, search, filterStatut, todayOnly, dupOnly, portefeuille, commercial, dateRange }, page)
     navigate(`${base}/prospects/${p.id}`)
   }
   const closeDrawer = () => setDrawerOpen(false)
@@ -1655,6 +1726,30 @@ export default function Prospects() {
           </SelectContent>
         </Select>
 
+        {/* Commercial — RENDU POUR LES SEULS GESTIONNAIRES. Pour une
+            commerciale, l'écran reste exactement celui d'avant : le serveur
+            ignorerait de toute façon le paramètre, mais un menu listant ses
+            collègues laisserait croire qu'elle peut ouvrir leurs fiches.
+            La sélection part au serveur (cf. `qParCommercial`) : le
+            navigateur ne sait pas ce qui est « partagé avec X ». */}
+        {isManager && (
+          <Select value={commercial} onValueChange={setCommercial}>
+            <SelectTrigger className="w-44 h-8 text-sm" title="Voir le portefeuille d'un commercial">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les commerciaux</SelectItem>
+              {(qPersonnel.data?.users ?? []).map(u => (
+                /* Le nom peut manquer sur un compte créé par invitation :
+                   l'e-mail reste alors le seul repère lisible. */
+                <SelectItem key={u.user_id} value={u.user_id}>
+                  {u.name || u.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         {/* À contacter aujourd'hui */}
         <button
           onClick={() => setTodayOnly(p => !p)}
@@ -1801,12 +1896,16 @@ export default function Prospects() {
                 <div className="py-16 text-center">
                   <User className="w-10 h-10 text-muted-foreground opacity-30 mx-auto mb-3" />
                   <p className="text-sm font-medium text-foreground">Aucun prospect trouvé</p>
-                  {/* Le filtre de portefeuille est testé en premier : sinon
+                  {/* Les filtres restrictifs sont testés en premier : sinon
                       « Assignés à moi » sur un portefeuille vide invitait à
                       « ajouter votre premier prospect » alors qu'il suffit de
-                      revenir à « Tous mes accès ». */}
+                      revenir à « Tous mes accès ». Le filtre par commercial
+                      passe avant : un portefeuille vide n'est pas un CRM vide,
+                      et le dire évite de croire à une perte de données. */}
                   <p className="text-xs text-muted-foreground mt-1">
-                    {portefeuille !== 'all'
+                    {commercialActif
+                      ? `Aucun prospect dans le portefeuille de ${nomCommercialActif}`
+                      : portefeuille !== 'all'
                       ? 'Aucun prospect dans cette sélection — revenez à « Tous mes accès »'
                       : todayOnly ? "Aucune relance prévue aujourd'hui" : 'Ajoutez votre premier prospect'}
                   </p>

@@ -719,13 +719,46 @@
 /* ═══════════════════════════════════════════════════════════════════
    ANIMATIONS
    ═══════════════════════════════════════════════════════════════════ */
-@keyframes fade-in   { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-@keyframes slide-up  { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+/* `transform: none` en fin d'animation, et surtout PAS translateY(0).
+   Les deux rendent le même pixel, mais pas le même DOM : avec
+   `animation-fill-mode: forwards`, la dernière image est FIGÉE, donc
+   translateY(0) laisse un `transform: matrix(1,0,0,1,0,0)` sur l'élément
+   pour toujours. Or une transformation, même identité, fait de l'élément
+   le BLOC CONTENEUR de tous ses descendants en `position: fixed`
+   (CSS Transforms, § containing block).
+
+   Conséquence mesurée avant ce correctif : la fenêtre « Nouveau prospect »,
+   pourtant en `fixed inset-0`, se calait sur le conteneur de page — relevé
+   à top -1051px pour 3479px de haut dans une fenêtre de 900px. Elle
+   apparaissait donc décalée et coupée en haut ou en bas selon le
+   défilement. Ces classes servent dans 59 fichiers : toute surcouche
+   rendue à l'intérieur était exposée au même défaut. */
+@keyframes fade-in   { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+@keyframes slide-up  { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:none} }
 @keyframes shimmer   { 0%{background-position:-400px 0} 100%{background-position:calc(400px + 100%) 0} }
 @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
 @keyframes float     { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
 
-.animate-fade-in  { animation: fade-in  0.3s ease-out forwards; }
-.animate-slide-up { animation: slide-up 0.35s ease-out forwards; }
+/* `backwards` et NON `forwards` — la différence décide du placement de
+   toutes les surcouches de l'application.
+
+   `forwards` fige la dernière image de l'animation sur l'élément. Or la
+   valeur ANIMÉE d'un `transform` est toujours une MATRICE, même quand la
+   dernière image écrit le mot-clé `none` : l'interpolation traite `none`
+   comme la matrice identité. L'élément conservait donc, pour toujours,
+   un `transform: matrix(1,0,0,1,0,0)` — invisible à l'œil, mais qui fait
+   de lui le BLOC CONTENEUR de ses descendants en `position: fixed`.
+
+   Mesuré avant ce correctif : la fenêtre « Nouveau prospect », pourtant
+   en `fixed inset-0`, se calait sur le conteneur de page (top -1051px,
+   hauteur 3479px, dans une fenêtre de 900px) et se retrouvait coupée en
+   haut ou en bas selon le défilement.
+
+   `backwards` applique la PREMIÈRE image avant le départ — ce qui évite
+   l'éclair d'opacité au montage, seule raison d'être du fill ici — et ne
+   laisse RIEN une fois l'animation terminée. Ces classes servent dans 59
+   fichiers : toute surcouche rendue à l'intérieur était concernée. */
+.animate-fade-in  { animation: fade-in  0.3s ease-out backwards; }
+.animate-slide-up { animation: slide-up 0.35s ease-out backwards; }
 .animate-shimmer  { animation: shimmer  1.4s linear infinite; }
 .animate-float    { animation: float    3s ease-in-out infinite; }
