@@ -59,6 +59,15 @@ const TODAY = ymd(new Date().toISOString())
    vide pour représenter « personne ». Même convention que le panneau
    d'accès de la fiche (src/components/crm/ProspectAccessCard.tsx). */
 const SANS_RESPONSABLE = '__none__'
+
+/* Initiales d'un nom d'affichage : « imane MAHI » → « IM ». Deux lettres au
+   plus — au-delà, la pastille cesse d'être ronde et la colonne s'élargit. */
+function initiales(nom: string): string {
+  const mots = nom.trim().split(/\s+/).filter(Boolean)
+  if (!mots.length) return '?'
+  const deux = mots.length > 1 ? [mots[0], mots[mots.length - 1]] : [mots[0]]
+  return deux.map(m => m.charAt(0).toUpperCase()).join('').slice(0, 2)
+}
 const isRelanceToday = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) === TODAY
 
 /* Heure de relance 'HH:MM' (depuis relance_at) — vide si minuit / non renseignée. */
@@ -1142,23 +1151,40 @@ function ProspectRow({
           <span className="text-muted-foreground text-xs">—</span>
         )}
       </td>
-      {/* Transfert — stopPropagation : la ligne entière ouvre la fiche,
-          et un clic sur ce bouton ne doit pas faire les deux. */}
-      {onTransfer && (
-        <td className="col-action px-3 py-3 w-12 text-right" onClick={e => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => onTransfer(p)}
-            title={responsable
-              ? `Responsable : ${responsable} — transférer à quelqu'un d'autre`
-              : 'Aucun responsable — attribuer cette fiche'}
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md opacity-60 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-500/10 transition-all"
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5" />
-            <span className="sr-only">Transférer</span>
-          </button>
-        </td>
-      )}
+      {/* Responsable — qui porte la fiche, lisible sans l'ouvrir. La cellule
+          reste cliquable comme le reste de la ligne ; seul le bouton de
+          transfert arrête la propagation, sinon un clic ferait les deux. */}
+      <td className="col-action px-3 py-3 w-[176px]">
+        <div className="flex items-center justify-between gap-1.5">
+          {responsable ? (
+            <span className="inline-flex items-center gap-1.5 min-w-0" title={`Responsable : ${responsable}`}>
+              <span
+                className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-300"
+              >
+                {initiales(responsable)}
+              </span>
+              <span className="text-xs text-foreground truncate">{responsable}</span>
+            </span>
+          ) : (
+            /* « Non attribué » et non « — » : une fiche sans responsable est
+               une fiche que personne ne relance, et ça doit se lire. */
+            <span className="text-xs text-muted-foreground italic truncate">Non attribué</span>
+          )}
+          {onTransfer && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onTransfer(p) }}
+              title={responsable
+                ? `Transférer cette fiche (actuellement à ${responsable})`
+                : 'Attribuer cette fiche à un commercial'}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0 opacity-60 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span className="sr-only">Transférer</span>
+            </button>
+          )}
+        </div>
+      </td>
     </motion.tr>
   )
 }
@@ -1355,10 +1381,15 @@ export default function Prospects() {
      dans l'autre. */
   const cacheTenant = currentTenantIdForCache()
 
+  /* Chargé pour TOUT LE MONDE, et non plus pour les seuls gestionnaires :
+     la colonne « Responsable » nomme le propriétaire de chaque ligne, et un
+     commercial doit lire ce nom sur les fiches qu'on lui a partagées. La
+     route est ouverte à tout compte de l'espace pour cette raison précise
+     (cf. le commentaire de GET /api/crm/assignables) — la restreindre ici
+     n'aurait rien fermé, elle aurait juste laissé des cases vides. */
   const qPersonnel = useQuery<{ users: CrmAssignable[] }>({
     queryKey: ['crm-assignables', cacheTenant],
     queryFn:  () => crmAccessApi.assignables(),
-    enabled:  isManager,
     /* Le personnel de l'espace bouge en semaines, pas en secondes. */
     staleTime: 5 * 60_000,
   })
@@ -1969,9 +2000,10 @@ export default function Prospects() {
                     {['Prospect', 'Contact', 'Statut', 'Valeur', 'Source', 'Relance', 'Dernière note'].map(h => (
                       <th key={h}>{h}</th>
                     ))}
-                    {/* Colonne d'actions réservée à l'administration —
-                        cf. ProspectRow.onTransfer. */}
-                    {isManager && <th className="col-action px-3 py-3 w-12 text-right">Transfert</th>}
+                    {/* Le NOM du responsable est montré à tout le monde ;
+                        le bouton de transfert, lui, reste réservé à
+                        l'administration (cf. ProspectRow.onTransfer). */}
+                    <th className="col-action px-3 py-3 w-[176px]">Responsable</th>
                   </tr>
                 </thead>
                 <tbody>
