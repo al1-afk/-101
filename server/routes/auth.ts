@@ -200,7 +200,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
   try {
     const [existing, existingTenant] = await Promise.all([
-      queryOne('SELECT id FROM users WHERE email = $1', [email]),
+      queryOne('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]),
       queryOne('SELECT id FROM tenants WHERE slug = $1', [slug]),
     ])
     if (existing)       return res.status(409).json({ error: 'Email déjà utilisé' })
@@ -262,7 +262,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
          et serait donc visible par les administrateurs de TOUS les
          espaces — fuite d'information entre tenants. */
       const target = await queryOne<{ id: string }>(
-        `SELECT id FROM users WHERE email = $1`, [email]
+        `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email]
       ).catch(() => null)
       markSecurityLogged(req)
       trackSecurityEvent({
@@ -282,8 +282,15 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
       id: string; password_hash: string; name: string;
       is_active: boolean; twofa_mode: string;
     }>(
+      /* LOWER des DEUX côtés : une adresse est insensible à la casse
+          (RFC 5321 pour le domaine, usage universel pour la partie
+          locale), mais la colonne conserve la casse SAISIE. Sans cette
+          normalisation, « Aya@… » et « aya@… » désignent deux comptes
+          différents : la personne inscrite avec une majuscule ne peut
+          plus se connecter dès qu'elle tape son adresse en minuscules,
+          et rien ne le lui explique. */
       `SELECT id, password_hash, name, is_active, twofa_mode
-         FROM users WHERE email = $1`,
+         FROM users WHERE LOWER(email) = LOWER($1)`,
       [email]
     )
 
@@ -454,7 +461,7 @@ router.post('/verify-login', authLimiter, async (req: Request, res: Response) =>
             WHERE id = $1 LIMIT 1`
         : `SELECT id, user_id, tenant_id, code_hash, attempts, method, status, expires_at
              FROM login_verification_codes
-            WHERE email = $1 AND status = 'pending' AND expires_at > NOW()
+            WHERE LOWER(email) = LOWER($1) AND status = 'pending' AND expires_at > NOW()
             ORDER BY created_at DESC LIMIT 1`,
       [challengeId ?? email]
     )
@@ -609,7 +616,7 @@ router.post('/resend-login-code', authLimiter, async (req: Request, res: Respons
        endpoint inutilisable en cold-start (anti-abuse). */
     const recent = await queryOne<{ user_id: string; tenant_id: string; method: string }>(
       `SELECT user_id, tenant_id, method FROM login_verification_codes
-        WHERE email = $1 AND created_at > NOW() - INTERVAL '30 minutes'
+        WHERE LOWER(email) = LOWER($1) AND created_at > NOW() - INTERVAL '30 minutes'
         ORDER BY created_at DESC LIMIT 1`,
       [email]
     )
@@ -665,7 +672,7 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
 
   try {
     const user = await queryOne<{ id: string }>(
-      `SELECT id FROM users WHERE email = $1 AND is_active = true`, [email]
+      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND is_active = true`, [email]
     )
 
     /* Pas de compte users. Peut-être un team_member invité qui n'a jamais
@@ -677,7 +684,7 @@ router.post('/forgot-password', authLimiter, async (req: Request, res: Response)
         job_title: string | null; email: string;
       }>(
         `SELECT id, tenant_id, prenom, job_title, email FROM public.team_members
-          WHERE email = $1 AND user_id IS NULL AND account_status != 'archived'
+          WHERE LOWER(email) = LOWER($1) AND user_id IS NULL AND account_status != 'archived'
           LIMIT 1`,
         [email]
       )
@@ -770,7 +777,7 @@ router.post('/reset-password', authLimiter, async (req: Request, res: Response) 
   try {
     const row = await queryOne<{ id: string; user_id: string; code_hash: string; attempts: number }>(
       `SELECT id, user_id, code_hash, attempts FROM password_reset_codes
-       WHERE email = $1 AND used = false AND expires_at > NOW()
+       WHERE LOWER(email) = LOWER($1) AND used = false AND expires_at > NOW()
        ORDER BY created_at DESC LIMIT 1`,
       [email]
     )

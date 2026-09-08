@@ -138,8 +138,26 @@ async function main() {
   check('il ne peut PAS voir les clients (non accordé)', p1.data?.can?.clients_view === false)
   const l1 = await call(COMMERCIAL, 'GET', '/api/my-space/crm/prospects')
   check('la liste répond 200', l1.status === 200, `statut ${l1.status}`)
-  check('elle est vide tant que rien n’est attribué',
-    (l1.data?.prospects ?? []).length === 0, `${(l1.data?.prospects ?? []).length} fiche(s)`)
+
+  /* L'invariant qui compte n'est pas « la liste est vide » — l'espace
+     peut déjà porter des attributions — mais « il ne voit QUE ce qui lui
+     revient ». On le vérifie contre la base : chaque fiche retournée
+     doit être la sienne, et le total de l'espace doit rester hors de
+     portée. C'est la propriété de sécurité ; le reste est de la fixture. */
+  const vus = (l1.data?.prospects ?? []).map(p => p.id)
+  const total = (await pool.query(`SELECT count(*)::int AS n FROM prospects WHERE tenant_id=$1`, [TENANT])).rows[0].n
+  check('il ne voit pas tout le portefeuille de l’espace',
+    vus.length < total, `${vus.length} vues sur ${total}`)
+  if (vus.length) {
+    const miennes = await pool.query(
+      `SELECT count(*)::int AS n FROM prospects
+        WHERE id = ANY($1::uuid[]) AND (assigned_to = $2 OR created_by = $2)`,
+      [vus, COMMERCIAL.id])
+    check('chaque fiche visible lui est bien attribuée',
+      miennes.rows[0].n === vus.length, `${miennes.rows[0].n}/${vus.length}`)
+  } else {
+    check('chaque fiche visible lui est bien attribuée', true)
+  }
 
   /* ── 4. Attribution et périmètre ───────────────────────────────── */
   section('4. Périmètre « mes prospects » (§16.3)')
@@ -148,13 +166,21 @@ async function main() {
     [TENANT])
   const [a, b, autre] = dispo.rows.map(r => r.id)
   prospetsTouches.push(a, b)
+  /* On raisonne en ÉCART, jamais en valeur absolue : cet espace peut
+     déjà porter des attributions faites à la main, et un test qui exige
+     « exactement 2 » échouerait sur un état parfaitement sain. */
+  const avant = ((await call(COMMERCIAL, 'GET', '/api/my-space/crm/prospects')).data?.prospects ?? []).length
+
   const assign = await call(ADMIN, 'POST', `/api/commercials/${COMMERCIAL.id}/prospects`,
     { prospect_ids: [a, b] })
   check('attribution en lot acceptée', assign.status === 200, `statut ${assign.status}`)
 
   const l2 = await call(COMMERCIAL, 'GET', '/api/my-space/crm/prospects')
-  check('il voit exactement ses 2 prospects',
-    (l2.data?.prospects ?? []).length === 2, `${(l2.data?.prospects ?? []).length}`)
+  const apres = (l2.data?.prospects ?? []).length
+  check('les 2 prospects attribués apparaissent dans sa liste',
+    apres === avant + 2, `${avant} avant, ${apres} après`)
+  const ids = new Set((l2.data?.prospects ?? []).map(p => p.id))
+  check('ce sont bien CES deux fiches-là', ids.has(a) && ids.has(b))
   const sien = await call(COMMERCIAL, 'GET', `/api/my-space/crm/prospects/${a}`)
   check('il ouvre une fiche qui lui est attribuée', sien.status === 200, `statut ${sien.status}`)
   const vole = await call(COMMERCIAL, 'GET', `/api/my-space/crm/prospects/${autre}`)
@@ -191,9 +217,10 @@ async function main() {
   const l3 = await call(COMMERCIAL, 'GET', '/api/my-space/crm/prospects')
   check('ses routes CRM répondent de nouveau 403', l3.status === 403, `statut ${l3.status}`)
   const reste = await pool.query(
-    `SELECT count(*)::int AS n FROM prospects WHERE assigned_to = $1`, [COMMERCIAL.id])
-  check('les prospects lui restent attribués (historique conservé)', reste.rows[0].n === 2,
-    `${reste.rows[0].n} fiche(s)`)
+    `SELECT count(*)::int AS n FROM prospects WHERE assigned_to = $1 AND id = ANY($2::uuid[])`,
+    [COMMERCIAL.id, [a, b]])
+  check('ses prospects lui restent attribués (historique conservé)', reste.rows[0].n === 2,
+    `${reste.rows[0].n}/2 fiche(s)`)
 
   /* ── Bilan ─────────────────────────────────────────────────────── */
   console.log(`\n${'─'.repeat(64)}`)

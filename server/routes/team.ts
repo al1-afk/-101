@@ -229,7 +229,7 @@ router.post('/invite/:token/accept', authLimiter, async (req: Request, res: Resp
     /* Reuse existing users row if one exists for that email (e.g. user
        is also a workspace admin elsewhere). Otherwise create fresh. */
     let user = await queryOne<{ id: string }>(
-      `SELECT id FROM public.users WHERE email = $1`, [member.email],
+      `SELECT id FROM public.users WHERE LOWER(email) = LOWER($1)`, [member.email],
     )
     if (user) {
       await query(
@@ -331,7 +331,11 @@ router.post('/auth/login', authLimiter, async (req: Request, res: Response) => {
     }
 
     const user = await queryOne<{ id: string; password_hash: string; is_active: boolean }>(
-      `SELECT id, password_hash, is_active FROM public.users WHERE email = $1`, [email],
+      /* Même raison qu'au login administrateur : l'adresse est
+         insensible à la casse, la colonne ne l'est pas. Une employée
+         enregistrée « Aya@… » se voyait refuser sa propre adresse dès
+         qu'elle la tapait en minuscules. */
+      `SELECT id, password_hash, is_active FROM public.users WHERE LOWER(email) = LOWER($1)`, [email],
     )
 
     const valid = user ? await bcrypt.compare(password, user.password_hash) : false
@@ -563,7 +567,7 @@ router.post('/invite', inviteLimiter, ...requireAdminMgr, async (req: Request, r
        (met à jour ses infos + réémet une invitation). Sinon → 409. */
     const existing = await tenantQueryOne<{ id: string; account_status: string }>(
       tenantId,
-      `SELECT id, account_status FROM public.team_members WHERE email = $1`, [email],
+      `SELECT id, account_status FROM public.team_members WHERE LOWER(email) = LOWER($1)`, [email],
     )
     if (existing && existing.account_status !== 'archived') {
       return res.status(409).json({ error: 'Un membre avec cet email existe déjà' })

@@ -80,7 +80,7 @@ const pool = new pg.Pool({
 try {
   const email = emailArg.trim().toLowerCase()
 
-  const found = await pool.query('SELECT id, name, email FROM users WHERE email = $1', [email])
+  const found = await pool.query('SELECT id, name, email FROM users WHERE LOWER(email) = LOWER($1)', [email])
   if (found.rows.length === 0) {
     console.error(`\n❌ Aucun utilisateur trouvé avec l'email "${email}".\n`)
     process.exit(2)
