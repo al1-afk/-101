@@ -42,6 +42,7 @@ import { query, tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { logger } from '../lib/logger'
 import { resolveMember, logActivity } from './mySpace'
+import { UPLOAD_DIR } from '../lib/uploadStorage'
 
 const router = Router()
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -55,8 +56,6 @@ router.use((req: Request, res: Response, next) => {
   next()
 })
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR
-  || (process.env.NODE_ENV === 'production' ? '/app/uploads' : path.resolve(process.cwd(), 'uploads'))
 
 const MAX_IMAGE_BYTES = Number(process.env.SOP_MAX_IMAGE_MB || 15) * 1024 * 1024
 const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp'])

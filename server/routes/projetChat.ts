@@ -34,15 +34,13 @@ import { requireAuth } from '../middleware/auth'
 import { logger } from '../lib/logger'
 import { sendPushToUser } from '../lib/webPush'
 import { notifyNewProjetMessage } from '../lib/notificationEmails'
+import { UPLOAD_DIR } from '../lib/uploadStorage'
 
 const router = Router()
 router.use(requireAuth)
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Racine de stockage — volume Docker en production. */
-const UPLOAD_DIR = process.env.UPLOAD_DIR
-  || (process.env.NODE_ENV === 'production' ? '/app/uploads' : path.resolve(process.cwd(), 'uploads'))
 
 /** Plafond par fichier. Réglable sans redéploiement de code. */
 const MAX_UPLOAD_BYTES = Number(process.env.CHAT_MAX_UPLOAD_MB || 100) * 1024 * 1024

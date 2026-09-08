@@ -1053,6 +1053,31 @@ export interface ChatThread {
 const chatToken = (as: 'admin' | 'member') =>
   as === 'member' ? memberTokenStore.get() : tokenStore.get()
 
+/**
+ * Pourquoi ce fichier ne s'ouvre pas — dans les mots du serveur.
+ *
+ * « Fichier indisponible (404) » disait la même chose pour trois causes
+ * très différentes : la fiche n'existe pas, l'accès est refusé, ou le
+ * CONTENU a disparu du stockage. Le 08/09/2026, 23 pièces jointes ont
+ * été effacées par un redéploiement et ce message laissait croire à un
+ * problème de droits. Le serveur, lui, sait laquelle des trois : on lui
+ * emprunte sa phrase, et on ne garde le code HTTP que s'il se tait.
+ */
+async function raisonFichier(res: Response): Promise<string> {
+  const dit = await res.json().catch(() => null) as { error?: string } | null
+  if (dit?.error) {
+    /* Le cas « le contenu n'est plus là » mérite d'être explicite :
+       l'utilisateur doit comprendre qu'il ne s'agit ni d'une panne
+       passagère ni d'un droit manquant, et qu'il faut redemander le
+       fichier à son expéditeur. */
+    if (/absent du stockage/i.test(dit.error)) {
+      return "Ce fichier n'est plus disponible — son contenu a été perdu. Demandez à l'expéditeur de le renvoyer."
+    }
+    return dit.error
+  }
+  return `Fichier indisponible (${res.status})`
+}
+
 export const projetChatApi = {
   thread: (projetId: string, as: 'admin' | 'member' = 'admin') =>
     request<ChatThread>('GET', `/api/projet-chat/${projetId}/messages`, undefined, as),
@@ -1100,7 +1125,7 @@ export const projetChatApi = {
       `${BASE_URL}/api/projet-chat/files/${fileId}${inline ? '?inline=1' : ''}`,
       { headers: { 'Authorization': `Bearer ${chatToken(as)}` }, credentials: 'include' },
     )
-    if (!res.ok) throw new Error(`Fichier indisponible (${res.status})`)
+    if (!res.ok) throw new Error(await raisonFichier(res))
     return URL.createObjectURL(await res.blob())
   },
 }
@@ -1659,7 +1684,7 @@ export const messagesApi = {
       `${BASE_URL}/api/messages/files/${fileId}${inline ? '?inline=1' : ''}`,
       { headers: { 'Authorization': `Bearer ${chatToken(as)}` }, credentials: 'include' },
     )
-    if (!res.ok) throw new Error(`Fichier indisponible (${res.status})`)
+    if (!res.ok) throw new Error(await raisonFichier(res))
     return URL.createObjectURL(await res.blob())
   },
 

@@ -50,14 +50,12 @@ import {
   subscribeUser, publishToUser, isUserConnected, streamCount,
   MAX_STREAMS_PER_USER,
 } from '../lib/realtimeBus'
+import { UPLOAD_DIR } from '../lib/uploadStorage'
 
 const router = Router()
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Racine de stockage — volume Docker en production. */
-const UPLOAD_DIR = process.env.UPLOAD_DIR
-  || (process.env.NODE_ENV === 'production' ? '/app/uploads' : path.resolve(process.cwd(), 'uploads'))
 
 /** Plafond par pièce jointe. Plus bas que la discussion projet : une
  *  messagerie sert à échanger un document, pas à héberger des vidéos. */

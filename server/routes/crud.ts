@@ -18,13 +18,11 @@ import {
   clausePerimetre, peutAcceder, estGestionnaire,
   type CrmActor, type CrmResource,
 } from '../lib/crmScope'
+import { UPLOAD_DIR } from '../lib/uploadStorage'
 
 const router = Router()
 router.use(requireAuth)
 
-/* Même racine que les autres médias (server/routes/mySpaceSops.ts). */
-const UPLOAD_DIR = process.env.UPLOAD_DIR
-  || (process.env.NODE_ENV === 'production' ? '/app/uploads' : path.resolve(process.cwd(), 'uploads'))
 router.use('/:table', tableRbac)
 
 export const EXPOSED_TABLES = new Set([

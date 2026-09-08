@@ -50,6 +50,7 @@ import { securityResponseMonitor } from './middleware/securityMonitor'
 import { startSecurityRetentionScheduler } from './lib/securityEvents'
 import { trustedProxyHops } from './lib/clientIp'
 import { reportUnscopedTables } from './db/tenantColumns'
+import { verifierStockageFichiers } from './lib/uploadStorage'
 
 dotenv.config({ path: '.env.local' })
 
@@ -339,4 +340,11 @@ app.listen(PORT, () => {
       ? '[rls] requêtes tenant exécutées sous le rôle gestiq_rls (RLS garantie)'
       : '[rls] ATTENTION — rôle RLS indisponible, cloisonnement dépendant du compte de connexion')
   })
+  /* Stockage des pièces jointes : la base annonce-t-elle des fichiers que
+     le disque n'a plus ? Le 08/09/2026, 23 pièces jointes (62 Mo) ont été
+     effacées par un redéploiement — le conteneur n'avait aucun volume
+     monté — et RIEN ne l'a signalé : la perte s'est découverte au premier
+     clic sur « télécharger ». Ce contrôle transforme ce silence en
+     alarme. */
+  void verifierStockageFichiers()
 })
