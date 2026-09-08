@@ -67,7 +67,6 @@ const AbonnementsClients  = lazy(() => import('@/pages/AbonnementsClients'))
 const Integrations        = lazy(() => import('@/pages/Integrations'))
 const Rapports            = lazy(() => import('@/pages/Rapports'))
 const SOP                 = lazy(() => import('@/pages/SOP'))
-const Landing             = lazy(() => import('@/pages/Landing'))
 const ComingSoon          = lazy(() => import('@/pages/ComingSoon'))
 const Guides              = lazy(() => import('@/pages/Guides'))
 const GuideStep           = lazy(() => import('@/pages/GuideStep'))
@@ -128,7 +127,12 @@ export default function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* ── Public routes ─────────────────────────────────── */}
-            <Route path="/"     element={<Landing />} />
+            {/* La racine mène à la connexion. Elle servait auparavant une
+                fausse page d'erreur Chrome (« ce site est inaccessible »)
+                qui masquait l'application, avec deux entrées secrètes.
+                Le camouflage a été retiré : qui ouvre l'adresse voit
+                maintenant l'écran de connexion. */}
+            <Route path="/"     element={<Navigate to="/auth" replace />} />
             <Route path="/auth" element={<Auth />} />
 
             {/* ── Team member: invite + login + personal space ───── */}

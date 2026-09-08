@@ -54,9 +54,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem('gestiq_tenant_slug', slug)
     } catch (e: any) {
       /* No silent demo fallback — an unknown slug is an error state.
-         The UI layer (`ProtectedRoute` + Landing) is responsible for
-         redirecting; rendering app chrome with a fake tenant_id was
-         masking the multi-tenancy bug in production. */
+         The UI layer (`ProtectedRoute` + the `/` → `/auth` redirect) is
+         responsible for redirecting; rendering app chrome with a fake
+         tenant_id was masking the multi-tenancy bug in production. */
       setState({
         tenant:  null,
         loading: false,
