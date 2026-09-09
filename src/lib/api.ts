@@ -1037,6 +1037,11 @@ export const projetMessagesApi          = tableApi('projet_messages')
 export interface ChatFile {
   id: string; message_id?: string | null; filename: string; mime: string
   size_bytes: number | string; uploader_name: string; created_at: string
+  /** 'chat' = pièce jointe d'un message ; 'bibliotheque' = fichier
+   *  déposé dans l'espace du projet. Absent des réponses anciennes. */
+  origine?: 'chat' | 'bibliotheque'
+  /** Le fichier est-il porté par un message ? Renvoyé par la liste. */
+  dans_un_message?: boolean
 }
 export interface ChatMessage {
   id: string; projet_id: string; author_name: string
@@ -1091,12 +1096,17 @@ export const projetChatApi = {
   /** Téléverse un fichier : le corps de la requête EST le fichier.
    *  Pas de FormData — inutile pour un fichier unique, et cela évite de
    *  recopier le contenu en mémoire avant l'envoi. */
+  /** `origine` distingue une pièce jointe en cours d'envoi (défaut) d'un
+   *  dépôt direct dans la bibliothèque du projet, que la purge des
+   *  téléversements abandonnés ne doit jamais ramasser. */
   uploadFile: async (
     projetId: string,
     file: File,
     as: 'admin' | 'member' = 'admin',
+    origine: 'chat' | 'bibliotheque' = 'chat',
   ): Promise<ChatFile> => {
-    const res = await fetch(`${BASE_URL}/api/projet-chat/${projetId}/files`, {
+    const suffixe = origine === 'bibliotheque' ? '?origine=bibliotheque' : ''
+    const res = await fetch(`${BASE_URL}/api/projet-chat/${projetId}/files${suffixe}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${chatToken(as)}`,
@@ -1128,6 +1138,27 @@ export const projetChatApi = {
     if (!res.ok) throw new Error(await raisonFichier(res))
     return URL.createObjectURL(await res.blob())
   },
+
+  /** Tous les fichiers du projet, du plus récent au plus ancien —
+   *  dépôts directs ET pièces jointes de la discussion, pour qu'un
+   *  fichier reçu n'ait jamais à être cherché à deux endroits.
+   *  `origine: 'bibliotheque'` restreint aux dépôts directs. */
+  listFiles: (
+    projetId: string,
+    as: 'admin' | 'member' = 'admin',
+    origine?: 'bibliotheque',
+  ) =>
+    request<ChatFile[]>(
+      'GET',
+      `/api/projet-chat/${projetId}/files${origine ? '?origine=bibliotheque' : ''}`,
+      undefined,
+      as,
+    ),
+
+  /** Retire un fichier du projet — ligne ET contenu sur le disque.
+   *  Le serveur n'accepte que l'administration ou le déposant. */
+  deleteFile: (fileId: string, as: 'admin' | 'member' = 'admin') =>
+    request<{ success: true }>('DELETE', `/api/projet-chat/files/${fileId}`, undefined, as),
 }
 export const projetTemplatesApi         = tableApi('projet_templates')
 export const teamMemberTasksApi         = tableApi('team_member_tasks')

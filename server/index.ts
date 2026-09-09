@@ -225,7 +225,15 @@ app.use('/api/sop-images', sopImagesRoutes)
 app.use('/api/my-space/crm',  mySpaceCrmRoutes)
 app.use('/api/my-space/sops', mySpaceSopsRoutes)
 app.use('/api/my-space',  mySpaceRoutes)
-app.use('/api/projet-chat', projetChatRoutes)
+/* `moduleRbac` manquait ici, alors que MODULE_DE_PREFIXE associe déjà
+   'projet-chat' au module « projets » (server/middleware/rbac.ts). Sans
+   lui, un compte dont la liste de modules ne contient PAS « projets » —
+   une commerciale limitée au CRM, par exemple — lisait malgré tout la
+   discussion de n'importe quel projet et ses pièces jointes : la porte
+   était fermée sur /api/projets mais restée ouverte sur son chat.
+   Mesuré le 09/09/2026 par scripts/test-projet-fichiers-e2e.mjs (§7),
+   qui exigeait 403 et recevait 200. */
+app.use('/api/projet-chat', requireAuth, moduleRbac, projetChatRoutes)
 app.use('/api/send-document', sendDocumentRoutes)
 app.use('/api/activity',  activityRoutes)
 app.use('/api/outbound',  requireAuth, moduleRbac, outboundRoutes)

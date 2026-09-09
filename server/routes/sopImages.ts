@@ -17,14 +17,13 @@ import path from 'node:path'
 import { tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { logger } from '../lib/logger'
+import { UPLOAD_DIR } from '../lib/uploadStorage'
 
 const router = Router()
 router.use(requireAuth)
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR
-  || (process.env.NODE_ENV === 'production' ? '/app/uploads' : path.resolve(process.cwd(), 'uploads'))
 
 /**
  * GET /:id — servir une image.

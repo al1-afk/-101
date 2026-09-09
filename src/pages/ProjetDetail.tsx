@@ -9,6 +9,7 @@ import {
   Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
   MessageSquare, Settings, Globe, Server, CalendarCheck, UserPlus,
   Eye, CheckCheck,
+  FolderOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
@@ -48,6 +49,7 @@ import { buildTasksFromTemplates, countTemplate } from '@/lib/templateTasks'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
 import ProjetChat from '@/components/projet/ProjetChat'
+import ProjetFichiers from '@/components/projet/ProjetFichiers'
 import { getActiveTimer, setActiveTimer, formatHMS } from '@/lib/taskTimer'
 import { useAuth } from '@/hooks/useAuth'
 import type { SopBlock } from '@/hooks/useSops'
@@ -154,7 +156,7 @@ function toDateInput(iso: string | null | undefined): string {
 /* ═══════════════════════════════════════════════════════════════════
    MAIN PAGE
 ═══════════════════════════════════════════════════════════════════ */
-type Tab = 'overview' | 'team' | 'tasks' | 'chat' | 'infos' | 'docs'
+type Tab = 'overview' | 'team' | 'tasks' | 'chat' | 'infos' | 'docs' | 'fichiers'
 
 export default function ProjetDetail() {
   const { id, tenantSlug } = useParams<{ id: string; tenantSlug: string }>()
@@ -184,6 +186,7 @@ export default function ProjetDetail() {
         infos:    'infos',
         team:     'team',
         docs:     'docs',
+        fichiers: 'fichiers',
         infra:    'infos',
       }
       const next = map[detail?.section]
@@ -329,6 +332,7 @@ export default function ProjetDetail() {
           { key: 'infos',    label: 'Infos & Accès',   icon: KeyRound   },
           { key: 'team',     label: 'Équipe',          icon: Users      },
           { key: 'chat',     label: 'Discussion',      icon: MessageSquare },
+          { key: 'fichiers', label: 'Fichiers',        icon: FolderOpen },
           { key: 'docs',     label: 'Documentation',   icon: FileText   },
           { key: 'overview', label: 'Vue d\'ensemble', icon: Briefcase },
         ] as const).map(t => {
@@ -371,6 +375,10 @@ export default function ProjetDetail() {
       {tab === 'infos' && (
         <InfosAccesTab projet={projet} client={client} />
       )}
+      {tab === 'fichiers' && (
+        <ProjetFichiers projetId={projet.id} as="admin" />
+      )}
+
       {tab === 'docs' && (
         <DocsTab projet={projet} />
       )}

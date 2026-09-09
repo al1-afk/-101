@@ -35,6 +35,7 @@ import { logger } from '../lib/logger'
 import { sendPushToUser } from '../lib/webPush'
 import { notifyNewProjetMessage } from '../lib/notificationEmails'
 import { UPLOAD_DIR } from '../lib/uploadStorage'
+import { normaliserMime, entetesFichier } from '../lib/fichiersMime'
 
 const router = Router()
 router.use(requireAuth)
@@ -396,7 +397,17 @@ router.post('/:projetId/files', withProjetAccess, async (req: Request, res: Resp
      chemin sur le disque, donc pas de traversée possible via « ../ ». */
   filename = filename.replace(/[\r\n]/g, '').slice(0, 255)
 
-  const mime = String(req.headers['content-type'] ?? 'application/octet-stream').slice(0, 128)
+  /* Liste blanche partagée (server/lib/fichiersMime.ts) : un type inconnu
+     n'interdit pas le fichier, il le rend inoffensif — stocké et resservi
+     comme du binaire, donc téléchargé, jamais ouvert dans l'origine de
+     l'application. */
+  const mime = normaliserMime(req.headers['content-type'])
+
+  /* « bibliotheque » = fichier déposé sciemment dans l'espace du projet,
+     qui n'attend aucun message. « chat » (défaut) = pièce jointe en
+     cours d'envoi. La distinction protège la bibliothèque de la purge
+     des téléversements abandonnés (migration 105). */
+  const origine = req.query.origine === 'bibliotheque' ? 'bibliotheque' : 'chat'
 
   const declared = Number(req.headers['content-length'] ?? 0)
   if (declared && declared > MAX_UPLOAD_BYTES) {
@@ -458,11 +469,11 @@ router.post('/:projetId/files', withProjetAccess, async (req: Request, res: Resp
         actor.tenantId,
         `INSERT INTO public.projet_message_files
            (tenant_id, projet_id, filename, mime, size_bytes, storage_path,
-            uploader_name, uploader_user_id, uploader_team_member_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, filename, mime, size_bytes, uploader_name, created_at`,
+            uploader_name, uploader_user_id, uploader_team_member_id, origine)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id, filename, mime, size_bytes, uploader_name, created_at, origine`,
         [actor.tenantId, projetId, filename, mime, st.size, relPath,
-         actor.name, actor.userId ?? null, actor.teamMemberId ?? null],
+         actor.name, actor.userId ?? null, actor.teamMemberId ?? null, origine],
       )
       res.status(201).json(row)
     } catch (e: any) {
@@ -473,6 +484,141 @@ router.post('/:projetId/files', withProjetAccess, async (req: Request, res: Resp
   })
 
   req.pipe(out)
+})
+
+/* ════════════════════════════════════════════════════════════════════
+   BIBLIOTHÈQUE DE FICHIERS DU PROJET
+
+   « Quand un employé m'envoie un fichier par e-mail ou par Google Drive,
+   je veux pouvoir le déposer ici, le retrouver, le télécharger sur mon
+   ordinateur et le supprimer. »
+
+   Trois routes seulement, parce que le reste existait déjà : le dépôt
+   est le POST ci-dessus (avec ?origine=bibliotheque), le téléchargement
+   est le GET /files/:fileId, et le contrôle d'accès au projet est
+   `withProjetAccess`. Il ne manquait, littéralement, qu'une liste et une
+   suppression.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * GET /:projetId/files — tous les fichiers du projet, du plus récent au
+ * plus ancien.
+ *
+ * On renvoie AUSSI les pièces jointes de la discussion, marquées
+ * `origine: 'chat'`. C'est le sens de la demande : « gérer les fichiers
+ * reçus des employés sans devoir retourner à l'e-mail » — un écran qui
+ * cacherait le fichier envoyé dans le chat obligerait à le chercher
+ * ailleurs, c'est-à-dire exactement ce qu'on veut supprimer.
+ *
+ * `?origine=bibliotheque` restreint aux dépôts directs pour qui veut la
+ * liste stricte.
+ */
+router.get('/:projetId/files', withProjetAccess, async (req: Request, res: Response) => {
+  const actor = getActor(req)
+  const projetId = String(req.params.projetId)
+  const filtre = req.query.origine === 'bibliotheque' ? 'bibliotheque' : null
+
+  try {
+    const files = await tenantQuery(
+      actor.tenantId,
+      `SELECT id, filename, mime, size_bytes, uploader_name, created_at,
+              origine, (message_id IS NOT NULL) AS dans_un_message,
+              /* Calculé ici, avec la MÊME règle que la route DELETE :
+                 l'écran ne doit pas proposer un bouton qui répondra 403,
+                 et il ne doit pas non plus deviner la règle de son côté.
+                 Le serveur reste seul juge — ceci n'est qu'un affichage
+                 fidèle de sa décision. */
+              ($3::boolean
+               OR ($4::uuid IS NOT NULL AND uploader_user_id = $4::uuid)
+               OR ($5::uuid IS NOT NULL AND uploader_team_member_id = $5::uuid)) AS peut_supprimer
+         FROM public.projet_message_files
+        WHERE projet_id = $1
+          AND ($2::text IS NULL OR origine = $2)
+          /* Un téléversement de chat sans message est un envoi
+             abandonné : il n'a jamais été montré à personne, il n'a
+             rien à faire dans une liste de fichiers. */
+          AND NOT (origine = 'chat' AND message_id IS NULL)
+        ORDER BY created_at DESC
+        LIMIT 500`,
+      [projetId, filtre, actor.isAdmin,
+       actor.isAdmin ? actor.accountUserId : null,
+       actor.isAdmin ? null : actor.teamMemberId],
+    )
+    res.json(files)
+  } catch (err: any) {
+    /* La migration 105 n'est pas encore passée sur cette base : la
+       colonne `origine` manque (42703). On ne masque pas le problème —
+       une liste vide ferait croire à un espace sans fichiers, et le
+       premier dépôt semblerait s'évaporer. */
+    if (err?.code === '42703') {
+      return res.status(503).json({ error: 'Bibliothèque de fichiers non installée — migration 105 à appliquer.' })
+    }
+    logger.error('[projet-chat:files-list]', err.message)
+    res.status(500).json({ error: 'Erreur serveur' })
+  }
+})
+
+/**
+ * DELETE /files/:fileId — retire un fichier du projet.
+ *
+ * ── Qui peut supprimer ──────────────────────────────────────────────
+ * L'administration de l'espace, et le déposant. Un employé peut donc
+ * retirer ce qu'il a mis — un mauvais fichier, une version périmée —
+ * mais pas ce qu'un autre a déposé. Le rôle est relu par requireAuth,
+ * rien du corps de la requête ne participe à la décision.
+ *
+ * ── La ligne d'abord, le fichier ensuite ────────────────────────────
+ * Même ordre que la suppression des images de SOP : si le DELETE échoue,
+ * on n'a rien perdu ; si c'est le `unlink` qui échoue, il reste un
+ * fichier orphelin sur le disque — invisible, sans référence, et que la
+ * prochaine purge ramassera. L'inverse laisserait une ligne qui promet
+ * un contenu disparu, c'est-à-dire un « télécharger » qui répond 404.
+ */
+router.delete('/files/:fileId', async (req: Request, res: Response) => {
+  const fileId = String(req.params.fileId)
+  if (!UUID_RE.test(fileId)) return res.status(400).json({ error: 'Fichier invalide' })
+
+  try {
+    const actor = await resolveActor(req)
+    if (!actor) return res.status(403).json({ error: 'Compte inactif' })
+
+    const f = await tenantQueryOne<{
+      projet_id: string; storage_path: string; filename: string
+      uploader_user_id: string | null; uploader_team_member_id: string | null
+    }>(
+      actor.tenantId,
+      `SELECT projet_id, storage_path, filename, uploader_user_id, uploader_team_member_id
+         FROM public.projet_message_files WHERE id = $1`,
+      [fileId],
+    )
+    if (!f) return res.status(404).json({ error: 'Fichier introuvable' })
+    if (!(await canAccessProjet(actor, f.projet_id))) {
+      return res.status(403).json({ error: 'Accès refusé à ce projet' })
+    }
+
+    const deposant = actor.isAdmin
+      ? f.uploader_user_id === actor.accountUserId
+      : f.uploader_team_member_id === actor.teamMemberId
+    if (!actor.isAdmin && !deposant) {
+      return res.status(403).json({ error: 'Vous ne pouvez retirer que les fichiers que vous avez déposés' })
+    }
+
+    await tenantQuery(
+      actor.tenantId,
+      `DELETE FROM public.projet_message_files WHERE id = $1`,
+      [fileId],
+    )
+
+    const absPath = path.join(UPLOAD_DIR, f.storage_path)
+    if (absPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
+      try { await unlink(absPath) } catch { /* déjà absent : la ligne est partie, c'est l'essentiel */ }
+    }
+
+    res.json({ success: true })
+  } catch (err: any) {
+    logger.error('[projet-chat:file-delete]', err.message)
+    if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' })
+  }
 })
 
 /**
@@ -507,15 +653,12 @@ router.get('/files/:fileId', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Chemin invalide' })
     }
 
-    const inline = req.query.inline === '1'
-    res.setHeader('Content-Type', f.mime)
-    res.setHeader('Content-Length', f.size_bytes)
-    res.setHeader(
-      'Content-Disposition',
-      `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`,
-    )
-    /* Le contenu est privé : aucun cache partagé ne doit le garder. */
-    res.setHeader('Cache-Control', 'private, max-age=3600')
+    /* En-têtes durcis, partagés avec la messagerie privée : nosniff,
+       affichage refusé à tout type qui pourrait exécuter du script, et
+       type anonyme pour le reste. Les lignes enregistrées avant ce
+       durcissement portent encore le type déclaré par leur expéditeur —
+       ce contrôle à la SORTIE les couvre aussi. */
+    entetesFichier(res, f, req.query.inline === '1')
 
     const stream = createReadStream(absPath)
     stream.on('error', () => {

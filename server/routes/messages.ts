@@ -51,6 +51,9 @@ import {
   MAX_STREAMS_PER_USER,
 } from '../lib/realtimeBus'
 import { UPLOAD_DIR } from '../lib/uploadStorage'
+import {
+  MIME_AFFICHABLES, BINAIRE_ANONYME, normaliserMime, entetesFichier,
+} from '../lib/fichiersMime'
 
 const router = Router()
 
@@ -77,28 +80,6 @@ const MAX_UPLOAD_BYTES = Number(process.env.MESSAGES_MAX_UPLOAD_MB || 25) * 1024
      • à la SORTIE, seuls les types de MIME_AFFICHABLES peuvent s'ouvrir
        dans le navigateur. Le SVG n'en fait pas partie et n'en fera
        jamais partie : c'est un document XML qui exécute du script. */
-const MIME_AUTORISES = new Set([
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/heic',
-  'application/pdf',
-  'text/plain', 'text/csv',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/zip', 'application/x-zip-compressed', 'application/x-rar-compressed',
-  'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/wav', 'audio/webm',
-  'video/mp4', 'video/webm', 'video/quicktime',
-])
-
-/* Ce qui peut s'afficher DANS le navigateur sans rien pouvoir exécuter. */
-const MIME_AFFICHABLES = new Set([
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
-  'application/pdf',
-])
-
-const BINAIRE_ANONYME = 'application/octet-stream'
 
 /* ── Le module n'est pas encore installé sur cette base ──────────────
    Les migrations de ce projet sont appliquées À LA MAIN en production :
@@ -123,10 +104,6 @@ const ERREUR_MODULE_ABSENT = {
 
 /** Type retenu à l'enregistrement : celui déclaré s'il est connu et sûr,
  *  jamais la chaîne brute de l'expéditeur. */
-function normaliserMime(brut: unknown): string {
-  const mime = String(brut ?? '').split(';')[0].trim().toLowerCase()
-  return MIME_AUTORISES.has(mime) ? mime : BINAIRE_ANONYME
-}
 
 /* ── Types de pièces jointes : liste blanche, jamais la déclaration ──
    Le type MIME arrive dans l'en-tête `content-type` de l'expéditeur :
@@ -144,63 +121,6 @@ function normaliserMime(brut: unknown): string {
    'application/octet-stream', c'est-à-dire un fichier que le navigateur
    enregistre au lieu de l'interpréter. Le fichier n'est jamais refusé :
    il arrive à destination, il ne s'exécute simplement plus. */
-const ALLOWED_MIME = new Set([
-  /* Images matricielles — aucun script possible dans le format. */
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
-  'image/bmp', 'image/heic', 'image/heif',
-  /* Documents */
-  'application/pdf', 'text/plain', 'text/csv',
-  'application/rtf',
-  /* Bureautique */
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.oasis.opendocument.text',
-  'application/vnd.oasis.opendocument.spreadsheet',
-  'application/vnd.oasis.opendocument.presentation',
-  /* Archives */
-  'application/zip',
-  /* Audio & vidéo courants (message vocal, capture d'écran filmée) */
-  'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/wav', 'audio/webm', 'audio/aac',
-  'video/mp4', 'video/webm', 'video/quicktime',
-])
-
-/* Appellations rencontrées dans la nature (vieux navigateurs, Windows) :
-   on les ramène au type canonique plutôt que de dégrader inutilement un
-   fichier parfaitement légitime. */
-const MIME_ALIASES: Record<string, string> = {
-  'image/jpg':                     'image/jpeg',
-  'image/pjpeg':                   'image/jpeg',
-  'image/x-png':                   'image/png',
-  'application/x-zip-compressed':  'application/zip',
-  'application/x-pdf':             'application/pdf',
-  'audio/mp3':                     'audio/mpeg',
-  'audio/x-wav':                   'audio/wav',
-  'audio/wave':                    'audio/wav',
-  'text/rtf':                      'application/rtf',
-}
-
-/* Les seuls types qu'on accepte d'AFFICHER dans l'onglet : des images
-   matricielles et le PDF (visionneuse isolée du navigateur). Tout le
-   reste part en téléchargement, même si le client demande ?inline=1. */
-const INLINE_MIME = new Set([
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/bmp',
-  'application/pdf',
-])
-
-/** Ramène un type déclaré à un type sûr. Appliqué DEUX fois — à l'envoi
- *  (ce qu'on stocke) et au téléchargement (ce qu'on sert) : les lignes
- *  écrites avant ce garde-fou portent encore n'importe quoi. */
-function normalizeMime(raw: unknown): string {
-  /* Les paramètres (« ; charset=utf-8 ») ne participent pas à la
-     décision et servent surtout à masquer un type derrière un autre. */
-  const base = String(raw ?? '').split(';')[0].trim().toLowerCase()
-  const canon = MIME_ALIASES[base] ?? base
-  return ALLOWED_MIME.has(canon) ? canon : 'application/octet-stream'
-}
 
 /** Longueur d'un message. Au-delà, c'est un document — donc un fichier. */
 const MAX_BODY_CHARS = 4000
