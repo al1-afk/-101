@@ -518,6 +518,19 @@ export async function loadTenantTick(pool: Pool, tenantId: string): Promise<Tena
 }
 
 /** Lance un envoi immédiatement, hors planning (et hors verrou du jour). */
+/** Ce type d'envoi est-il ACTIVÉ pour cet espace ? (l'heure ne compte pas) */
+function estActif(t: TenantTick, kind: ReportKind): boolean {
+  switch (kind) {
+    case 'tasks_overdue':      return t.tasks_alert_enabled
+    case 'clients_to_contact': return t.contacts_alert_enabled
+    case 'daily_report':       return t.daily_report_enabled
+    case 'weekly_report':      return t.weekly_report_enabled
+    case 'paiements_retard':   return t.retards_alert_enabled
+    case 'depenses_rappel':    return t.depenses_rappel_enabled
+    case 'taches_rappel':      return t.taches_rappel_enabled
+  }
+}
+
 export async function runReportNow(
   pool: Pool,
   tenantId: string,
@@ -525,6 +538,21 @@ export async function runReportNow(
 ): Promise<{ ok: boolean; empty: boolean; subject?: string }> {
   const tenant = await loadTenantTick(pool, tenantId)
   if (!tenant) throw new Error('Notifications non configurées pour cet espace')
+
+  /* ── Un envoi désactivé ne s'envoie pas, même à la main ───────────
+     `runReportNow` ne passait pas par `isDue` — c'était voulu (on veut
+     pouvoir rattraper un envoi manqué sans attendre l'heure), mais cela
+     contournait AUSSI l'interrupteur du type. Le 13/09/2026, deux
+     alertes « tâches en retard » sont ainsi parties par e-mail à 20:22
+     et 20:32 alors que ce type était désactivé depuis des jours : un
+     réglage qu'un bouton peut ignorer n'est pas un réglage.
+
+     L'heure, elle, reste ignorée : rattraper à 16 h un envoi prévu à
+     9 h garde tout son sens. */
+  if (!estActif(tenant, kind)) {
+    throw new Error('Ce type d\'envoi est désactivé pour cet espace — activez-le d\'abord dans les réglages.')
+  }
+
   const { report } = await runKind(pool, tenant, kind, 'manual')
   return { ok: true, empty: !!report?.empty, subject: report?.subject }
 }

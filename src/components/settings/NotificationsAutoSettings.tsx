@@ -451,8 +451,13 @@ export default function NotificationsAutoSettings() {
                     {busyKind === b.kind ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
                     Aperçu
                   </Button>
+                  {/* Grisé quand le type est éteint : le serveur refuse
+                      désormais un envoi manuel d'un type désactivé, et un
+                      bouton qui mène à un refus est une promesse fausse.
+                      « Aperçu » reste actif — il n'envoie rien. */}
                   <Button variant="outline" size="sm" className="gap-1.5"
-                          disabled={busyKind === b.kind}
+                          disabled={busyKind === b.kind || !on}
+                          title={on ? undefined : 'Activez ce type d\'envoi pour pouvoir le déclencher'}
                           onClick={() => sendNow(b.kind)}>
                     <Send className="w-3.5 h-3.5" /> Envoyer maintenant
                   </Button>

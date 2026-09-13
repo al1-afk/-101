@@ -67,7 +67,14 @@ async function emailKindAllowed(tenantId: string, kind: EmailKind): Promise<bool
     if (!Array.isArray(s.email_kinds)) return true
     return s.email_kinds.includes(kind)
   } catch {
-    return true
+    /* ── En cas de panne, on se TAIT ─────────────────────────────────
+       Ce catch renvoyait `true` : une erreur passagère de base laissait
+       donc partir un e-mail que l'espace avait peut-être interdit. Le
+       13/09/2026, un utilisateur a demandé « arrête les e-mails » —
+       une exception SQL n'est pas une autorisation, et un e-mail
+       indésirable ne se rattrape pas, alors qu'une notification
+       manquée, si : la cloche et le push, eux, ne passent pas par ici. */
+    return false
   }
 }
 
