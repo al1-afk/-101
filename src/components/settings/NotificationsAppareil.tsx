@@ -23,11 +23,16 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   BellRing, CheckCircle2, AlertTriangle, Smartphone, Share, Loader2, Send, BellOff,
+  ExternalLink,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { usePushSubscription, usePushDevices } from '@/hooks/useTaskReminders'
 import { sendTestPush } from '@/lib/pushClient'
+
+/* L'adresse qui, elle, sait envoyer des notifications. Écrite en dur
+   parce que c'est justement quand on n'y est PAS qu'il faut la lire. */
+const ADRESSE_PRODUCTION = 'https://101.nextgital.tech'
 
 /** Les trois gestes d'un iPhone, dans l'ordre où ils doivent être faits. */
 const GESTES_IOS = [
@@ -44,6 +49,7 @@ export default function NotificationsAppareil() {
   const etat = push.status?.state
   const pret     = etat === 'ready'
   const aInstaller = etat === 'ios-a-installer'
+  const dev      = etat === 'origine-dev'
   const bloque   = etat === 'denied' || etat === 'unsupported' || etat === 'server-off' || etat === 'no-sw'
 
   const envoyerTest = async () => {
@@ -92,14 +98,33 @@ export default function NotificationsAppareil() {
       <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs leading-relaxed ${
         pret       ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
         : aInstaller ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
-        : bloque   ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+        : dev || bloque ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
                    : 'bg-muted/40 text-muted-foreground'
       }`}>
         {pret ? <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              : bloque ? <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              : (dev || bloque) ? <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               : <BellRing className="w-4 h-4 flex-shrink-0 mt-0.5" />}
         <span>{push.status?.reason ?? 'Vérification…'}</span>
       </div>
+
+      {/* Adresse de développement : la seule issue est de changer
+          d'adresse — autant la rendre cliquable. */}
+      {dev && (
+        <a
+          href={ADRESSE_PRODUCTION}
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-blue-500/40 bg-blue-500/5 hover:bg-blue-500/10 transition-colors"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-foreground">
+              Ouvrir la vraie application
+            </span>
+            <span className="block text-xs text-muted-foreground truncate">
+              {ADRESSE_PRODUCTION}
+            </span>
+          </span>
+          <ExternalLink className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+        </a>
+      )}
 
       {/* iPhone : les trois gestes, nommés. */}
       {aInstaller && (
@@ -139,7 +164,7 @@ export default function NotificationsAppareil() {
                inopérant : le griser sans rien dire était précisément le
                cul-de-sac qu'on corrige. Les trois gestes sont juste
                au-dessus. */
-            disabled={push.busy || aInstaller || etat === 'unsupported' || etat === 'no-sw'}
+            disabled={push.busy || aInstaller || dev || etat === 'unsupported' || etat === 'no-sw'}
           >
             {push.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <BellRing className="w-4 h-4" />}
             Activer sur cet appareil

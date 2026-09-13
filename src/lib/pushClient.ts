@@ -24,6 +24,7 @@ export type PushState =
   | 'denied'         // refusé par la personne
   | 'unsupported'    // navigateur sans Push API
   | 'ios-a-installer'// iPhone/iPad : l'app doit d'abord être sur l'écran d'accueil
+  | 'origine-dev'    // adresse de développement : aucune notification n'y est possible
   | 'no-sw'          // service worker absent (cas du mode développement)
   | 'server-off'     // pas de clés VAPID côté serveur
 
@@ -39,6 +40,14 @@ const REASONS: Record<PushState, string> = {
   available:   'Autorise les notifications pour être prévenu même app fermée.',
   denied:      'Notifications bloquées dans le navigateur — à réautoriser dans les réglages du site.',
   unsupported: 'Ce navigateur ne gère pas les notifications push.',
+  /* Le piège du 13/09/2026 : l'application avait été installée sur un
+     iPhone depuis l'adresse du serveur de développement (http, IP de
+     réseau local). Rien ne pouvait en sortir — et l'écran n'en disait
+     pas un mot, laissant croire à une panne du système d'alertes. */
+  'origine-dev':
+    'Cette adresse est celle du DÉVELOPPEMENT : les notifications n\'y fonctionnent jamais ' +
+    '(connexion non sécurisée, et service worker désactivé). Ouvrez https://101.nextgital.tech ' +
+    'et installez l\'application depuis cette adresse-là.',
   /* Le cas le plus fréquent sur iPhone, et le plus mal expliqué : sans
      cette distinction, l'écran affichait « ce navigateur ne gère pas les
      notifications » et grisait le bouton — un cul-de-sac, alors qu'il
@@ -63,6 +72,31 @@ function estAppleMobile(): boolean {
      tactile, qu'aucun Mac n'a. */
   const iPadOS = /Macintosh/.test(ua) && (navigator.maxTouchPoints ?? 0) > 1
   return iOS || iPadOS
+}
+
+/**
+ * Sommes-nous sur une adresse de développement ?
+ *
+ * Deux choses l'empêchent d'émettre la moindre notification, et aucune
+ * n'est réparable côté site :
+ *   • le Push API exige un contexte SÉCURISÉ — « http:// » sur une IP de
+ *     réseau local n'en est pas un ;
+ *   • en développement, src/main.tsx DÉSENREGISTRE le service worker,
+ *     volontairement (les ports localhost sont recyclés entre projets).
+ *
+ * `localhost` est pourtant un contexte sécurisé au sens de la norme :
+ * on ne peut donc pas se fier au seul `isSecureContext`, il faut aussi
+ * reconnaître les adresses privées.
+ */
+function estOrigineDeDeveloppement(): boolean {
+  const h = location.hostname
+  const privee =
+    /^(localhost|127\.0\.0\.1)$/.test(h) ||
+    /^192\.168\./.test(h) ||
+    /^10\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+    h.endsWith('.local')
+  return privee || !window.isSecureContext
 }
 
 function estInstallee(): boolean {
@@ -96,6 +130,11 @@ async function registration(): Promise<ServiceWorkerRegistration | null> {
 
 /** État courant, sans rien demander ni modifier. */
 export async function pushStatus(): Promise<PushStatus> {
+  /* Contrôlé AVANT tout le reste : sur une adresse de développement,
+     l'absence d'API n'apprend rien, et les états « non pris en charge »
+     ou « à installer » enverraient sur une fausse piste. */
+  if (estOrigineDeDeveloppement()) return status('origine-dev')
+
   if (!('PushManager' in window) || !('Notification' in window)) {
     /* Sur un appareil Apple, l'absence de PushManager n'est pas une
        incapacité du navigateur : c'est l'application qui n'est pas
