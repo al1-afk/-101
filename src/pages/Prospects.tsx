@@ -41,6 +41,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { crmAccessApi, prospectsApi, type CrmAssignable } from '@/lib/api'
 import { currentTenantIdForCache } from '@/lib/authToken'
 import { canonicalPhone, groupByPhone } from '@/lib/phone'
+import ProspectsMobile from '@/components/crm/ProspectsMobile'
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 /* Les colonnes DATE reviennent de l'API en timestamp décalé au fuseau
@@ -1713,19 +1714,47 @@ export default function Prospects() {
               et « exporter la sélection de la semaine » produisait le fichier
               de l'année entière. Le périmètre serveur limite déjà ce qui est
               chargé ; ceci aligne le fichier sur ce qui est affiché. */}
-          <ImportExportButtons
-            schema={prospectsSchema}
-            data={filtered}
-            onImport={async (row) => { await createProspect.mutateAsync(row as any) }}
-          />
+          {/* Import/Export : gestes de bureau, avec un fichier à choisir
+              et une colonne à vérifier. Masqués sur téléphone, ils y
+              coûtaient une rangée entière avant la liste. */}
+          <span className="hidden md:contents">
+            <ImportExportButtons
+              schema={prospectsSchema}
+              data={filtered}
+              onImport={async (row) => { await createProspect.mutateAsync(row as any) }}
+            />
+          </span>
           <Button size="sm" onClick={openNew}>
             <Plus className="w-4 h-4" /> Nouveau prospect
           </Button>
         </div>
       </div>
 
+      {/* ── Téléphone : les chiffres en UNE ligne ────────────────────
+          Les quatre cartes occupaient à elles seules près de 300 px de
+          haut sur un écran de 844 px — un tiers de l'écran pour des
+          nombres qu'on lit en passant. Elles restent entières dès `sm`. */}
+      <div className="sm:hidden flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-border bg-[var(--surface-card)] text-center">
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-foreground leading-none">{stats.total}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">prospects</p>
+        </div>
+        <div className="w-px h-7 bg-border flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 leading-none">{stats.gagne}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">gagnés</p>
+        </div>
+        <div className="w-px h-7 bg-border flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-violet-600 dark:text-violet-400 leading-none truncate">
+            {formatCurrency(stats.pipe)}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">pipeline</p>
+        </div>
+      </div>
+
       {/* ── KPI cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="hidden sm:grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="card-premium p-5 flex items-center gap-4">
           <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
             <UserCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -1912,8 +1941,11 @@ export default function Prospects() {
         )}
       </div>
 
-      {/* Date filter */}
-      <div className="card-premium p-3">
+      {/* Date filter — masqué sur téléphone : il occupe 200 px pour un
+          réglage qu'on change rarement, et « Toute la période » est le
+          défaut. La recherche et le filtre « À contacter aujourd'hui »
+          restent, eux, à portée immédiate. */}
+      <div className="card-premium p-3 hidden md:block">
         <DateRangeFilter value={dateRange} onChange={setDateRange} counts={periodCounts} />
       </div>
 
@@ -1983,7 +2015,25 @@ export default function Prospects() {
             )}
           </AnimatePresence>
 
-          <div className="card-premium overflow-hidden">
+          {/* ── Téléphone : des cartes, pas un tableau ──────────────
+              Mesuré sur 390 px : la page faisait 4 069 px de haut et le
+              tableau 1 544 px de large — il fallait le faire glisser
+              latéralement pour lire un numéro. Sur petit écran, chaque
+              prospect devient une carte avec Appeler et WhatsApp à
+              portée du pouce. Le tableau, ses sélections multiples et
+              son transfert reprennent la main dès `md`. */}
+          <div className="md:hidden">
+            <ProspectsMobile
+              prospects={paginated}
+              accentDe={st => stageAccent(st as ProspectStatut)}
+              libelleDe={st => stageLabel(st as ProspectStatut)}
+              relanceAujourdhui={isRelanceToday}
+              doublonsDe={twinsOf}
+              onOuvrir={openEdit}
+            />
+          </div>
+
+          <div className="card-premium overflow-hidden hidden md:block">
             <div className="table-scroll">
               <table className="w-full text-sm">
                 <thead className="table-header">

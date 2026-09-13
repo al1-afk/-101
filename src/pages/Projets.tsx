@@ -620,7 +620,28 @@ export default function Projets() {
         <Button size="sm" onClick={openNew}><Plus className="w-4 h-4" /> Nouveau projet</Button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      {/* ── Téléphone : les chiffres en UNE ligne ────────────────────
+          Les quatre cartes prenaient 380 px — presque un demi-écran —
+          avant d'atteindre le travail du jour. Elles restent entières
+          dès `sm`. */}
+      <div className="sm:hidden flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-border bg-[var(--surface-card)] text-center">
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-foreground leading-none">{projets.length}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">projets</p>
+        </div>
+        <div className="w-px h-7 bg-border flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-amber-600 dark:text-amber-400 leading-none">{stats.enCours}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">en cours</p>
+        </div>
+        <div className="w-px h-7 bg-border flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 leading-none">{stats.termines}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">terminés</p>
+        </div>
+      </div>
+
+      <div className="hidden sm:grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         <div className="card-premium p-5 flex items-center gap-4">
           <div className="w-11 h-11 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center flex-shrink-0">
             <Briefcase className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -993,7 +1014,55 @@ function AgencyOverviewTable({
         <p className="text-sm font-bold text-foreground">Vue d'ensemble agence</p>
         <span className="text-[11px] text-muted-foreground">— {rows.length} projet{rows.length > 1 ? 's' : ''}</span>
       </div>
-      <div className="overflow-x-auto">
+      {/* ── Téléphone : une carte par projet ─────────────────────────
+          Le tableau fait 867 px de large pour un écran de 390 : le
+          responsable et l'échéance sortaient du cadre, et il fallait le
+          faire glisser latéralement pour savoir où en était un chantier.
+          Sur petit écran, chaque projet tient sur deux lignes, barre
+          d'avancement comprise. Le tableau reprend la main dès `md`. */}
+      <div className="md:hidden divide-y divide-border">
+        {rows.map(({ projet, taskCount, done, pct, leadName, overdue }) => {
+          const statutCfg = STATUT_CONFIG[projet.statut] ?? STATUT_CONFIG.planifie
+          return (
+            <button
+              key={projet.id}
+              type="button"
+              onClick={() => onOpen(projet.id)}
+              className="w-full text-left px-4 py-3 active:bg-muted/40 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground truncate">{projet.nom}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {projet.client_id ? clientMap.get(projet.client_id) : 'Sans client'} · {leadName}
+                  </p>
+                </div>
+                <Badge variant={statutCfg.variant}>
+                  {projet.statut === 'termine' ? '✔️' : statutCfg.label}
+                </Badge>
+              </div>
+
+              <div className="flex items-center gap-2 mt-2">
+                <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full rounded-full" style={{
+                    width: `${pct}%`,
+                    background: pct === 100 ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #6366f1, #818cf8)',
+                  }} />
+                </div>
+                <span className="text-[11px] font-mono font-bold tabular-nums">{pct}%</span>
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap">{done}/{taskCount}</span>
+                {projet.date_fin_prevue && (
+                  <span className={`text-[11px] whitespace-nowrap ${overdue ? 'text-red-500 font-semibold' : 'text-muted-foreground'}`}>
+                    {formatDate(projet.date_fin_prevue)}{overdue && ' ⚠'}
+                  </span>
+                )}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="overflow-x-auto hidden md:block">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr>
