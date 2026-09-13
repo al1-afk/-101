@@ -33,6 +33,9 @@ const WEEKDAYS = [
 ]
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h)
+/* Par quart d'heure : le planificateur passe toutes les 10 minutes, une
+   précision plus fine serait une promesse qu'il ne peut pas tenir. */
+const MINUTES = [0, 15, 30, 45]
 
 interface Block {
   kind:      ReportKind
@@ -41,6 +44,9 @@ interface Block {
   desc:      string
   enabledKey: keyof NotificationSettings
   hourKey:   keyof NotificationSettings
+  /* Migration 107 : « 9 h 30 » n'est pas « 9 h ». Absente des réponses
+     d'avant, la minute est alors lue comme 0 — son défaut en base. */
+  minuteKey: keyof NotificationSettings
 }
 
 /* Catégories d'e-mails déclenchés par un événement — miroir de
@@ -70,37 +76,43 @@ const BLOCKS: Block[] = [
     kind: 'tasks_overdue', icon: '⏰',
     title: 'Alerte tâches en retard ou non terminées',
     desc: "Chaque jour : les tâches dont l'échéance est dépassée, celles à rendre aujourd'hui, celles qui attendent votre validation et celles qui n'ont plus bougé.",
-    enabledKey: 'tasks_alert_enabled', hourKey: 'tasks_alert_hour',
+    enabledKey: 'tasks_alert_enabled', hourKey: 'tasks_alert_hour', minuteKey: 'tasks_alert_minute',
   },
   {
     kind: 'clients_to_contact', icon: '📞',
     title: 'Alerte clients et prospects à contacter',
     desc: "Chaque jour : les relances échues, les prospects jamais appelés, les clients sans aucun contact enregistré et ceux dont on est sans nouvelle.",
-    enabledKey: 'contacts_alert_enabled', hourKey: 'contacts_alert_hour',
+    enabledKey: 'contacts_alert_enabled', hourKey: 'contacts_alert_hour', minuteKey: 'contacts_alert_minute',
   },
   {
     kind: 'daily_report', icon: '📊',
     title: 'Rapport quotidien',
     desc: 'Tâches réalisées dans la journée, tâches en attente, clients à contacter et actions prioritaires.',
-    enabledKey: 'daily_report_enabled', hourKey: 'daily_report_hour',
+    enabledKey: 'daily_report_enabled', hourKey: 'daily_report_hour', minuteKey: 'daily_report_minute',
   },
   {
     kind: 'weekly_report', icon: '🗓️',
     title: 'Rapport hebdomadaire',
     desc: 'Bilan des 7 derniers jours : réalisé par personne, retards, contacts traités ou non, résultats commerciaux et prochaines actions.',
-    enabledKey: 'weekly_report_enabled', hourKey: 'weekly_report_hour',
+    enabledKey: 'weekly_report_enabled', hourKey: 'weekly_report_hour', minuteKey: 'weekly_report_minute',
   },
   {
     kind: 'paiements_retard', icon: '⏰',
     title: 'Alerte retards de paiement',
     desc: "Chaque jour : les factures dont l'échéance est dépassée et qui ne sont pas soldées, avec le montant restant dû et l'ancienneté du retard.",
-    enabledKey: 'retards_alert_enabled', hourKey: 'retards_alert_hour',
+    enabledKey: 'retards_alert_enabled', hourKey: 'retards_alert_hour', minuteKey: 'retards_alert_minute',
+  },
+  {
+    kind: 'taches_rappel', icon: '📝',
+    title: 'Rappel de planification des tâches',
+    desc: "Chaque matin, si AUCUNE tâche n'a été créée dans la journée. Rien n'est envoyé les jours où la planification est déjà faite.",
+    enabledKey: 'taches_rappel_enabled', hourKey: 'taches_rappel_hour', minuteKey: 'taches_rappel_minute',
   },
   {
     kind: 'depenses_rappel', icon: '🧾',
     title: 'Rappel de saisie des dépenses',
     desc: "Chaque soir, si AUCUNE dépense n'a été saisie dans la journée. Rien n'est envoyé les jours où la saisie est déjà faite.",
-    enabledKey: 'depenses_rappel_enabled', hourKey: 'depenses_rappel_hour',
+    enabledKey: 'depenses_rappel_enabled', hourKey: 'depenses_rappel_hour', minuteKey: 'depenses_rappel_minute',
   },
 ]
 
@@ -343,6 +355,9 @@ export default function NotificationsAutoSettings() {
         {BLOCKS.map(b => {
           const on   = draft[b.enabledKey] as boolean
           const hour = draft[b.hourKey] as number
+          /* `?? 0` : une réponse d'API antérieure à la migration 107 ne
+             porte pas la minute, et `undefined` viderait le sélecteur. */
+          const minute = (draft[b.minuteKey] as number | undefined) ?? 0
           const last = lastByKind.get(b.kind)
           return (
             <div key={b.kind} className={cn(
@@ -360,12 +375,20 @@ export default function NotificationsAutoSettings() {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">
                   <label className="form-label">Heure d'envoi</label>
-                  <Select value={String(hour)} onValueChange={v => set(b.hourKey, Number(v) as never)}>
-                    <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {HOURS.map(h => <SelectItem key={h} value={String(h)}>{String(h).padStart(2, '0')}:00</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-1.5">
+                    <Select value={String(hour)} onValueChange={v => set(b.hourKey, Number(v) as never)}>
+                      <SelectTrigger className="w-[84px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {HOURS.map(h => <SelectItem key={h} value={String(h)}>{String(h).padStart(2, '0')} h</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Select value={String(minute)} onValueChange={v => set(b.minuteKey, Number(v) as never)}>
+                      <SelectTrigger className="w-[84px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {MINUTES.map(m => <SelectItem key={m} value={String(m)}>{String(m).padStart(2, '0')}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 {b.kind === 'weekly_report' && (

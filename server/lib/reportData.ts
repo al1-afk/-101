@@ -857,3 +857,53 @@ export async function collectDepenses(
     jours_sans_saisie:  derniere[0]?.jours ?? null,
   }
 }
+
+export interface TachesRappelSnapshot {
+  /** Tâches créées aujourd'hui — zéro déclenche le rappel. */
+  creees_aujourdhui: number
+  /** Ce qui reste ouvert, pour donner la mesure du travail en cours. */
+  ouvertes: number
+  /** Jours écoulés depuis la dernière création, ou null si jamais. */
+  jours_sans_creation: number | null
+}
+
+/**
+ * « Ajoute tes tâches du jour. »
+ *
+ * Un rappel de PLANIFICATION, pas de retard : il se déclenche quand
+ * rien n'a été planifié, et se tait dès qu'une seule tâche a été créée
+ * dans la journée. Le nombre de tâches encore ouvertes l'accompagne, car
+ * « tu n'as rien planifié » et « tu as 38 tâches en cours » ne réclament
+ * pas la même réaction.
+ */
+export async function collectTachesRappel(
+  pool: Pool,
+  tenantId: string,
+  localDate: string,
+): Promise<TachesRappelSnapshot> {
+  const { rows } = await pool.query<{ n: string }>(`
+    SELECT COUNT(*)::text AS n
+      FROM public.team_member_tasks
+     WHERE tenant_id = $1
+       AND created_at::date = $2::date
+  `, [tenantId, localDate])
+
+  const { rows: ouvertes } = await pool.query<{ n: string }>(`
+    SELECT COUNT(*)::text AS n
+      FROM public.team_member_tasks
+     WHERE tenant_id = $1
+       AND COALESCE(status, '') <> 'done'
+  `, [tenantId])
+
+  const { rows: derniere } = await pool.query<{ jours: number | null }>(`
+    SELECT ($2::date - MAX(created_at::date)) AS jours
+      FROM public.team_member_tasks
+     WHERE tenant_id = $1
+  `, [tenantId, localDate])
+
+  return {
+    creees_aujourdhui:   Number(rows[0]?.n ?? 0),
+    ouvertes:            Number(ouvertes[0]?.n ?? 0),
+    jours_sans_creation: derniere[0]?.jours ?? null,
+  }
+}

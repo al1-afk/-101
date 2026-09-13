@@ -1234,7 +1234,7 @@ export type ReportKind =
   | 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
   /* Alertes d'argent (migration 106) : le retard de paiement et la
      dépense non saisie n'ont pas d'instant, ils se vérifient à heure fixe. */
-  | 'paiements_retard' | 'depenses_rappel'
+  | 'paiements_retard' | 'depenses_rappel' | 'taches_rappel'
 
 export interface ServerNotification {
   id:        string
@@ -1275,6 +1275,17 @@ export interface NotificationSettings {
   retards_alert_hour:    number
   depenses_rappel_enabled: boolean
   depenses_rappel_hour:    number
+  taches_rappel_enabled: boolean
+  taches_rappel_hour:    number
+  /* Minutes (migration 107). Absentes des réponses d'avant : traitées
+     comme 0 par l'écran, ce qui est exactement leur défaut en base. */
+  tasks_alert_minute?:     number
+  contacts_alert_minute?:  number
+  daily_report_minute?:    number
+  weekly_report_minute?:   number
+  retards_alert_minute?:   number
+  depenses_rappel_minute?: number
+  taches_rappel_minute?:   number
   updated_at: string
 }
 

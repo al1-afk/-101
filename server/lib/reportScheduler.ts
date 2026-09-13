@@ -30,11 +30,11 @@ import { sendPushToUser } from './webPush'
 import { logger } from './logger'
 import {
   buildDailySnapshot, buildWeeklySnapshot, collectTasks, collectContacts,
-  collectRetards, collectDepenses,
+  collectRetards, collectDepenses, collectTachesRappel,
 } from './reportData'
 import {
   renderTasksAlert, renderContactsAlert, renderDailyReport, renderWeeklyReport,
-  renderRetardsAlert, renderDepensesRappel,
+  renderRetardsAlert, renderDepensesRappel, renderTachesRappel,
   type ReportKind, type RenderedReport, type RenderContext,
 } from './reportEmails'
 
@@ -43,6 +43,8 @@ export const REPORT_KINDS: ReportKind[] = [
   /* Ajoutés le 13/09/2026 : « notifications de paiement ou de retard de
      paiement, et un rappel quotidien de saisir les dépenses ». */
   'paiements_retard', 'depenses_rappel',
+  /* « Le matin à 9 h 30, ajoute tes tâches. » */
+  'taches_rappel',
 ]
 
 /**
@@ -59,7 +61,9 @@ export const REPORT_KINDS: ReportKind[] = [
  * `email_enabled` de l'espace reste maître pour tout le reste ; ces deux
  * types s'en dispensent par nature, cloche et push leur suffisent.
  */
-const SANS_EMAIL: ReadonlySet<ReportKind> = new Set(['paiements_retard', 'depenses_rappel'])
+const SANS_EMAIL: ReadonlySet<ReportKind> = new Set([
+  'paiements_retard', 'depenses_rappel', 'taches_rappel',
+])
 
 export const KIND_LABELS: Record<ReportKind, string> = {
   tasks_overdue:      'Alerte tâches en retard',
@@ -68,6 +72,7 @@ export const KIND_LABELS: Record<ReportKind, string> = {
   weekly_report:      'Rapport hebdomadaire',
   paiements_retard:   'Alerte retards de paiement',
   depenses_rappel:    'Rappel saisie des dépenses',
+  taches_rappel:      'Rappel planification des tâches',
 }
 
 export interface NotificationSettings {
@@ -93,6 +98,17 @@ export interface NotificationSettings {
   retards_alert_hour:    number
   depenses_rappel_enabled: boolean
   depenses_rappel_hour:    number
+  taches_rappel_enabled: boolean
+  taches_rappel_hour:    number
+  /* Minutes — par défaut 0, ce qui laisse les réglages historiques
+     exactement où ils étaient (migration 107). */
+  tasks_alert_minute:     number
+  contacts_alert_minute:  number
+  daily_report_minute:    number
+  weekly_report_minute:   number
+  retards_alert_minute:   number
+  depenses_rappel_minute: number
+  taches_rappel_minute:   number
 }
 
 export interface TenantTick extends NotificationSettings {
@@ -100,6 +116,7 @@ export interface TenantTick extends NotificationSettings {
   tenant_slug: string
   local_date:  string
   local_hour:  number
+  local_minute: number
   local_dow:   number
 }
 
@@ -118,6 +135,7 @@ export async function tickReports(pool: Pool): Promise<void> {
            t.slug AS tenant_slug,
            to_char(NOW() AT TIME ZONE s.timezone, 'YYYY-MM-DD')  AS local_date,
            EXTRACT(hour   FROM NOW() AT TIME ZONE s.timezone)::int AS local_hour,
+           EXTRACT(minute FROM NOW() AT TIME ZONE s.timezone)::int AS local_minute,
            EXTRACT(isodow FROM NOW() AT TIME ZONE s.timezone)::int AS local_dow
       FROM public.notification_settings s
       JOIN public.tenants t ON t.id = s.tenant_id
@@ -137,25 +155,42 @@ export async function tickReports(pool: Pool): Promise<void> {
   }
 }
 
+/**
+ * L'heure prévue est-elle ATTEINTE, dans le fuseau de l'espace ?
+ *
+ * « Atteinte » et non « égale » : le planificateur passe toutes les 10
+ * minutes et le serveur peut redémarrer. Un envoi prévu à 9 h 30 doit
+ * partir au premier passage qui suit 9 h 30 — et l'unicité (espace,
+ * type, jour) en base garantit qu'il ne partira qu'une fois.
+ *
+ * Les minutes viennent de la migration 107 : elles valent 0 pour les
+ * réglages d'avant, qui se comportent donc exactement comme avant.
+ */
+function heureAtteinte(t: TenantTick, heure: number, minute: number): boolean {
+  return t.local_hour > heure || (t.local_hour === heure && t.local_minute >= (minute ?? 0))
+}
+
 /** L'envoi est-il attendu maintenant, dans le fuseau de l'espace ? */
 function isDue(t: TenantTick, kind: ReportKind): boolean {
   switch (kind) {
     case 'tasks_overdue':
-      return t.tasks_alert_enabled && t.local_hour >= t.tasks_alert_hour
+      return t.tasks_alert_enabled && heureAtteinte(t, t.tasks_alert_hour, t.tasks_alert_minute)
     case 'clients_to_contact':
-      return t.contacts_alert_enabled && t.local_hour >= t.contacts_alert_hour
+      return t.contacts_alert_enabled && heureAtteinte(t, t.contacts_alert_hour, t.contacts_alert_minute)
     case 'daily_report':
-      return t.daily_report_enabled && t.local_hour >= t.daily_report_hour
+      return t.daily_report_enabled && heureAtteinte(t, t.daily_report_hour, t.daily_report_minute)
     case 'weekly_report':
       /* Uniquement le jour choisi : un bilan hebdo envoyé le mardi parce
          que le serveur était arrêté lundi n'aiderait personne. */
       return t.weekly_report_enabled
           && t.local_dow === t.weekly_report_weekday
-          && t.local_hour >= t.weekly_report_hour
+          && heureAtteinte(t, t.weekly_report_hour, t.weekly_report_minute)
     case 'paiements_retard':
-      return t.retards_alert_enabled && t.local_hour >= t.retards_alert_hour
+      return t.retards_alert_enabled && heureAtteinte(t, t.retards_alert_hour, t.retards_alert_minute)
     case 'depenses_rappel':
-      return t.depenses_rappel_enabled && t.local_hour >= t.depenses_rappel_hour
+      return t.depenses_rappel_enabled && heureAtteinte(t, t.depenses_rappel_hour, t.depenses_rappel_minute)
+    case 'taches_rappel':
+      return t.taches_rappel_enabled && heureAtteinte(t, t.taches_rappel_hour, t.taches_rappel_minute)
   }
 }
 
@@ -167,6 +202,7 @@ function scheduledHour(t: TenantTick, kind: ReportKind): number {
     case 'weekly_report':      return t.weekly_report_hour
     case 'paiements_retard':   return t.retards_alert_hour
     case 'depenses_rappel':    return t.depenses_rappel_hour
+    case 'taches_rappel':      return t.taches_rappel_hour
   }
 }
 
@@ -318,6 +354,10 @@ export async function buildReport(
       const snap = await collectDepenses(pool, tenant.tenant_id, opts.localDate)
       return renderDepensesRappel(snap, ctx)
     }
+    case 'taches_rappel': {
+      const snap = await collectTachesRappel(pool, tenant.tenant_id, opts.localDate)
+      return renderTachesRappel(snap, ctx)
+    }
     case 'daily_report': {
       const snap = await buildDailySnapshot(pool, tenant.tenant_id, opts)
       return renderDailyReport(snap, ctx)
@@ -468,6 +508,7 @@ export async function loadTenantTick(pool: Pool, tenantId: string): Promise<Tena
            t.slug AS tenant_slug,
            to_char(NOW() AT TIME ZONE s.timezone, 'YYYY-MM-DD')  AS local_date,
            EXTRACT(hour   FROM NOW() AT TIME ZONE s.timezone)::int AS local_hour,
+           EXTRACT(minute FROM NOW() AT TIME ZONE s.timezone)::int AS local_minute,
            EXTRACT(isodow FROM NOW() AT TIME ZONE s.timezone)::int AS local_dow
       FROM public.notification_settings s
       JOIN public.tenants t ON t.id = s.tenant_id

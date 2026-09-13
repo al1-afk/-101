@@ -160,6 +160,10 @@ const SETTINGS_COLUMNS = `
   weekly_report_enabled, weekly_report_hour, weekly_report_weekday,
   retards_alert_enabled, retards_alert_hour,
   depenses_rappel_enabled, depenses_rappel_hour,
+  taches_rappel_enabled, taches_rappel_hour,
+  tasks_alert_minute, contacts_alert_minute, daily_report_minute,
+  weekly_report_minute, retards_alert_minute, depenses_rappel_minute,
+  taches_rappel_minute,
   created_at, updated_at`
 
 /** Crée la ligne de configuration au premier accès (valeurs par défaut). */
@@ -207,7 +211,7 @@ const BOOL_FIELDS = [
   'enabled', 'email_enabled', 'inapp_enabled',
   'tasks_alert_enabled', 'contacts_alert_enabled',
   'daily_report_enabled', 'weekly_report_enabled',
-  'retards_alert_enabled', 'depenses_rappel_enabled',
+  'retards_alert_enabled', 'depenses_rappel_enabled', 'taches_rappel_enabled',
 ] as const
 
 const INT_FIELDS: Array<[string, number, number]> = [
@@ -221,6 +225,15 @@ const INT_FIELDS: Array<[string, number, number]> = [
   ['weekly_report_weekday', 1, 7],
   ['retards_alert_hour', 0, 23],
   ['depenses_rappel_hour', 0, 23],
+  ['taches_rappel_hour', 0, 23],
+  /* Minutes (migration 107) : un rappel « 9 h 30 » n'est pas « 9 h ». */
+  ['tasks_alert_minute', 0, 59],
+  ['contacts_alert_minute', 0, 59],
+  ['daily_report_minute', 0, 59],
+  ['weekly_report_minute', 0, 59],
+  ['retards_alert_minute', 0, 59],
+  ['depenses_rappel_minute', 0, 59],
+  ['taches_rappel_minute', 0, 59],
 ]
 
 /* PUT /api/notifications/settings */

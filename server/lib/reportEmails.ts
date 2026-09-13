@@ -13,7 +13,7 @@
 import type {
   TasksSnapshot, ContactsSnapshot, DailySnapshot, WeeklySnapshot,
   TaskRow, ContactRow, PriorityRow,
-  RetardsSnapshot, FactureRetardRow, DepensesSnapshot,
+  RetardsSnapshot, FactureRetardRow, DepensesSnapshot, TachesRappelSnapshot,
 } from './reportData'
 import { fmtMoney, fmtDateFr, LIST_LIMIT } from './reportData'
 
@@ -21,6 +21,8 @@ export type ReportKind =
   | 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
   /* Ajoutés le 13/09/2026 : argent qui rentre en retard, et dépenses non saisies. */
   | 'paiements_retard' | 'depenses_rappel'
+  /* Ajouté le 13/09/2026 : « le matin à 9 h 30, ajoute tes tâches ». */
+  | 'taches_rappel'
 
 export interface RenderContext {
   tenantName: string
@@ -586,8 +588,12 @@ export function renderRetardsAlert(snap: RetardsSnapshot, ctx: RenderContext): R
        snap.factures.map(f => `${f.client ?? '—'} ${f.numero ?? ''} : ${fmtMoney(f.montant_du)} (${f.jours} j)`)],
     ]),
     inapp: {
-      title:   `${n} facture${n > 1 ? 's' : ''} en retard de paiement`,
-      message: `${fmtMoney(snap.total_du)} à encaisser · plus ancien retard : ${snap.pire_retard} jour(s)`,
+      /* Un ordre d'action, pas un constat : « appelez » se lit sur un
+         écran verrouillé et dit quoi faire dans la minute. C'est la
+         demande du 13/09/2026 — « à 15 h, appelle les clients pour le
+         paiement » — et non « informe-moi qu'il y a des retards ». */
+      title:   `Appelez ${n} client${n > 1 ? 's' : ''} pour encaisser`,
+      message: `${fmtMoney(snap.total_du)} en retard · le plus ancien depuis ${snap.pire_retard} jour(s)`,
       link:    '/factures',
       icon:    '⏰',
       severity: snap.pire_retard > 30 ? 'critical' : 'warning',
@@ -649,5 +655,62 @@ export function renderDepensesRappel(snap: DepensesSnapshot, ctx: RenderContext)
       severity: 'info',
     },
     summary: { saisies: snap.saisies_aujourdhui, jours_sans_saisie: j ?? -1 },
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   7. Rappel — planifier les tâches du jour
+
+   Demandé le 13/09/2026 : « le matin à 9 h 30, ajoute tes tâches ».
+   Comme les deux autres rappels, il se tait dès que le travail est fait.
+───────────────────────────────────────────────────────────────────── */
+export function renderTachesRappel(snap: TachesRappelSnapshot, ctx: RenderContext): RenderedReport {
+  const empty = snap.creees_aujourdhui > 0
+  const j = snap.jours_sans_creation
+
+  const depuis = j === null
+    ? 'Aucune tâche n\'a encore été créée dans cet espace.'
+    : j <= 0
+      ? ''
+      : `Dernière tâche créée il y a ${j} jour${j > 1 ? 's' : ''}.`
+
+  const body = [
+    stats([
+      { value: snap.ouvertes, label: 'tâches encore ouvertes', color: snap.ouvertes ? C.amber : C.ink },
+    ]),
+    `<p style="margin:14px 0 0;font-size:15px;color:${C.body};">
+       Aucune tâche n'a été planifiée aujourd'hui.
+     </p>`,
+    depuis ? `<p style="margin:8px 0 0;font-size:13px;color:${C.muted};">${depuis}</p>` : '',
+    `<p style="margin:18px 0 0;font-size:12px;color:${C.muted};">
+       Une journée qu'on n'a pas écrite le matin se raconte le soir sans qu'on sache
+       ce qui a avancé.
+     </p>`,
+  ].join('')
+
+  return {
+    subject: '101/ 📝 Planifiez les tâches du jour',
+    empty,
+    html: layout({
+      title: '📝 Tâches du jour',
+      subtitle: `${ctx.tenantName} · ${fmtDateFr(ctx.localDate)}`,
+      accent: C.blue,
+      body,
+      ctaLabel: 'Ouvrir les tâches',
+      ctaUrl: link(ctx.tenantSlug, '/taches'),
+    }),
+    text: textLines(`Tâches du jour — ${fmtDateFr(ctx.localDate)}`, [
+      ['Aucune tâche planifiée aujourd\'hui', depuis ? [depuis] : []],
+    ]),
+    inapp: {
+      title:   'Ajoutez vos tâches du jour',
+      message: snap.ouvertes
+        ? `Rien de planifié aujourd'hui · ${snap.ouvertes} tâche(s) encore ouverte(s)`
+        : depuis || 'Rien de planifié aujourd\'hui.',
+      link:    '/taches',
+      icon:    '📝',
+      severity: 'info',
+    },
+    summary: { creees: snap.creees_aujourdhui, ouvertes: snap.ouvertes },
   }
 }
