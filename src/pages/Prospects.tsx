@@ -71,6 +71,23 @@ function initiales(nom: string): string {
 }
 const isRelanceToday = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) === TODAY
 
+/**
+ * Cette relance est-elle DUE — aujourd'hui ou déjà dépassée ?
+ *
+ * `isRelanceToday` compare à la date du jour par ÉGALITÉ. Conséquence
+ * mesurée : une relance d'hier qu'on n'a pas traitée sortait du filtre
+ * « À contacter », perdait sa teinte et disparaissait du compteur — le
+ * client oublié devenait invisible précisément parce qu'on l'avait
+ * oublié. C'est l'inverse du service qu'un CRM doit rendre.
+ *
+ * L'espace du commercial connaissait déjà la bonne règle
+ * (src/pages/MySpace/crm/ProspectsListe.tsx, `enRetard`) : on l'aligne.
+ */
+const isRelanceDue = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) <= TODAY
+
+/** Relance dépassée — à distinguer de celle du jour, qui n'est pas en retard. */
+const isRelanceEnRetard = (p: Prospect) => !!p.date_relance && ymd(p.date_relance) < TODAY
+
 /* Heure de relance 'HH:MM' (depuis relance_at) — vide si minuit / non renseignée. */
 function relanceTime(v: string | null | undefined): string {
   if (!v) return ''
@@ -1438,7 +1455,7 @@ export default function Prospects() {
   const isError   = commercialActif ? qParCommercial.isError   : erreurEspace
 
   const todayCount = useMemo(
-    () => prospects.filter(isRelanceToday).length,
+    () => prospects.filter(isRelanceDue).length,
     [prospects]
   )
 
@@ -1482,7 +1499,7 @@ export default function Prospects() {
       const matchStatut  = filterStatut === 'all' || p.statut === filterStatut
       /* Une recherche active affiche la liste complète : on ignore les
          filtres de période (« Ce mois ») et « à contacter aujourd'hui ». */
-      const matchToday   = !!q || !todayOnly || isRelanceToday(p)
+      const matchToday   = !!q || !todayOnly || isRelanceDue(p)
       /* Le filtre doublons reste actif même pendant une recherche : il sert
          justement à retrouver l'autre fiche du même client. */
       const matchDup     = !dupOnly || phoneGroups.has(canonicalPhone(p.telephone))
@@ -1896,7 +1913,8 @@ export default function Prospects() {
           </Select>
         )}
 
-        {/* À contacter aujourd'hui */}
+        {/* À rappeler — aujourd'hui ET en retard : voir « 3 » quand une
+            relance d'hier traîne est le seul moyen de ne pas la perdre. */}
         <button
           onClick={() => setTodayOnly(p => !p)}
           className={`relative flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium transition-all border ${
@@ -1911,7 +1929,7 @@ export default function Prospects() {
             </span>
           )}
           <Bell className={`w-3.5 h-3.5 ${todayCount > 0 ? 'text-amber-600 dark:text-amber-400' : ''}`} />
-          À contacter aujourd'hui
+          À rappeler
           {todayOnly && (
             <span className="ml-1 w-4 h-4 rounded-full bg-amber-400 text-[10px] font-bold text-black flex items-center justify-center">
               {todayCount}
@@ -2028,6 +2046,7 @@ export default function Prospects() {
               accentDe={st => stageAccent(st as ProspectStatut)}
               libelleDe={st => stageLabel(st as ProspectStatut)}
               relanceAujourdhui={isRelanceToday}
+              relanceEnRetard={isRelanceEnRetard}
               doublonsDe={twinsOf}
               onOuvrir={openEdit}
             />

@@ -46,13 +46,15 @@ interface Props {
   accentDe: (statut: string) => string
   libelleDe: (statut: string) => string
   relanceAujourdhui: (p: Prospect) => boolean
+  /** Relance DÉPASSÉE — signalée en rouge : c'est celle qu'on oublie. */
+  relanceEnRetard: (p: Prospect) => boolean
   /** Autres fiches portant le même numéro — on ne rappelle pas deux fois. */
   doublonsDe: (p: Prospect) => Prospect[]
   onOuvrir: (p: Prospect) => void
 }
 
 export default function ProspectsMobile({
-  prospects, accentDe, libelleDe, relanceAujourdhui, doublonsDe, onOuvrir,
+  prospects, accentDe, libelleDe, relanceAujourdhui, relanceEnRetard, doublonsDe, onOuvrir,
 }: Props) {
   if (!prospects.length) return null
 
@@ -61,6 +63,7 @@ export default function ProspectsMobile({
       {prospects.map(p => {
         const accent  = accentDe(p.statut)
         const aujourd = relanceAujourdhui(p)
+        const retard  = relanceEnRetard(p)
         const jumeaux = doublonsDe(p)
         const tel     = numeroBrut(p.telephone)
 
@@ -71,7 +74,7 @@ export default function ProspectsMobile({
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             className={`rounded-xl border bg-[var(--surface-card)] overflow-hidden ${
-              aujourd ? 'border-amber-500/50' : 'border-border'
+              retard ? 'border-red-500/60' : aujourd ? 'border-amber-500/50' : 'border-border'
             }`}
           >
             {/* Le corps ouvre la fiche ; les deux boutons d'appel sont
@@ -118,10 +121,16 @@ export default function ProspectsMobile({
                     )}
                     {p.date_relance && (
                       <span className={`text-[11px] inline-flex items-center gap-1 ${
-                        aujourd ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-muted-foreground'
+                        retard ? 'text-red-600 dark:text-red-400 font-bold'
+                        : aujourd ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                        : 'text-muted-foreground'
                       }`}>
                         <Calendar className="w-3 h-3" />
-                        {aujourd ? "Aujourd'hui" : new Date(p.date_relance).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
+                        {retard
+                          ? `En retard · ${new Date(p.date_relance).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}`
+                          : aujourd
+                            ? "Aujourd'hui"
+                            : new Date(p.date_relance).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
                       </span>
                     )}
                   </div>
