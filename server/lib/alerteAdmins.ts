@@ -38,7 +38,9 @@ export interface AlerteAdmin {
   severity?: 'info' | 'success' | 'warning' | 'critical'
   titre: string
   message: string
-  /** Route du front, SANS le préfixe d'espace (ex. « /taches »). */
+  /** Route du front, SANS le préfixe d'espace (ex. « /taches ») : il est
+   *  ajouté ici, car une notification ouverte depuis un téléphone part
+   *  de la racine du site et n'a aucun espace en mémoire. */
   lien: string
   icone?: string
   /** Regroupe les notifications du téléphone : un même `tag` remplace la
@@ -62,6 +64,23 @@ export interface AlerteAdmin {
  */
 export async function previenirAdmins(tenantId: string, a: AlerteAdmin): Promise<number> {
   try {
+    /* ── Le lien doit porter l'espace ────────────────────────────────
+       Les routes de l'application sont toutes préfixées par le slug
+       (`/:tenantSlug/taches`) : « /taches » seul est compris comme
+       l'espace nommé « taches », dont la résolution échoue. Une
+       notification ouverte depuis l'écran verrouillé aurait donc mené à
+       une page d'erreur — le pire moment pour en montrer une.
+       Le planificateur des rapports fait déjà ce préfixage de son côté
+       (reportScheduler.pushInApp) ; on l'applique ici pour les
+       événements, en laissant passer une URL absolue telle quelle. */
+    const espace = await tenantQuery<{ slug: string }>(
+      tenantId, `SELECT slug FROM public.tenants WHERE id = $1`, [tenantId],
+    )
+    const slug = espace[0]?.slug ?? ''
+    const lien = slug && a.lien.startsWith('/') && !a.lien.startsWith(`/${slug}/`)
+      ? `/${slug}${a.lien}`
+      : a.lien
+
     const admins = await tenantQuery<{ user_id: string }>(
       tenantId,
       `SELECT user_id FROM public.tenant_users
@@ -89,7 +108,7 @@ export async function previenirAdmins(tenantId: string, a: AlerteAdmin): Promise
                          is_read = FALSE, read_at = NULL, created_at = NOW()`,
           [
             tenantId, admin.user_id, a.kind, a.severity ?? 'info',
-            a.titre, a.message, a.lien, a.icone ?? '🔔',
+            a.titre, a.message, lien, a.icone ?? '🔔',
             JSON.stringify(a.data ?? {}), a.dedupeKey ?? null,
           ],
         )
@@ -104,7 +123,7 @@ export async function previenirAdmins(tenantId: string, a: AlerteAdmin): Promise
       void sendPushToUser(tenantId, admin.user_id, {
         title: `${a.icone ?? '🔔'} ${a.titre}`,
         body:  a.message,
-        url:   a.lien,
+        url:   lien,
         tag:   a.tag ?? a.kind,
       }).catch(() => {})
     }
