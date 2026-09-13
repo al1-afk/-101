@@ -45,6 +45,22 @@ export const REPORT_KINDS: ReportKind[] = [
   'paiements_retard', 'depenses_rappel',
 ]
 
+/**
+ * Alertes qui ne partent JAMAIS par e-mail.
+ *
+ * Elles ont été demandées le 13/09/2026 pour arriver SUR LE TÉLÉPHONE
+ * (« je veux recevoir les notifications comme pour les autres
+ * applications »), et l'espace concerné avait justement fait couper les
+ * rapports par e-mail le 08/09 — un courrier quotidien de plus serait
+ * précisément ce qu'on venait de lui retirer. Deux e-mails étaient
+ * partis le soir même de la mise en service : le défaut est mesuré, pas
+ * théorique.
+ *
+ * `email_enabled` de l'espace reste maître pour tout le reste ; ces deux
+ * types s'en dispensent par nature, cloche et push leur suffisent.
+ */
+const SANS_EMAIL: ReadonlySet<ReportKind> = new Set(['paiements_retard', 'depenses_rappel'])
+
 export const KIND_LABELS: Record<ReportKind, string> = {
   tasks_overdue:      'Alerte tâches en retard',
   clients_to_contact: 'Alerte clients à contacter',
@@ -348,7 +364,9 @@ async function dispatch(
   let sent = 0
   let failed = 0
 
-  if (tenant.email_enabled && emails.length) {
+  if (SANS_EMAIL.has(kind)) {
+    /* Ces deux alertes-là ne passent JAMAIS par l'e-mail — cf. SANS_EMAIL. */
+  } else if (tenant.email_enabled && emails.length) {
     const results = await Promise.allSettled(emails.map(to => sendEmail({
       to,
       subject: report.subject,
