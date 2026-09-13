@@ -26,17 +26,23 @@
 import type { Pool } from 'pg'
 import { tenantQuery } from '../db/pool'
 import { sendEmail } from './email'
+import { sendPushToUser } from './webPush'
 import { logger } from './logger'
 import {
   buildDailySnapshot, buildWeeklySnapshot, collectTasks, collectContacts,
+  collectRetards, collectDepenses,
 } from './reportData'
 import {
   renderTasksAlert, renderContactsAlert, renderDailyReport, renderWeeklyReport,
+  renderRetardsAlert, renderDepensesRappel,
   type ReportKind, type RenderedReport, type RenderContext,
 } from './reportEmails'
 
 export const REPORT_KINDS: ReportKind[] = [
   'tasks_overdue', 'clients_to_contact', 'daily_report', 'weekly_report',
+  /* Ajoutés le 13/09/2026 : « notifications de paiement ou de retard de
+     paiement, et un rappel quotidien de saisir les dépenses ». */
+  'paiements_retard', 'depenses_rappel',
 ]
 
 export const KIND_LABELS: Record<ReportKind, string> = {
@@ -44,6 +50,8 @@ export const KIND_LABELS: Record<ReportKind, string> = {
   clients_to_contact: 'Alerte clients à contacter',
   daily_report:       'Rapport quotidien',
   weekly_report:      'Rapport hebdomadaire',
+  paiements_retard:   'Alerte retards de paiement',
+  depenses_rappel:    'Rappel saisie des dépenses',
 }
 
 export interface NotificationSettings {
@@ -65,6 +73,10 @@ export interface NotificationSettings {
   weekly_report_enabled: boolean
   weekly_report_hour:    number
   weekly_report_weekday: number
+  retards_alert_enabled: boolean
+  retards_alert_hour:    number
+  depenses_rappel_enabled: boolean
+  depenses_rappel_hour:    number
 }
 
 export interface TenantTick extends NotificationSettings {
@@ -124,6 +136,10 @@ function isDue(t: TenantTick, kind: ReportKind): boolean {
       return t.weekly_report_enabled
           && t.local_dow === t.weekly_report_weekday
           && t.local_hour >= t.weekly_report_hour
+    case 'paiements_retard':
+      return t.retards_alert_enabled && t.local_hour >= t.retards_alert_hour
+    case 'depenses_rappel':
+      return t.depenses_rappel_enabled && t.local_hour >= t.depenses_rappel_hour
   }
 }
 
@@ -133,6 +149,8 @@ function scheduledHour(t: TenantTick, kind: ReportKind): number {
     case 'clients_to_contact': return t.contacts_alert_hour
     case 'daily_report':       return t.daily_report_hour
     case 'weekly_report':      return t.weekly_report_hour
+    case 'paiements_retard':   return t.retards_alert_hour
+    case 'depenses_rappel':    return t.depenses_rappel_hour
   }
 }
 
@@ -276,6 +294,14 @@ export async function buildReport(
         pool, tenant.tenant_id, opts.localDate, opts.contactDelayDays, opts.newLeadGraceDays)
       return renderContactsAlert(snap, ctx, opts.contactDelayDays)
     }
+    case 'paiements_retard': {
+      const snap = await collectRetards(pool, tenant.tenant_id, opts.localDate)
+      return renderRetardsAlert(snap, ctx)
+    }
+    case 'depenses_rappel': {
+      const snap = await collectDepenses(pool, tenant.tenant_id, opts.localDate)
+      return renderDepensesRappel(snap, ctx)
+    }
     case 'daily_report': {
       const snap = await buildDailySnapshot(pool, tenant.tenant_id, opts)
       return renderDailyReport(snap, ctx)
@@ -390,6 +416,26 @@ async function pushInApp(
     } catch (e: any) {
       logger.error(`[reports] notification in-app (${a.user_id}) : ${e?.message}`)
     }
+
+    /* ── Et sur le téléphone ─────────────────────────────────────
+       La cloche ne réveille personne : elle attend qu'on ouvre
+       l'application. Un rapport quotidien qui signale onze relances en
+       retard n'a d'utilité que s'il ARRIVE — c'est la demande explicite
+       du 13/09/2026 (« je veux recevoir les notifications comme pour
+       les autres applications »).
+
+       Le push est « au mieux » : il n'atteint que les appareils abonnés
+       (Réglages → Notifications, et sur iPhone après ajout à l'écran
+       d'accueil). Son échec ne doit rien interrompre — la ligne de
+       cloche, elle, est déjà écrite. */
+    void sendPushToUser(tenant.tenant_id, a.user_id, {
+      title: `${report.inapp.icon} ${report.inapp.title}`,
+      body:  report.inapp.message,
+      url:   link,
+      /* Un tag par type et par jour : le rapport du jour remplace celui
+         d'hier au lieu d'empiler une pile de bannières. */
+      tag:   dedupeKey,
+    }).catch(() => {})
   }
   return n
 }

@@ -17,6 +17,7 @@ import { query, queryOne, tenantQuery, tenantQueryOne } from '../db/pool'
 import { requireAuth } from '../middleware/auth'
 import { logger } from '../lib/logger'
 import { sendPushToUser } from '../lib/webPush'
+import { previenirAdmins } from '../lib/alerteAdmins'
 import { notifyMemberTaskCreated } from '../lib/notificationEmails'
 
 const router = Router()
@@ -316,6 +317,48 @@ router.post('/tasks', async (req: Request, res: Response) => {
  * une tâche : cloche, notification navigateur, et e-mail si la catégorie
  * `tache_creee` est restée active dans les réglages (migration 096).
  */
+/**
+ * Prévient l'administration qu'un employé a fait avancer une tâche.
+ *
+ * `dedupe_key` par tâche ET par état : une tâche qu'on repasse trois
+ * fois de « en cours » à « terminé » ne produit pas trois bannières
+ * identiques, mais la même, remontée en tête.
+ */
+async function previenirAdminsDuStatut(
+  tenantId: string,
+  memberId: string,
+  tache: { id: string; titre: string; statut: string },
+): Promise<void> {
+  try {
+    const me = await tenantQueryOne<{ prenom: string | null; nom: string | null; email: string }>(
+      tenantId, `SELECT prenom, nom, email FROM public.team_members WHERE id = $1`, [memberId],
+    )
+    const auteur = [me?.prenom, me?.nom].filter(Boolean).join(' ').trim() || me?.email || 'Un employé'
+
+    const LIBELLES: Record<string, { verbe: string; icone: string; severity: 'info' | 'success' }> = {
+      done:        { verbe: 'a terminé',          icone: '✅', severity: 'success' },
+      in_progress: { verbe: 'a commencé',         icone: '▶️', severity: 'info' },
+      blocked:     { verbe: 'est bloqué sur',     icone: '🚧', severity: 'info' },
+      todo:        { verbe: 'a remis à faire',    icone: '↩️', severity: 'info' },
+    }
+    const l = LIBELLES[tache.statut] ?? { verbe: 'a mis à jour', icone: '📋', severity: 'info' as const }
+
+    await previenirAdmins(tenantId, {
+      kind: 'member_task_status',
+      severity: l.severity,
+      titre: `${auteur} ${l.verbe} une tâche`,
+      message: tache.titre,
+      lien: '/taches',
+      icone: l.icone,
+      tag: `member-task-${tache.id}`,
+      data: { task_id: tache.id, member_id: memberId, statut: tache.statut },
+      dedupeKey: `member-task-${tache.id}:${tache.statut}`,
+    })
+  } catch (e: any) {
+    logger.error('[my-space:task-status-notif]', e?.message)
+  }
+}
+
 async function notifyAdminsOfNewTask(
   tenantId: string,
   memberId: string,
@@ -492,6 +535,12 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
         status === 'done' ? 'task_completed' : 'task_updated',
         { taskId: id, title: (row as any).title, status },
       )
+      /* L'administration doit l'apprendre au moment où ça arrive, pas en
+         relisant le journal d'activité. Le changement d'état d'une tâche
+         est précisément « l'employé a fait une mise à jour ». */
+      void previenirAdminsDuStatut(m.tenantId, m.id, {
+        id: String(id), titre: String((row as any).title ?? 'Tâche'), statut: String(status),
+      })
     }
     res.json({ success: true })
   } catch (err: any) {

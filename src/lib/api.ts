@@ -1230,7 +1230,11 @@ export const activityApi = {
 }
 
 /* ── Notifications & rapports automatiques ───────────────────── */
-export type ReportKind = 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
+export type ReportKind =
+  | 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
+  /* Alertes d'argent (migration 106) : le retard de paiement et la
+     dépense non saisie n'ont pas d'instant, ils se vérifient à heure fixe. */
+  | 'paiements_retard' | 'depenses_rappel'
 
 export interface ServerNotification {
   id:        string
@@ -1267,6 +1271,10 @@ export interface NotificationSettings {
   weekly_report_enabled: boolean
   weekly_report_hour:    number
   weekly_report_weekday: number
+  retards_alert_enabled: boolean
+  retards_alert_hour:    number
+  depenses_rappel_enabled: boolean
+  depenses_rappel_hour:    number
   updated_at: string
 }
 

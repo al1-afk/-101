@@ -90,6 +90,18 @@ const BLOCKS: Block[] = [
     desc: 'Bilan des 7 derniers jours : réalisé par personne, retards, contacts traités ou non, résultats commerciaux et prochaines actions.',
     enabledKey: 'weekly_report_enabled', hourKey: 'weekly_report_hour',
   },
+  {
+    kind: 'paiements_retard', icon: '⏰',
+    title: 'Alerte retards de paiement',
+    desc: "Chaque jour : les factures dont l'échéance est dépassée et qui ne sont pas soldées, avec le montant restant dû et l'ancienneté du retard.",
+    enabledKey: 'retards_alert_enabled', hourKey: 'retards_alert_hour',
+  },
+  {
+    kind: 'depenses_rappel', icon: '🧾',
+    title: 'Rappel de saisie des dépenses',
+    desc: "Chaque soir, si AUCUNE dépense n'a été saisie dans la journée. Rien n'est envoyé les jours où la saisie est déjà faite.",
+    enabledKey: 'depenses_rappel_enabled', hourKey: 'depenses_rappel_hour',
+  },
 ]
 
 /* Interrupteur visuel — même rendu que les autres bascules de la page. */

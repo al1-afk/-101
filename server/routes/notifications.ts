@@ -158,6 +158,8 @@ const SETTINGS_COLUMNS = `
   contacts_alert_enabled, contacts_alert_hour, contact_delay_days, new_lead_grace_days,
   daily_report_enabled, daily_report_hour,
   weekly_report_enabled, weekly_report_hour, weekly_report_weekday,
+  retards_alert_enabled, retards_alert_hour,
+  depenses_rappel_enabled, depenses_rappel_hour,
   created_at, updated_at`
 
 /** Crée la ligne de configuration au premier accès (valeurs par défaut). */
@@ -205,6 +207,7 @@ const BOOL_FIELDS = [
   'enabled', 'email_enabled', 'inapp_enabled',
   'tasks_alert_enabled', 'contacts_alert_enabled',
   'daily_report_enabled', 'weekly_report_enabled',
+  'retards_alert_enabled', 'depenses_rappel_enabled',
 ] as const
 
 const INT_FIELDS: Array<[string, number, number]> = [
@@ -216,6 +219,8 @@ const INT_FIELDS: Array<[string, number, number]> = [
   ['daily_report_hour', 0, 23],
   ['weekly_report_hour', 0, 23],
   ['weekly_report_weekday', 1, 7],
+  ['retards_alert_hour', 0, 23],
+  ['depenses_rappel_hour', 0, 23],
 ]
 
 /* PUT /api/notifications/settings */

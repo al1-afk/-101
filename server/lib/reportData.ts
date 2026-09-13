@@ -749,3 +749,111 @@ export function fmtDateFr(isoDate: string): string {
   const [y, m, d] = isoDate.split('-')
   return `${d}/${m}/${y}`
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   ARGENT — deux rappels demandés le 13/09/2026
+
+   « Notifications de paiement ou de retard de paiement ; rappel
+   quotidien de saisir les dépenses. »
+
+   Les deux suivent la règle du module : renvoyer un instantané, et rien
+   d'autre. C'est le rendu (reportEmails) qui décide des mots, et le
+   planificateur qui décide de l'heure et du destinataire.
+   ═══════════════════════════════════════════════════════════════════ */
+
+export interface FactureRetardRow {
+  id: string
+  numero: string | null
+  client: string | null
+  montant_du: number
+  jours: number
+  date_echeance: string | null
+}
+
+export interface RetardsSnapshot {
+  factures: FactureRetardRow[]
+  /** Somme due, toutes factures en retard confondues. */
+  total_du: number
+  /** Le plus ancien retard, en jours — c'est lui qui donne l'urgence. */
+  pire_retard: number
+}
+
+/**
+ * Factures échues et non soldées.
+ *
+ * ── Ce qui compte comme « en retard » ───────────────────────────────
+ * Une échéance dépassée ET un reste à payer. Le statut seul ne suffit
+ * pas : une facture « partielle » dont il reste 200 MAD est en retard,
+ * une facture « impayee » soldée par un paiement saisi après coup ne
+ * l'est pas. On compare donc les MONTANTS, et on laisse le statut
+ * écarter ce qui n'a jamais été réclamé (brouillon) ou ne le sera plus
+ * (annulée, refusée).
+ */
+export async function collectRetards(
+  pool: Pool,
+  tenantId: string,
+  localDate: string,
+): Promise<RetardsSnapshot> {
+  const { rows } = await pool.query<FactureRetardRow>(`
+    SELECT f.id,
+           f.numero,
+           COALESCE(NULLIF(BTRIM(f.client_nom), ''), c.nom, c.entreprise) AS client,
+           (COALESCE(f.montant_ttc, 0) - COALESCE(f.montant_paye, 0))::float8 AS montant_du,
+           ($2::date - f.date_echeance::date)                              AS jours,
+           f.date_echeance::text                                           AS date_echeance
+      FROM public.factures f
+      LEFT JOIN public.clients c ON c.id = f.client_id
+     WHERE f.tenant_id = $1
+       AND f.date_echeance IS NOT NULL
+       AND f.date_echeance::date < $2::date
+       AND COALESCE(f.statut, '') NOT IN ('payee', 'annulee', 'refusee', 'brouillon')
+       AND COALESCE(f.montant_ttc, 0) - COALESCE(f.montant_paye, 0) > 0
+     ORDER BY f.date_echeance ASC
+     LIMIT $3
+  `, [tenantId, localDate, LIST_LIMIT])
+
+  const total = rows.reduce((s, r) => s + (Number(r.montant_du) || 0), 0)
+  const pire  = rows.reduce((m, r) => Math.max(m, Number(r.jours) || 0), 0)
+  return { factures: rows, total_du: total, pire_retard: pire }
+}
+
+export interface DepensesSnapshot {
+  /** Dépenses saisies aujourd'hui — zéro déclenche le rappel. */
+  saisies_aujourdhui: number
+  total_aujourdhui: number
+  /** Combien de jours depuis la dernière saisie, pour mesurer le retard. */
+  jours_sans_saisie: number | null
+}
+
+/**
+ * État de la saisie des dépenses du jour.
+ *
+ * Le rappel ne part QUE si rien n'a été saisi : un rappel qui arrive
+ * après que le travail est fait n'est plus un rappel, c'est du bruit —
+ * et c'est ainsi qu'on apprend à ignorer les notifications.
+ */
+export async function collectDepenses(
+  pool: Pool,
+  tenantId: string,
+  localDate: string,
+): Promise<DepensesSnapshot> {
+  const { rows } = await pool.query<{ n: string; total: string }>(`
+    SELECT COUNT(*)::text AS n,
+           COALESCE(SUM(montant), 0)::text AS total
+      FROM public.depenses
+     WHERE tenant_id = $1
+       AND COALESCE(date_depense::date, created_at::date) = $2::date
+  `, [tenantId, localDate])
+
+  const { rows: derniere } = await pool.query<{ jours: number | null }>(`
+    SELECT ($2::date - MAX(COALESCE(date_depense::date, created_at::date))) AS jours
+      FROM public.depenses
+     WHERE tenant_id = $1
+  `, [tenantId, localDate])
+
+  return {
+    saisies_aujourdhui: Number(rows[0]?.n ?? 0),
+    total_aujourdhui:   Number(rows[0]?.total ?? 0),
+    jours_sans_saisie:  derniere[0]?.jours ?? null,
+  }
+}

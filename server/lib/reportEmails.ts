@@ -13,10 +13,14 @@
 import type {
   TasksSnapshot, ContactsSnapshot, DailySnapshot, WeeklySnapshot,
   TaskRow, ContactRow, PriorityRow,
+  RetardsSnapshot, FactureRetardRow, DepensesSnapshot,
 } from './reportData'
 import { fmtMoney, fmtDateFr, LIST_LIMIT } from './reportData'
 
-export type ReportKind = 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
+export type ReportKind =
+  | 'tasks_overdue' | 'clients_to_contact' | 'daily_report' | 'weekly_report'
+  /* Ajoutés le 13/09/2026 : argent qui rentre en retard, et dépenses non saisies. */
+  | 'paiements_retard' | 'depenses_rappel'
 
 export interface RenderContext {
   tenantName: string
@@ -530,4 +534,120 @@ function resultRow(label: string, count: string, montant: string, color: string)
     <td style="padding:6px 0;text-align:right;color:${C.ink};font-weight:700;border-bottom:1px solid ${C.line};">${escapeHtml(count)}</td>
     <td style="padding:6px 0 6px 14px;text-align:right;color:${color};font-weight:700;border-bottom:1px solid ${C.line};white-space:nowrap;">${escapeHtml(montant)}</td>
   </tr>`
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   5. Alerte — factures en retard de paiement
+
+   Demande du 13/09/2026 : « notifications de paiement, ou de retard de
+   paiement ». L'encaissement est notifié à la seconde où il est saisi
+   (server/routes/crud.ts) ; le RETARD, lui, n'a pas d'instant : il
+   s'installe. D'où une vérification quotidienne.
+───────────────────────────────────────────────────────────────────── */
+export function renderRetardsAlert(snap: RetardsSnapshot, ctx: RenderContext): RenderedReport {
+  const n = snap.factures.length
+  const empty = n === 0
+
+  /* `bullets` échappe le texte : on lui passe des champs, pas du HTML —
+     un nom de client contenant « & » ou « < » ne doit pas casser le
+     message, et encore moins y injecter du balisage. */
+  const ligne = (f: FactureRetardRow) => ({
+    main: [f.client ?? 'Client non renseigné', f.numero].filter(Boolean).join(' · '),
+    sub: `${fmtMoney(f.montant_du)} · ${f.jours} jour${f.jours > 1 ? 's' : ''} de retard`
+       + (f.date_echeance ? ` (échéance ${fmtDateFr(f.date_echeance)})` : ''),
+    tag: f.jours > 30 ? '+30 j' : undefined,
+    tagColor: C.red,
+  })
+
+  const body = [
+    stats([
+      { value: n,                label: 'factures en retard', color: n ? C.red : C.ink },
+      { value: snap.pire_retard, label: 'jours de retard max', color: snap.pire_retard > 30 ? C.red : C.amber },
+    ]),
+    `<p style="margin:14px 0 0;font-size:20px;font-weight:700;color:${C.red};">${fmtMoney(snap.total_du)}</p>`,
+    `<p style="margin:2px 0 0;font-size:12px;color:${C.muted};">restant dû</p>`,
+    heading('⏰ À relancer', C.red),
+    bullets(snap.factures.map(ligne), n),
+  ].join('')
+
+  return {
+    subject: `101/ ⏰ ${n} facture${n > 1 ? 's' : ''} en retard — ${fmtMoney(snap.total_du)} à encaisser`,
+    empty,
+    html: layout({
+      title: '⏰ Retards de paiement',
+      subtitle: `${ctx.tenantName} · ${fmtDateFr(ctx.localDate)}`,
+      accent: C.red,
+      body,
+      ctaLabel: 'Ouvrir les factures',
+      ctaUrl: link(ctx.tenantSlug, '/factures'),
+    }),
+    text: textLines(`Retards de paiement — ${fmtDateFr(ctx.localDate)}`, [
+      [`${n} facture(s), ${fmtMoney(snap.total_du)} dus`,
+       snap.factures.map(f => `${f.client ?? '—'} ${f.numero ?? ''} : ${fmtMoney(f.montant_du)} (${f.jours} j)`)],
+    ]),
+    inapp: {
+      title:   `${n} facture${n > 1 ? 's' : ''} en retard de paiement`,
+      message: `${fmtMoney(snap.total_du)} à encaisser · plus ancien retard : ${snap.pire_retard} jour(s)`,
+      link:    '/factures',
+      icon:    '⏰',
+      severity: snap.pire_retard > 30 ? 'critical' : 'warning',
+    },
+    summary: { factures: n, total_du: Math.round(snap.total_du), pire_retard: snap.pire_retard },
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   6. Rappel — saisir les dépenses du jour
+
+   Demande du 13/09/2026 : « un rappel quotidien de saisir les
+   dépenses ». Le rappel ne part QUE si rien n'a été saisi : arriver
+   après que le travail est fait n'est plus un rappel, c'est du bruit —
+   et c'est ainsi qu'on apprend à ignorer les notifications.
+───────────────────────────────────────────────────────────────────── */
+export function renderDepensesRappel(snap: DepensesSnapshot, ctx: RenderContext): RenderedReport {
+  const empty = snap.saisies_aujourdhui > 0
+  const j = snap.jours_sans_saisie
+
+  const depuis = j === null
+    ? 'Aucune dépense n\'a jamais été enregistrée dans cet espace.'
+    : j <= 0
+      ? ''
+      : `Dernière saisie il y a ${j} jour${j > 1 ? 's' : ''}.`
+
+  const body = [
+    `<p style="margin:0;font-size:15px;color:${C.body};">
+       Aucune dépense n'a été saisie aujourd'hui.
+     </p>`,
+    depuis
+      ? `<p style="margin:8px 0 0;font-size:13px;color:${C.muted};">${depuis}</p>`
+      : '',
+    `<p style="margin:18px 0 0;font-size:12px;color:${C.muted};">
+       Saisir au fil de l'eau évite la soirée de rattrapage en fin de mois —
+       et c'est la seule façon d'avoir une trésorerie juste.
+     </p>`,
+  ].join('')
+
+  return {
+    subject: '101/ 🧾 Pensez à saisir les dépenses du jour',
+    empty,
+    html: layout({
+      title: '🧾 Dépenses du jour',
+      subtitle: `${ctx.tenantName} · ${fmtDateFr(ctx.localDate)}`,
+      accent: C.amber,
+      body,
+      ctaLabel: 'Saisir une dépense',
+      ctaUrl: link(ctx.tenantSlug, '/depenses'),
+    }),
+    text: textLines(`Dépenses du jour — ${fmtDateFr(ctx.localDate)}`, [
+      ['Aucune dépense saisie aujourd\'hui', depuis ? [depuis] : []],
+    ]),
+    inapp: {
+      title:   'Dépenses du jour à saisir',
+      message: depuis || 'Aucune dépense enregistrée aujourd\'hui.',
+      link:    '/depenses',
+      icon:    '🧾',
+      severity: 'info',
+    },
+    summary: { saisies: snap.saisies_aujourdhui, jours_sans_saisie: j ?? -1 },
+  }
 }

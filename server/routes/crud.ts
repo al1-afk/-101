@@ -19,6 +19,20 @@ import {
   type CrmActor, type CrmResource,
 } from '../lib/crmScope'
 import { UPLOAD_DIR } from '../lib/uploadStorage'
+import { previenirAdmins } from '../lib/alerteAdmins'
+
+/** Une ligne de paiement en une phrase lisible sur un écran verrouillé.
+ *  Les colonnes varient d'un espace à l'autre (montant, mode, client) :
+ *  on prend ce qui est là, sans jamais afficher « undefined ». */
+function descriptionPaiement(row: Record<string, any>): string {
+  const montant = Number(row.montant ?? row.montant_paye ?? 0)
+  const somme = montant
+    ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2 }).format(montant) + ' MAD'
+    : null
+  const mode = typeof row.mode === 'string' ? row.mode : null
+  const ref  = typeof row.reference === 'string' ? row.reference : null
+  return [somme, mode, ref].filter(Boolean).join(' · ') || 'Nouveau paiement enregistré'
+}
 
 const router = Router()
 router.use(requireAuth)
@@ -861,6 +875,21 @@ router.post('/:table', async (req: Request, res: Response) => {
         notifyNewProspect(tid, row).catch(e => logger.error('[notif:prospect] async err:', e?.message))
       } else if (table === 'paiements') {
         notifyNewPaiement(tid, row).catch(e => logger.error('[notif:paiement] async err:', e?.message))
+        /* L'e-mail ci-dessus ne réveille personne : il arrive dans une
+           boîte qu'on relève quand on y pense. Un encaissement mérite
+           d'atteindre le téléphone au moment où il est saisi. */
+        void previenirAdmins(tid, {
+          kind: 'paiement_recu',
+          severity: 'success',
+          titre: 'Paiement encaissé',
+          message: descriptionPaiement(row),
+          lien: '/paiements',
+          icone: '💰',
+          tag: `paiement-${row.id}`,
+          data: { paiement_id: row.id },
+          /* Celui qui vient de saisir le paiement sait déjà. */
+          saufUserId: req.user!.userId,
+        })
       }
     }
   } catch (err: any) {
