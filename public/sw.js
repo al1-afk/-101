@@ -93,6 +93,11 @@ self.addEventListener('push', e => {
        tâche, au lieu d'empiler « demain » puis « dans 30 min ». */
     tag: data.tag || 'gestiq',
     renotify: true,
+    /* Vibration : Android la joue, iOS l'ignore (Safari n'expose aucun
+       réglage de son ni de vibration au site — le son est celui du
+       système, réglé dans Réglages → Notifications → NEXT GITAL). On la
+       pose quand même : elle ne coûte rien là où elle est ignorée. */
+    vibrate: [200, 100, 200],
     data: { url: data.url || '/' },
   }
   e.waitUntil(self.registration.showNotification(title, options))
