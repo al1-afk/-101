@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/DateRangeFilter'
 import { ImportExportButtons } from '@/components/ImportExportButtons'
 import { depensesSchema } from '@/lib/importExportSchemas'
+import SaisieRapideDepense from '@/components/finance/SaisieRapideDepense'
 import { BankAccountsBanner } from '@/components/finance/BankAccountsBanner'
 import { FinanceSummary } from '@/components/finance/FinanceSummary'
 import { PrevisionsSection } from '@/components/finance/PrevisionsSection'
@@ -434,7 +435,23 @@ export default function Depenses() {
               </p>
             </form>
           ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <>
+          {/* ── Téléphone : tout tient sur un écran ─────────────────
+              Le formulaire complet ci-dessous demandait trois écrans de
+              défilement pour une dépense. Sur petit écran on sert donc
+              une saisie resserrée, qui garde la catégorie et le compte
+              d'une saisie à l'autre. Le formulaire complet reste intact
+              et reprend la main dès `md`. */}
+          <div className="md:hidden">
+            <SaisieRapideDepense
+              categories={CATEGORIES}
+              comptes={activeAccounts.map(a => ({ id: a.id, nom: a.nom, icon: a.icon }))}
+              enCours={createDepense.isPending}
+              onEnregistrer={d => createDepense.mutateAsync(d as any)}
+            />
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4 hidden md:block">
             {/* Amount */}
             <div className="space-y-1.5">
               <label className="form-label">💰 Montant (DH) *</label>
@@ -558,6 +575,7 @@ export default function Depenses() {
               Enregistrer la dépense
             </Button>
           </form>
+          </>
           )}
         </div>
 
