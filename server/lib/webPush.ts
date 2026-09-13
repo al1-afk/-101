@@ -187,7 +187,17 @@ export async function sendPushToUser(
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         body,
-        { TTL: 3600, timeout: PUSH_TIMEOUT_MS },   // au-delà d'une heure, un rappel n'a plus d'objet
+        {
+          TTL: 3600,   // au-delà d'une heure, un rappel n'a plus d'objet
+          timeout: PUSH_TIMEOUT_MS,
+          /* « normal » autorise le service de push à RETENIR le message
+             jusqu'à la prochaine sortie de veille de l'appareil — ce qui
+             détruit la promesse « prévenu au moment où ça arrive ».
+             `high` demande la remise immédiate ; c'est le réglage des
+             messageries. On ne monte pas jusqu'à `very-high`, réservé
+             aux appels entrants, qui vide la batterie. */
+          urgency: 'high',
+        },
       )
       delivered++
       await tenantQuery(tenantId,

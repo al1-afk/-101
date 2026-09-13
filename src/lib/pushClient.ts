@@ -23,6 +23,7 @@ export type PushState =
   | 'available'      // possible, pas encore autorisé/abonné
   | 'denied'         // refusé par la personne
   | 'unsupported'    // navigateur sans Push API
+  | 'ios-a-installer'// iPhone/iPad : l'app doit d'abord être sur l'écran d'accueil
   | 'no-sw'          // service worker absent (cas du mode développement)
   | 'server-off'     // pas de clés VAPID côté serveur
 
@@ -38,8 +39,36 @@ const REASONS: Record<PushState, string> = {
   available:   'Autorise les notifications pour être prévenu même app fermée.',
   denied:      'Notifications bloquées dans le navigateur — à réautoriser dans les réglages du site.',
   unsupported: 'Ce navigateur ne gère pas les notifications push.',
+  /* Le cas le plus fréquent sur iPhone, et le plus mal expliqué : sans
+     cette distinction, l'écran affichait « ce navigateur ne gère pas les
+     notifications » et grisait le bouton — un cul-de-sac, alors qu'il
+     suffit d'ajouter l'application à l'écran d'accueil. */
+  'ios-a-installer':
+    'Sur iPhone, ajoutez d\'abord l\'application à l\'écran d\'accueil : bouton Partager, ' +
+    'puis « Sur l\'écran d\'accueil ». Rouvrez ensuite par son icône, et revenez ici.',
   'no-sw':     'Indisponible en développement (le service worker n\'est actif que sur l\'app déployée).',
   'server-off':'Le serveur n\'a pas de clés VAPID configurées.',
+}
+
+/* ── iPhone / iPad ───────────────────────────────────────────────────
+   Safari n'expose PushManager que dans une web app AJOUTÉE À L'ÉCRAN
+   D'ACCUEIL. Dans un onglet ordinaire, l'API est simplement absente —
+   indiscernable, sans ce contrôle, d'un navigateur trop ancien.
+   `navigator.standalone` est propre à Safari ; on regarde aussi le mode
+   d'affichage, qui couvre l'iPad en mode bureau. */
+function estAppleMobile(): boolean {
+  const ua = navigator.userAgent
+  const iOS = /iPad|iPhone|iPod/.test(ua)
+  /* iPadOS 13+ se présente comme un Mac : on le reconnaît à l'écran
+     tactile, qu'aucun Mac n'a. */
+  const iPadOS = /Macintosh/.test(ua) && (navigator.maxTouchPoints ?? 0) > 1
+  return iOS || iPadOS
+}
+
+function estInstallee(): boolean {
+  const nav = navigator as Navigator & { standalone?: boolean }
+  if (nav.standalone === true) return true
+  try { return window.matchMedia('(display-mode: standalone)').matches } catch { return false }
 }
 
 function status(state: PushState, endpoint: string | null = null): PushStatus {
@@ -67,7 +96,13 @@ async function registration(): Promise<ServiceWorkerRegistration | null> {
 
 /** État courant, sans rien demander ni modifier. */
 export async function pushStatus(): Promise<PushStatus> {
-  if (!('PushManager' in window) || !('Notification' in window)) return status('unsupported')
+  if (!('PushManager' in window) || !('Notification' in window)) {
+    /* Sur un appareil Apple, l'absence de PushManager n'est pas une
+       incapacité du navigateur : c'est l'application qui n'est pas
+       encore installée. Le dire change tout — d'un « impossible » à un
+       geste à faire. */
+    return status(estAppleMobile() && !estInstallee() ? 'ios-a-installer' : 'unsupported')
+  }
 
   const reg = await registration()
   if (!reg) return status('no-sw')

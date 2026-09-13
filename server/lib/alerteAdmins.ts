@@ -81,15 +81,28 @@ export async function previenirAdmins(tenantId: string, a: AlerteAdmin): Promise
       ? `/${slug}${a.lien}`
       : a.lien
 
-    const admins = await tenantQuery<{ user_id: string }>(
+    const tous = await tenantQuery<{ user_id: string }>(
       tenantId,
       `SELECT user_id FROM public.tenant_users
         WHERE tenant_id = $1 AND status = 'active'
           AND role IN ('admin', 'manager')
-          AND user_id IS NOT NULL
-          AND ($2::uuid IS NULL OR user_id <> $2::uuid)`,
-      [tenantId, a.saufUserId ?? null],
+          AND user_id IS NOT NULL`,
+      [tenantId],
     )
+
+    /* ── Ne pas se taire faute d'un autre destinataire ───────────────
+       `saufUserId` évite de prévenir quelqu'un de son propre geste.
+       Mais dans un espace qui n'a QU'UN administrateur — le cas de la
+       plupart des espaces ici — retirer l'auteur ne laisse personne :
+       « paiement encaissé » ne prévenait donc rigoureusement personne
+       dès que c'est l'admin qui saisit le paiement, c'est-à-dire
+       toujours. On n'écarte l'auteur que s'il reste quelqu'un à
+       prévenir ; sinon il reçoit sa propre trace, ce qui vaut mieux
+       qu'un silence qu'on prendrait pour une panne. */
+    const autres = a.saufUserId
+      ? tous.filter(u => u.user_id !== a.saufUserId)
+      : tous
+    const admins = autres.length ? autres : tous
 
     let prevenus = 0
     for (const admin of admins) {

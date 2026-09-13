@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import NotificationsAutoSettings from '@/components/settings/NotificationsAutoSettings'
+import NotificationsAppareil from '@/components/settings/NotificationsAppareil'
 import TaskRemindersSettings from '@/components/settings/TaskRemindersSettings'
 import MessagesNotifSettings from '@/components/settings/MessagesNotifSettings'
 
@@ -293,6 +294,12 @@ export default function Parametres() {
 
         {/* ── Notifications ── */}
         <TabsContent value="notifications" className="space-y-4">
+          {/* Recevoir sur CE téléphone — en tête, parce que c'est la
+              première question qu'on se pose en ouvrant cet onglet, et
+              que l'abonnement n'était atteignable que tout en bas, dans
+              une carte consacrée aux tâches. */}
+          <NotificationsAppareil />
+
           {/* Notifs système (son + navigateur) */}
           <SystemNotificationsPanel />
 
