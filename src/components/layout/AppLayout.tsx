@@ -18,6 +18,7 @@ import { usePresenceHeartbeat } from '@/hooks/usePresenceHeartbeat'
 import { useMessagesRealtime } from '@/hooks/useMessaging'
 import { maybeRequestPermissionOnce } from '@/lib/browserNotifications'
 import PwaInstallBanner from '@/components/PwaInstallBanner'
+import NotificationsInvite from '@/components/NotificationsInvite'
 import ShortcutsModal from '@/components/ShortcutsModal'
 import OfflineBanner from '@/components/OfflineBanner'
 
@@ -121,6 +122,13 @@ export default function AppLayout() {
         )}
       >
         <OfflineBanner />
+        {/* L'activation des notifications, en tête de l'application :
+            le seul bouton capable de créer un abonnement vivait jusqu'ici
+            au fond d'un onglet de réglages, et personne ne l'avait
+            trouvé — la table des abonnés est restée vide des semaines
+            durant. Il ne s'affiche que si l'abonnement est réellement
+            possible ici, et se repousse d'une semaine d'un clic. */}
+        <NotificationsInvite />
         <motion.div
           key={location.pathname}
           initial={{ opacity: 0, y: 8 }}
