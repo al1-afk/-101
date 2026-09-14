@@ -62,6 +62,18 @@ interface Props {
   enCours?: boolean
 }
 
+/* ── Espèces ─────────────────────────────────────────────────────────
+   Payer en liquide, ce n'est pas payer depuis un compte : c'est
+   l'ABSENCE de compte, et la base le sait déjà — `bank_account_id` y
+   est nullable. Sans cette entrée, une dépense en espèces était
+   forcément imputée au premier compte de la liste, dont le solde
+   baissait alors d'un argent qui n'en est jamais sorti.
+
+   Elle est proposée EN PREMIER et choisie par défaut : c'est le cas le
+   plus courant d'une dépense notée depuis un téléphone. Dès qu'on
+   choisit un vrai compte, la mémoire le retient pour les suivantes. */
+const ESPECES = ''
+
 /* Le dernier choix est plus souvent le bon que le premier de la liste :
    on dépense plusieurs fois de suite depuis le même compte, dans la même
    catégorie. Mémorisé par appareil, jamais envoyé au serveur. */
@@ -92,9 +104,10 @@ export default function SaisieRapideDepense({ categories, comptes, onEnregistrer
      après le rendu — un second rendu pour rien, et une liste qui
      clignote. On calcule donc la valeur affichée à partir de ce qu'on
      a sous la main ; `compte` ne garde que le choix EXPLICITE. */
-  const compteRetenu = compte && comptes.some(c => c.id === compte)
-    ? compte
-    : (comptes[0]?.id ?? '')
+  /* Un identifiant mémorisé qui n'existe plus (compte supprimé) retombe
+     sur les espèces, jamais sur le premier compte venu : imputer en
+     silence à quelqu'un d'autre serait pire que ne rien imputer. */
+  const compteRetenu = compte && comptes.some(c => c.id === compte) ? compte : ESPECES
 
   const valide = Number(String(montant).replace(',', '.')) > 0
 
@@ -178,22 +191,21 @@ export default function SaisieRapideDepense({ categories, comptes, onEnregistrer
 
       {/* ── Compte · type · date, sur une seule ligne ────────────── */}
       <div className="flex items-center gap-2">
-        {comptes.length > 0 && (
-          <div className="relative flex-1 min-w-0">
-            <select
-              value={compteRetenu}
-              onChange={e => setCompte(e.target.value)}
-              aria-label="Payé depuis"
-              className="w-full appearance-none h-11 pl-3 pr-8 rounded-xl border border-border bg-background
-                         text-sm text-foreground truncate focus:outline-none focus:border-blue-500"
-            >
-              {comptes.map(a => (
-                <option key={a.id} value={a.id}>{a.icon || '🏦'} {a.nom}</option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-          </div>
-        )}
+        <div className="relative flex-1 min-w-0">
+          <select
+            value={compteRetenu}
+            onChange={e => setCompte(e.target.value)}
+            aria-label="Payé depuis"
+            className="w-full appearance-none h-11 pl-3 pr-8 rounded-xl border border-border bg-background
+                       text-sm text-foreground truncate focus:outline-none focus:border-blue-500"
+          >
+            <option value={ESPECES}>💵 Espèces</option>
+            {comptes.map(a => (
+              <option key={a.id} value={a.id}>{a.icon || '🏦'} {a.nom}</option>
+            ))}
+          </select>
+          <ChevronDown className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        </div>
 
         <div className="flex rounded-xl border border-border overflow-hidden h-11 flex-shrink-0">
           {([['personnel', '👤'], ['business', '💼']] as const).map(([v, e]) => (
@@ -266,7 +278,9 @@ export default function SaisieRapideDepense({ categories, comptes, onEnregistrer
       </button>
 
       <p className="text-[11px] text-center text-muted-foreground">
-        La catégorie et le compte restent choisis — la dépense suivante ne demande qu'un montant.
+        {compteRetenu === ESPECES
+          ? 'Payé en espèces : aucun solde de compte n\'est touché.'
+          : 'La catégorie et le compte restent choisis — la dépense suivante ne demande qu\'un montant.'}
       </p>
     </div>
   )
