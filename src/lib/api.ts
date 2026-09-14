@@ -3,7 +3,26 @@
    Toutes les requêtes sont envoyées à Express + PostgreSQL
 ───────────────────────────────────────────────────────────────── */
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000'
+/**
+ * Adresse de l'API.
+ *
+ * En production, `VITE_API_URL` est fixé au moment de la construction
+ * (.env.production) et fait autorité.
+ *
+ * En développement, on la DÉDUIT de l'adresse par laquelle la page a
+ * été ouverte : `localhost` depuis le Mac, `192.168.x.y` depuis un
+ * téléphone du même wifi. Une adresse écrite en dur dans .env.local
+ * cassait à chaque changement de bail DHCP — le 14/09/2026, le Mac est
+ * passé de 192.168.1.10 à 192.168.1.2 et plus aucun appel n'aboutissait,
+ * sans autre indice qu'un « ERR_ADDRESS_UNREACHABLE » dans la console.
+ */
+const PORT_API_DEV = import.meta.env.VITE_API_PORT ?? '4001'
+
+const BASE_URL =
+  import.meta.env.VITE_API_URL
+  ?? (typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.hostname}:${PORT_API_DEV}`
+      : 'http://localhost:4001')
 
 /* ── Token storage ───────────────────────────────────────────── */
 export const tokenStore = {

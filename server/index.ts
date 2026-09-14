@@ -62,6 +62,22 @@ const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .map(o => o.trim())
   .filter(Boolean)
 
+/**
+ * En DÉVELOPPEMENT seulement : accepter aussi les adresses privées.
+ *
+ * Ouvrir l'application depuis un téléphone du même wifi exige que son
+ * origine (http://192.168.x.y:5173) soit autorisée. L'écrire à la main
+ * dans CORS_ORIGINS cassait à chaque changement de bail DHCP. On
+ * reconnaît donc la forme d'une adresse de réseau privé — et jamais en
+ * production, où `isProd` coupe la règle net.
+ */
+const RESEAU_PRIVE = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/
+
+function origineAutorisee(origin: string): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true
+  return process.env.NODE_ENV !== 'production' && RESEAU_PRIVE.test(origin)
+}
+
 /* ── Security headers ───────────────────────────────────────── */
 const isProd = process.env.NODE_ENV === 'production'
 
@@ -166,7 +182,7 @@ app.use(cors((req, cb) => {
   const origin = req.headers.origin
   const allowed =
     !origin ||
-    ALLOWED_ORIGINS.includes(origin) ||
+    origineAutorisee(origin) ||
     NEXTGITAL_RE.test(origin) ||
     (!isProd && LOCALHOST_DEV_RE.test(origin))
   cb(null, {

@@ -77,14 +77,6 @@ export default function Depenses() {
   /* Un seul bloc de saisie, deux natures d'opération : on ne duplique pas
      la carte, on bascule — la page reste aussi courte qu'avant. */
   const [mode, setMode] = useState<'depense' | 'revenu'>('depense')
-  const [form, setForm] = useState({
-    montant: '' as string | number,
-    date_depense: todayStr,
-    categorie: 'autre',
-    type: 'personnel' as 'personnel' | 'business',
-    description: '',
-    bank_account_id: '' as string,
-  })
   const [revenuForm, setRevenuForm] = useState({
     montant: '' as string | number,
     date_revenu: todayStr,
@@ -98,16 +90,15 @@ export default function Depenses() {
   })
 
   /* Auto-sélectionne le premier compte quand la liste arrive, pour éviter
-     que l'utilisateur enregistre une dépense sans compte assigné. */
+     qu'un revenu soit enregistré sans compte assigné. La dépense, elle,
+     déduit son compte dans SaisieRapideDepense et n'a plus besoin d'être
+     réglée ici. */
   const activeAccounts = useMemo(() => bankAccounts.filter(a => a.actif !== false), [bankAccounts])
   useEffect(() => {
-    if (activeAccounts.length > 0 && !form.bank_account_id) {
-      setForm(p => ({ ...p, bank_account_id: activeAccounts[0].id }))
-    }
     if (activeAccounts.length > 0 && !revenuForm.bank_account_id) {
       setRevenuForm(p => ({ ...p, bank_account_id: activeAccounts[0].id }))
     }
-  }, [activeAccounts, form.bank_account_id, revenuForm.bank_account_id])
+  }, [activeAccounts, revenuForm.bank_account_id])
 
   const accountsById = useMemo(() => {
     const m = new Map<string, typeof bankAccounts[number]>()
@@ -123,19 +114,6 @@ export default function Depenses() {
     () => computeSummary(financeData, currentMonthStr),
     [financeData, currentMonthStr]
   )
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (createDepense.isPending) return
-    const montant = Number(String(form.montant).replace(',', '.'))
-    if (!Number.isFinite(montant) || montant <= 0) return
-    await createDepense.mutateAsync({
-      ...form,
-      montant: round2(montant),
-      bank_account_id: form.bank_account_id || null,
-    } as any)
-    setForm(p => ({ ...p, montant: '', description: '' }))
-  }
 
   const handleSubmitRevenu = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -435,147 +413,14 @@ export default function Depenses() {
               </p>
             </form>
           ) : (
-          <>
-          {/* ── Téléphone : tout tient sur un écran ─────────────────
-              Le formulaire complet ci-dessous demandait trois écrans de
-              défilement pour une dépense. Sur petit écran on sert donc
-              une saisie resserrée, qui garde la catégorie et le compte
-              d'une saisie à l'autre. Le formulaire complet reste intact
-              et reprend la main dès `md`. */}
-          <div className="md:hidden">
-            <SaisieRapideDepense
-              categories={CATEGORIES}
-              comptes={activeAccounts.map(a => ({ id: a.id, nom: a.nom, icon: a.icon }))}
-              enCours={createDepense.isPending}
-              onEnregistrer={d => createDepense.mutateAsync(d as any)}
-            />
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4 hidden md:block">
-            {/* Amount */}
-            <div className="space-y-1.5">
-              <label className="form-label">💰 Montant (DH) *</label>
-              <div className="relative">
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.montant}
-                  onChange={e => setForm(p => ({ ...p, montant: e.target.value }))}
-                  placeholder="0"
-                  className="pr-12"
-                  required
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
-                  DH
-                </span>
-              </div>
-            </div>
-
-            {/* Date */}
-            <div className="space-y-1.5">
-              <label className="form-label">📅 Date</label>
-              <Input
-                type="date"
-                value={form.date_depense}
-                onChange={e => setForm(p => ({ ...p, date_depense: e.target.value }))}
-              />
-            </div>
-
-            {/* Compte source */}
-            <div className="space-y-1.5">
-              <label className="form-label">🏦 Payé depuis</label>
-              {activeAccounts.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic">
-                  Aucun compte enregistré — ajoute un compte dans la section "Mes comptes" ci-dessus pour lier la dépense.
-                </p>
-              ) : (
-                <Select
-                  value={form.bank_account_id}
-                  onValueChange={v => setForm(p => ({ ...p, bank_account_id: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choisir un compte" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeAccounts.map(a => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.icon || '🏦'} {a.nom}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            {/* Category */}
-            <div className="space-y-1.5">
-              <label className="form-label">🏷️ Catégorie</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {CATEGORIES.map(c => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => setForm(p => ({ ...p, categorie: c.key }))}
-                    className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-xl border text-xs font-medium transition-all ${
-                      form.categorie === c.key
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-background text-foreground border-border hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/10'
-                    }`}
-                  >
-                    <span className="text-lg leading-none">{c.emoji}</span>
-                    <span>{c.label.split(' ')[0]}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Type */}
-            <div className="space-y-1.5">
-              <label className="form-label">👤 Type</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {[
-                  { value: 'personnel', label: '👤 Personnel' },
-                  { value: 'business', label: '💼 Business' },
-                ].map(t => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setForm(p => ({ ...p, type: t.value as 'personnel' | 'business' }))}
-                    className={`py-2.5 px-4 rounded-xl border text-sm font-medium transition-all ${
-                      form.type === t.value
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                        : 'bg-background text-foreground border-border hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/10'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Note */}
-            <div className="space-y-1.5">
-              <label className="form-label">📝 Note (optionnel)</label>
-              <AutocorrectTextarea
-                value={form.description}
-                onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-                placeholder="Détails de la dépense..."
-                rows={2}
-                className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow"
-              />
-            </div>
-
-            <Button type="submit" className="w-full" disabled={createDepense.isPending}>
-              {createDepense.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                '💾'
-              )}{' '}
-              Enregistrer la dépense
-            </Button>
-          </form>
-          </>
+          /* Une seule saisie, pour tous les écrans — le pourquoi est
+             écrit en tête de SaisieRapideDepense.tsx. */
+          <SaisieRapideDepense
+            categories={CATEGORIES}
+            comptes={activeAccounts.map(a => ({ id: a.id, nom: a.nom, icon: a.icon }))}
+            enCours={createDepense.isPending}
+            onEnregistrer={d => createDepense.mutateAsync(d as any)}
+          />
           )}
         </div>
 

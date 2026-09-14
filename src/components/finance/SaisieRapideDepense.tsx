@@ -20,11 +20,13 @@
  *    la dépense suivante ne coûte qu'un nombre et une touche. Le curseur
  *    revient de lui-même sur le montant.
  *
- * ── Ce qu'il ne fait pas ────────────────────────────────────────────
- * Il ne remplace pas le formulaire complet, il le double sur petit
- * écran. Le lien entre une dépense et un projet, ou une note longue,
- * restent l'affaire de la version bureau — les mettre ici rallongerait
- * précisément ce qu'on cherche à raccourcir.
+ * ── Une seule saisie, désormais, sur TOUS les écrans ────────────────
+ * Le formulaire long qu'il a remplacé portait exactement les mêmes six
+ * champs — montant, date, compte, catégorie, type, note — répartis sur
+ * trois écrans de défilement. Deux formulaires pour les mêmes données,
+ * c'est deux endroits où corriger un bug, et un jour où ils divergent.
+ * Celui-ci sert les deux : trois catégories par rangée sur téléphone,
+ * six d'un coup dès qu'il y a la place.
  */
 import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -153,7 +155,7 @@ export default function SaisieRapideDepense({ categories, comptes, onEnregistrer
       </div>
 
       {/* ── Catégories : deux rangées de trois ───────────────────── */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {categories.map(c => {
           const actif = categorie === c.key
           return (
