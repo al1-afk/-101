@@ -16,6 +16,7 @@ import NotificationBell from '@/components/NotificationBell'
 import { cn } from '@/lib/utils'
 import { useAlerts, type Alert, type AlertPriority } from '@/hooks/useAlerts'
 import { openGlobalSearch } from '@/components/GlobalSearch'
+import RaccourcisHeader from './RaccourcisHeader'
 
 /* Libellé du rôle réellement porté par la personne connectée.
    « Admin » était écrit en dur ici : tout le monde lisait « Admin » sous
@@ -212,21 +213,36 @@ export default function Header({ onMenuToggle, collapsed }: HeaderProps) {
         <button onClick={onMenuToggle} className={cn(iconBtn, 'flex-shrink-0')} aria-label="Menu">
           <Menu className="w-4 h-4" />
         </button>
-        <nav className="flex items-center gap-1.5 text-sm min-w-0">
-          <span className="text-slate-400 dark:text-slate-500 font-medium hidden md:inline text-[12.5px]">NEXT GITAL</span>
+        <nav className="flex items-center gap-1.5 text-sm min-w-0 whitespace-nowrap">
+          {/* Le nom de l'espace disparaît dès que les raccourcis prennent
+              place (lg) : il est déjà en haut de la barre latérale, et
+              le garder ici repliait le fil d'Ariane sur deux lignes en
+              faisant tomber le nom de la page — la seule information
+              qu'on vient y chercher. */}
+          <span className="text-slate-400 dark:text-slate-500 font-medium hidden md:inline lg:hidden text-[12.5px]">NEXT GITAL</span>
           {currentSection && (
             <>
-              <ChevronRight className="w-3 h-3 text-slate-300 dark:text-slate-700 flex-shrink-0 hidden md:block" />
-              <span className="hidden md:inline-flex items-center h-5 px-2 rounded-md text-[10.5px] font-semibold uppercase tracking-wide text-electric-700 dark:text-cyan-300 bg-electric-500/10">
+              <ChevronRight className="w-3 h-3 text-slate-300 dark:text-slate-700 flex-shrink-0 hidden md:block lg:hidden" />
+              {/* La pastille de section cède la place aux raccourcis dès
+                  `lg` : à 1440 px, garder « NEXT GITAL › COMMERCIAL ›
+                  Factures » ET quatre raccourcis ne tient pas, et c'est
+                  le NOM DE LA PAGE qui était tronqué jusqu'à disparaître
+                  — la seule des trois informations qu'on vient y lire. */}
+              <span className="hidden md:inline-flex lg:hidden items-center h-5 px-2 rounded-md text-[10.5px] font-semibold uppercase tracking-wide text-electric-700 dark:text-cyan-300 bg-electric-500/10">
                 {currentSection}
               </span>
             </>
           )}
-          <ChevronRight className="w-3 h-3 text-slate-300 dark:text-slate-700 flex-shrink-0 hidden sm:block" />
+          <ChevronRight className="w-3 h-3 text-slate-300 dark:text-slate-700 flex-shrink-0 hidden sm:block lg:hidden" />
           <span className="font-semibold text-foreground capitalize truncate text-[13px]">
             {currentPage}
           </span>
         </nav>
+
+        {/* Les mêmes quatre raccourcis que la barre du bas du téléphone :
+            sur ordinateur, ils évitaient de parcourir une barre latérale
+            de vingt entrées — ou de la rouvrir quand elle est repliée. */}
+        <RaccourcisHeader />
       </div>
 
       {/* ── Right ── */}
