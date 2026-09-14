@@ -9,11 +9,11 @@ import {
   Play, Pause, Square, RotateCcw, Sparkles, Receipt, KeyRound,
   MessageSquare, Settings, Globe, Server, CalendarCheck, UserPlus,
   Eye, CheckCheck,
-  FolderOpen,
+  FolderOpen, ListPlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
-import { AutocorrectInput } from '@/components/ui/AutocorrectInput'
+import { AutocorrectInput, AutocorrectTextarea } from '@/components/ui/AutocorrectInput'
 import { Badge }  from '@/components/ui/badge'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -45,6 +45,7 @@ import RecurrenceDialog from '@/components/projet/RecurrenceDialog'
 import { describeRecurrence, type TaskRecurrence } from '@/lib/taskRecurrence'
 import { SopBlocksRenderer } from '@/components/sop/SopBlocksRenderer'
 import { serializeTaskDesc } from '@/lib/taskNotes'
+import { splitTaskLines, hasLineBreak } from '@/lib/bulkTasks'
 import { buildTasksFromTemplates, countTemplate } from '@/lib/templateTasks'
 import InfosAccesTab from '@/components/projet/InfosAccesTab'
 import TaskDetailDialog from '@/components/projet/TaskDetailDialog'
@@ -1140,6 +1141,11 @@ function TasksTab({
   const [showTaskDescription, setShowTaskDescription] = useState(false)
   const [taskRecurrence, setTaskRecurrence] = useState<TaskRecurrence | null>(null)
   const [recurrenceDialogOpen, setRecurrenceDialogOpen] = useState(false)
+  /* Saisie « une ligne = une tâche » : activée à la main, ou toute seule
+     dès qu'on colle un texte multi-lignes dans le titre. */
+  const [multiMode, setMultiMode] = useState(false)
+  /* Progression de la création en série — le bouton affiche « 3/10 ». */
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   const [reqForm,  setReqForm]  = useState({ title: '', team_member_id: 'none', priority: 'high' as TaskPriority, due_date: todayISO, price: '' })
 
   const handleTaskPaste = async (e: React.ClipboardEvent) => {
@@ -1153,6 +1159,24 @@ function TasksTab({
     } catch (err: any) {
       toast.error(err?.message ?? 'Impossible de coller l\'image')
     }
+  }
+
+  /** Coller une liste dans le titre bascule tout seul en « une ligne = une tâche ».
+      Sans ça, un collage de 10 lignes finissait écrasé sur une seule ligne
+      par l'<input>, et il fallait ressaisir les 10 tâches à la main. */
+  const handleTitlePaste = (e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text/plain')
+    if (!text || !hasLineBreak(text)) return          // collage normal : rien à faire
+    if (splitTaskLines(text).length < 2) return       // une seule ligne utile
+    e.preventDefault()
+    e.stopPropagation()
+    setMultiMode(true)
+    const el = e.currentTarget
+    const before = taskForm.title.slice(0, el.selectionStart ?? taskForm.title.length)
+    const after  = taskForm.title.slice(el.selectionEnd ?? taskForm.title.length)
+    const merged = [before.replace(/\s+$/, ''), text.trim(), after.replace(/^\s+/, '')]
+      .filter(Boolean).join('\n')
+    setTaskForm(p => ({ ...p, title: merged }))
   }
 
   const openTask = openTaskId ? tasks.find(t => t.id === openTaskId) : null
@@ -1241,30 +1265,74 @@ function TasksTab({
 
   const assigneeFields = (v: string) => assigneeFieldsFor(v, auth.userId)
 
-  const submitTask = (e: React.FormEvent) => {
+  /* Titres à créer : une ligne = une tâche (puces et numéros retirés). */
+  const taskTitles = useMemo(() => splitTaskLines(taskForm.title), [taskForm.title])
+  const isBulk = taskTitles.length > 1
+
+  const resetTaskForm = () => {
+    setTaskForm({ title: '', team_member_id: 'none', priority: 'normal', due_date: '', category: '' })
+    setTaskImages([])
+    setTaskBlocks([])
+    setShowTaskDescription(false)
+    setShowTaskForm(false)
+    setTaskRecurrence(null)
+    setMultiMode(false)
+  }
+
+  const submitTask = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!taskForm.title.trim()) return
+    if (taskTitles.length === 0) return
     const description = serializeTaskDesc({ blocks: taskBlocks })
-    create.mutate({
+    /* Réglages communs à toutes les lignes : catégorie, personne,
+       priorité, échéance et récurrence viennent du même formulaire. */
+    const shared = {
       project_id:     projet.id,
       ...assigneeFields(taskForm.team_member_id),
-      title:          taskForm.title.trim(),
       priority:       taskForm.priority,
       due_date:       taskForm.due_date || null,
       category:       taskForm.category.trim() || null,
-      attachments:    taskImages,
-      description:    description || null,
       recurrence:     taskRecurrence,
-    } as any, {
-      onSuccess: () => {
-        setTaskForm({ title: '', team_member_id: 'none', priority: 'normal', due_date: '', category: '' })
-        setTaskImages([])
-        setTaskBlocks([])
-        setShowTaskDescription(false)
-        setShowTaskForm(false)
-        setTaskRecurrence(null)
-      },
-    })
+    }
+
+    if (!isBulk) {
+      create.mutate({
+        ...shared,
+        title:       taskTitles[0],
+        attachments: taskImages,
+        description: description || null,
+      } as any, { onSuccess: resetTaskForm })
+      return
+    }
+
+    /* Plusieurs lignes = plusieurs tâches. On crée en série via l'API
+       plutôt qu'avec la mutation : ça évite dix toasts « Tâche créée »
+       et dix invalidations de cache pour un seul geste. Images et
+       description ne sont posées que sur la première tâche — les
+       recopier dix fois alourdirait chaque ligne pour rien. */
+    setBulkProgress({ done: 0, total: taskTitles.length })
+    let count = 0
+    try {
+      for (let i = 0; i < taskTitles.length; i++) {
+        try {
+          await teamMemberTasksApi.create({
+            ...shared,
+            status:      'todo',
+            title:       taskTitles[i],
+            attachments: i === 0 ? taskImages : [],
+            description: i === 0 ? (description || null) : null,
+          } as any)
+          count++
+        } catch (err) { console.error('[bulkTasks]', err) }
+        setBulkProgress({ done: i + 1, total: taskTitles.length })
+      }
+      await qc.refetchQueries({ queryKey: ['team_member_tasks'] })
+      if (count === taskTitles.length) toast.success(`${count} tâches créées`)
+      else if (count > 0)              toast.warning(`${count} tâches créées sur ${taskTitles.length}`)
+      else                             toast.error('Aucune tâche créée')
+      if (count > 0) resetTaskForm()
+    } finally {
+      setBulkProgress(null)
+    }
   }
 
   const submitRequest = (e: React.FormEvent) => {
@@ -1309,7 +1377,48 @@ function TasksTab({
         {showTaskForm && (
           <form onSubmit={submitTask} onPaste={handleTaskPaste} className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
             <div className="flex items-start gap-2">
-              <AutocorrectInput autoFocus value={taskForm.title} onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))} placeholder="Titre de la tâche… (Cmd+V pour coller une image)" className="flex-1" />
+              {multiMode ? (
+                <AutocorrectTextarea
+                  autoFocus
+                  value={taskForm.title}
+                  onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))}
+                  onPaste={handleTitlePaste}
+                  onKeyDown={e => {
+                    /* Entrée = nouvelle ligne (donc nouvelle tâche) ;
+                       Cmd/Ctrl+Entrée = créer tout le lot. */
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      e.currentTarget.form?.requestSubmit()
+                    }
+                  }}
+                  rows={Math.min(14, Math.max(4, taskForm.title.split('\n').length + 1))}
+                  placeholder={'Une tâche par ligne…\nAppeler le client\nEnvoyer le devis\nRelancer vendredi'}
+                  className="input-field flex-1 h-auto py-2 leading-6 resize-y"
+                />
+              ) : (
+                <AutocorrectInput
+                  autoFocus
+                  value={taskForm.title}
+                  onChange={e => setTaskForm(p => ({ ...p, title: e.target.value }))}
+                  onPaste={handleTitlePaste}
+                  placeholder="Titre de la tâche… (Cmd+V pour coller une image ou une liste)"
+                  className="flex-1"
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => setMultiMode(m => !m)}
+                title={multiMode ? 'Revenir à une seule tâche' : 'Plusieurs tâches d\'un coup — une par ligne'}
+                className={cn(
+                  'h-10 shrink-0 px-2.5 rounded-xl border text-xs font-medium inline-flex items-center gap-1.5 transition-colors',
+                  multiMode
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300'
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                )}
+              >
+                <ListPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Plusieurs</span>
+              </button>
               <AIButton
                 value={taskForm.title}
                 onChange={v => setTaskForm(p => ({ ...p, title: v }))}
@@ -1317,6 +1426,21 @@ function TasksTab({
                 generationKind="tache"
               />
             </div>
+            {multiMode && (
+              <p className="text-[11px] text-muted-foreground">
+                {taskTitles.length === 0 ? (
+                  <>Colle ou écris ta liste : <strong>chaque ligne deviendra une tâche</strong> (les puces « - » et les numéros « 1. » sont retirés).</>
+                ) : (
+                  <>
+                    <strong className="text-blue-600 dark:text-blue-400">
+                      {taskTitles.length} tâche{taskTitles.length > 1 ? 's' : ''}
+                    </strong>{' '}
+                    {taskTitles.length > 1 ? 'seront créées' : 'sera créée'} — même catégorie, même personne, même priorité et même échéance pour {taskTitles.length > 1 ? 'toutes' : 'elle'}.
+                    {taskTitles.length > 1 && (taskImages.length > 0 || taskBlocks.length > 0) && ' Les images et la description vont sur la première.'}
+                  </>
+                )}
+              </p>
+            )}
             {taskImages.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {taskImages.map((src, i) => (
@@ -1415,10 +1539,12 @@ function TasksTab({
               </button>
             )}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowTaskForm(false); setTaskImages([]); setTaskBlocks([]); setShowTaskDescription(false) }}>Annuler</Button>
-              <Button type="submit" size="sm" disabled={create.isPending}>
-                {create.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Créer
+              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowTaskForm(false); setTaskImages([]); setTaskBlocks([]); setShowTaskDescription(false); setMultiMode(false) }}>Annuler</Button>
+              <Button type="submit" size="sm" disabled={create.isPending || bulkProgress !== null || taskTitles.length === 0}>
+                {(create.isPending || bulkProgress !== null) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {bulkProgress
+                  ? `Création… ${bulkProgress.done}/${bulkProgress.total}`
+                  : isBulk ? `Créer ${taskTitles.length} tâches` : 'Créer'}
               </Button>
             </div>
           </form>
@@ -1428,7 +1554,7 @@ function TasksTab({
           <div className="empty-state py-10">
             <CheckSquare className="empty-state-icon" />
             <p className="empty-state-title">Aucune tâche</p>
-            <p className="empty-state-desc">Clique <strong>« Appliquer un template »</strong> pour générer toutes les tâches d'un coup, ou crée-les manuellement</p>
+            <p className="empty-state-desc">Clique <strong>« Appliquer un template »</strong> pour générer toutes les tâches d'un coup, ou colle ta liste dans <strong>« Nouvelle tâche »</strong> — une ligne = une tâche</p>
             <Button size="sm" className="mt-3" onClick={() => setShowTemplateDialog(true)}>
               <Sparkles className="w-3.5 h-3.5" /> Choisir un template
             </Button>
